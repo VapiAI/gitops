@@ -399,7 +399,7 @@ State files track the mapping between resource IDs and Vapi UUIDs:
 See [Vapi Assistants API](https://docs.vapi.ai/api-reference/assistants/create) for all available properties.
 
 ### Structured Outputs
-See [Vapi Structured Outputs API](https://docs.vapi.ai/api-reference/analytics/structured-output/create) for all available properties.
+See [Vapi Structured Outputs API](https://docs.vapi.ai/api-reference/structured-outputs/structured-output-controller-create?error=true) for all available properties.
 
 ### Tools
 See [Vapi Tools API](https://docs.vapi.ai/api-reference/tools/create) for all available properties.
