@@ -9,7 +9,7 @@ export interface StateFile {
 }
 
 export interface ResourceFile<T = Record<string, unknown>> {
-  resourceId: string; // Derived from filename
+  resourceId: string; // Path relative to resource type dir (e.g., "healthcare/booking" or just "booking")
   filePath: string;
   data: T;
 }

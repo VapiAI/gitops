@@ -37,28 +37,29 @@ export function findReferencingResources(
 ): string[] {
   const referencingResources: string[] = [];
 
-  const checkResource = (resource: ResourceFile, resourceType: string) => {
+  const checkResource = (resource: ResourceFile) => {
     const refs = extractReferencedIds(resource.data as Record<string, unknown>);
 
+    // resourceId already includes the full path (e.g., "assistants/healthcare/booking")
     if (targetType === "tools" && refs.tools.includes(targetId)) {
-      referencingResources.push(`${resourceType}/${resource.resourceId}`);
+      referencingResources.push(resource.resourceId);
     }
     if (
       targetType === "structuredOutputs" &&
       refs.structuredOutputs.includes(targetId)
     ) {
-      referencingResources.push(`${resourceType}/${resource.resourceId}`);
+      referencingResources.push(resource.resourceId);
     }
     if (targetType === "assistants" && refs.assistants.includes(targetId)) {
-      referencingResources.push(`${resourceType}/${resource.resourceId}`);
+      referencingResources.push(resource.resourceId);
     }
   };
 
   for (const resource of allResources.assistants) {
-    checkResource(resource, "assistants");
+    checkResource(resource);
   }
   for (const resource of allResources.structuredOutputs) {
-    checkResource(resource, "structuredOutputs");
+    checkResource(resource);
   }
 
   return referencingResources;

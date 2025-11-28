@@ -335,6 +335,85 @@ This creates all resources in the staging Vapi account and populates `.vapi-stat
 
 ---
 
+### How to Organize Resources into Folders
+
+You can create subdirectories to organize resources by tenant, team, or feature. The folder path becomes part of the resource ID.
+
+**Example:** Multi-tenant setup with company-specific assistants and tools.
+
+**Step 1:** Create folder structure
+
+```
+resources/
+├── assistants/
+│   ├── inbound-support.yml              # Shared/base assistant
+│   └── company-1/
+│       └── inbound-support.yml          # Company-specific assistant
+├── tools/
+│   ├── transfer-call.yml                # Shared tool
+│   └── company-1/
+│       └── transfer-call.yml            # Company-specific tool
+└── structuredOutputs/
+    └── customer-sentiment.yml           # Shared structured output
+```
+
+**Step 2:** Reference nested resources using their full path
+
+In a nested assistant (`resources/assistants/company-1/inbound-support.yml`):
+
+```yaml
+name: Company 1 Support
+model:
+  provider: openai
+  model: gpt-4o
+  toolIds:
+    - company-1/transfer-call  # ← Full path for nested tool
+    - get-user                 # ← Root-level tool (no path)
+artifactPlan:
+  structuredOutputIds:
+    - customer-sentiment       # ← Root-level structured output
+```
+
+**Step 3:** Link structured outputs to nested assistants
+
+In `resources/structuredOutputs/customer-sentiment.yml`:
+
+```yaml
+name: Customer Sentiment
+type: ai
+schema:
+  type: string
+  enum: [positive, neutral, negative]
+assistant_ids:
+  - inbound-support              # ← Root-level assistant
+  - company-1/inbound-support    # ← Nested assistant (full path!)
+```
+
+**Step 4:** Apply
+
+```bash
+bun run apply:dev
+```
+
+The state file will track both:
+
+```json
+{
+  "assistants": {
+    "inbound-support": "uuid-1111",
+    "company-1/inbound-support": "uuid-2222"
+  },
+  "tools": {
+    "transfer-call": "uuid-3333",
+    "company-1/transfer-call": "uuid-4444"
+  }
+}
+```
+
+> ⚠️ **Important:** When referencing nested resources from any YAML file, always use the **full path** (e.g., `company-1/transfer-call`), not just the filename.
+
+---
+
 ### How to Add Comments to YAML References
 
 You can add inline comments to document references:
@@ -369,8 +448,10 @@ The apply engine strips everything after `##` when resolving references.
 │   └── delete.ts               # Deletion & orphan checks
 ├── resources/
 │   ├── assistants/             # Assistant YAML files
+│   │   └── {tenant}/           # Optional: nested folders for multi-tenant
 │   ├── structuredOutputs/      # Structured output YAML files
 │   └── tools/                  # Tool YAML files
+│       └── {tenant}/           # Optional: nested folders for multi-tenant
 ├── .env.dev                    # Dev environment secrets (gitignored)
 ├── .env.prod                   # Prod environment secrets (gitignored)
 ├── .vapi-state.dev.json        # Dev state file
@@ -464,6 +545,22 @@ The resource you're referencing doesn't exist yet. Make sure:
 1. The referenced file exists in the correct folder
 2. The filename matches exactly (case-sensitive)
 3. You're using the filename without the `.yml` extension
+4. For nested resources, use the **full path** (e.g., `company-1/transfer-call` not just `transfer-call`)
+
+### Structured output not linking to nested assistant
+
+When using folders, structured outputs must reference assistants by their full path:
+
+```yaml
+# ❌ Wrong - won't find the nested assistant
+assistant_ids:
+  - inbound-support
+
+# ✅ Correct - uses full path for nested assistant  
+assistant_ids:
+  - inbound-support              # Root-level
+  - company-1/inbound-support    # Nested (full path)
+```
 
 ### "Cannot delete resource - still referenced"
 

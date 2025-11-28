@@ -13,4 +13,5 @@ model:
   provider: openai
 assistant_ids:
   - inbound-customer-support ## Reference file name in resources/assistants
+  - company-1/inbound-customer-support ## Nested assistant in company-1 folder
 workflow_ids: []
