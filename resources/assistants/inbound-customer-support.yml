@@ -141,3 +141,20 @@ endCallMessage: Thank you for choosing TechSolutions. I'm glad I could help you 
 artifactPlan:
   structuredOutputIds:
     - customer-sentiment ## Reference file name in resources/structuredOutputs
+hooks:
+  - do:
+      - type: say
+        exact: Just checking in. Are you still there?
+    on: customer.speech.timeout
+    options:
+      timeoutSeconds: 5
+      triggerResetMode: onUserSpeech
+  - do:
+      - type: say
+        exact: Please give us a callback we are happy to help
+      - type: tool
+        toolId: transfer-call
+    on: customer.speech.timeout
+    options:
+      timeoutSeconds: 10
+      triggerResetMode: onUserSpeech

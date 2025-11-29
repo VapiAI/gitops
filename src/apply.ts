@@ -14,7 +14,15 @@ export async function applyTool(
   const { resourceId, data } = resource;
   const existingUuid = state.tools[resourceId];
 
-  const payload = { ...data } as Record<string, unknown>;
+  // Resolve references (but assistants may not exist yet on first pass)
+  const payload = resolveReferences(data as Record<string, unknown>, state);
+
+  // For handoff tools with assistant destinations, strip unresolved assistantIds for initial creation
+  // They will be linked after assistants are created
+  const payloadForCreate = stripUnresolvedAssistantDestinations(
+    payload,
+    data as Record<string, unknown>
+  );
 
   if (existingUuid) {
     const updatePayload = removeExcludedKeys(payload, "tools");
@@ -23,9 +31,34 @@ export async function applyTool(
     return existingUuid;
   } else {
     console.log(`  ✨ Creating tool: ${resourceId}`);
-    const result = await vapiRequest("POST", "/tool", payload);
+    const result = await vapiRequest("POST", "/tool", payloadForCreate);
     return result.id;
   }
+}
+
+// Strip destinations with unresolved assistantIds (where original equals resolved = not found in state)
+function stripUnresolvedAssistantDestinations(
+  resolved: Record<string, unknown>,
+  original: Record<string, unknown>
+): Record<string, unknown> {
+  if (!Array.isArray(resolved.destinations)) {
+    return resolved;
+  }
+
+  const originalDests = original.destinations as Record<string, unknown>[];
+  const resolvedDests = resolved.destinations as Record<string, unknown>[];
+
+  // Filter out destinations where assistantId wasn't resolved (still matches original)
+  const filteredDests = resolvedDests.filter((dest, idx) => {
+    if (typeof dest.assistantId !== "string") return true;
+    const origDest = originalDests[idx];
+    if (!origDest || typeof origDest.assistantId !== "string") return true;
+    // Keep if resolved (UUID format) or no original assistantId
+    const originalId = (origDest.assistantId as string).split("##")[0]?.trim();
+    return dest.assistantId !== originalId;
+  });
+
+  return { ...resolved, destinations: filteredDests };
 }
 
 export async function applyStructuredOutput(
@@ -72,6 +105,42 @@ export async function applyAssistant(
     console.log(`  ✨ Creating assistant: ${resourceId}`);
     const result = await vapiRequest("POST", "/assistant", payload);
     return result.id;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-Apply: Update Tools with Assistant References (for handoff tools)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function updateToolAssistantRefs(
+  tools: ResourceFile[],
+  state: StateFile
+): Promise<void> {
+  for (const resource of tools) {
+    const { resourceId, data } = resource;
+    const rawData = data as Record<string, unknown>;
+
+    // Check if this tool has destinations with assistant references
+    if (!Array.isArray(rawData.destinations)) {
+      continue;
+    }
+
+    const hasAssistantRefs = (rawData.destinations as Record<string, unknown>[]).some(
+      (dest) => typeof dest.assistantId === "string"
+    );
+
+    if (!hasAssistantRefs) continue;
+
+    const uuid = state.tools[resourceId];
+    if (!uuid) continue;
+
+    // Resolve destinations now that all assistants exist
+    const resolved = resolveReferences(rawData, state);
+
+    console.log(`  🔗 Linking tool ${resourceId} to assistant destinations`);
+    await vapiRequest("PATCH", `/tool/${uuid}`, {
+      destinations: resolved.destinations,
+    });
   }
 }
 

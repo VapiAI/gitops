@@ -4,18 +4,23 @@ import type { StateFile } from "./types.ts";
 // ID Resolution - Convert resource IDs to Vapi UUIDs
 // ─────────────────────────────────────────────────────────────────────────────
 
+export function resolveToolId(
+  toolId: string,
+  state: StateFile
+): string | null {
+  // Remove comments from YAML (e.g., "transfer-call ## Reference...")
+  const cleanId = toolId.split("##")[0]?.trim() ?? "";
+  const uuid = state.tools[cleanId];
+  if (!uuid) {
+    console.warn(`  ⚠️  Tool reference not found: ${cleanId}`);
+    return null;
+  }
+  return uuid;
+}
+
 export function resolveToolIds(toolIds: string[], state: StateFile): string[] {
   return toolIds
-    .map((refId: string) => {
-      // Remove comments from YAML (e.g., "transfer-call ## Reference...")
-      const cleanId = refId.split("##")[0]?.trim() ?? "";
-      const uuid = state.tools[cleanId];
-      if (!uuid) {
-        console.warn(`  ⚠️  Tool reference not found: ${cleanId}`);
-        return null;
-      }
-      return uuid;
-    })
+    .map((refId: string) => resolveToolId(refId, state))
     .filter((id): id is string => id !== null);
 }
 
@@ -36,20 +41,25 @@ export function resolveStructuredOutputIds(
     .filter((id): id is string => id !== null);
 }
 
+export function resolveAssistantId(
+  assistantId: string,
+  state: StateFile
+): string | null {
+  const cleanId = assistantId.split("##")[0]?.trim() ?? "";
+  const uuid = state.assistants[cleanId];
+  if (!uuid) {
+    console.warn(`  ⚠️  Assistant reference not found: ${cleanId}`);
+    return null;
+  }
+  return uuid;
+}
+
 export function resolveAssistantIds(
   assistantIds: string[],
   state: StateFile
 ): string[] {
   return assistantIds
-    .map((refId: string) => {
-      const cleanId = refId.split("##")[0]?.trim() ?? "";
-      const uuid = state.assistants[cleanId];
-      if (!uuid) {
-        console.warn(`  ⚠️  Assistant reference not found: ${cleanId}`);
-        return null;
-      }
-      return uuid;
-    })
+    .map((refId: string) => resolveAssistantId(refId, state))
     .filter((id): id is string => id !== null);
 }
 
@@ -102,6 +112,34 @@ export function resolveReferences(
     delete resolved.workflow_ids; // Remove snake_case version
   }
 
+  // Resolve toolId in hooks[].do[] actions
+  if (Array.isArray(resolved.hooks)) {
+    for (const hook of resolved.hooks as Record<string, unknown>[]) {
+      if (Array.isArray(hook.do)) {
+        for (const action of hook.do as Record<string, unknown>[]) {
+          if (typeof action.toolId === "string") {
+            const resolvedId = resolveToolId(action.toolId, state);
+            if (resolvedId) {
+              action.toolId = resolvedId;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Resolve assistantId in destinations[] (for handoff tools)
+  if (Array.isArray(resolved.destinations)) {
+    for (const destination of resolved.destinations as Record<string, unknown>[]) {
+      if (typeof destination.assistantId === "string") {
+        const resolvedId = resolveAssistantId(destination.assistantId, state);
+        if (resolvedId) {
+          destination.assistantId = resolvedId;
+        }
+      }
+    }
+  }
+
   return resolved;
 }
 
@@ -147,6 +185,28 @@ export function extractReferencedIds(data: Record<string, unknown>): {
   // Check assistant_ids in structured outputs
   if (Array.isArray(data.assistant_ids)) {
     assistants.push(...(data.assistant_ids as string[]).map(cleanId));
+  }
+
+  // Check hooks[].do[].toolId
+  if (Array.isArray(data.hooks)) {
+    for (const hook of data.hooks as Record<string, unknown>[]) {
+      if (Array.isArray(hook.do)) {
+        for (const action of hook.do as Record<string, unknown>[]) {
+          if (typeof action.toolId === "string") {
+            tools.push(cleanId(action.toolId));
+          }
+        }
+      }
+    }
+  }
+
+  // Check destinations[].assistantId (for handoff tools)
+  if (Array.isArray(data.destinations)) {
+    for (const destination of data.destinations as Record<string, unknown>[]) {
+      if (typeof destination.assistantId === "string") {
+        assistants.push(cleanId(destination.assistantId));
+      }
+    }
   }
 
   return { tools, structuredOutputs, assistants };

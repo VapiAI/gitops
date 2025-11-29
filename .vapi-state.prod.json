@@ -1,12 +1,15 @@
 {
   "assistants": {
-    "inbound-customer-support": "0bbfdf02-c01a-46a9-86a8-0d0eb0b8e14a"
+    "inbound-customer-support": "0bbfdf02-c01a-46a9-86a8-0d0eb0b8e14a",
+    "company-1/inbound-customer-support": "260405e4-34ee-4aed-9251-80443d8a6e64"
   },
   "structuredOutputs": {
     "customer-sentiment": "549ae835-2155-44ec-a557-664c669372db"
   },
   "tools": {
     "get-user": "745f28e0-e99f-4d2f-aa27-bb661a807b87",
-    "transfer-call": "311b547d-ee68-4372-abbc-e8b1e0ae1958"
+    "transfer-call": "311b547d-ee68-4372-abbc-e8b1e0ae1958",
+    "handoff": "e8ad4961-0484-457c-a420-19f90f1d65ba",
+    "company-1/transfer-call": "49ac1e9c-64c7-4c05-8104-5036cb9a667e"
   }
 }

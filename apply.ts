@@ -5,6 +5,7 @@ import {
   applyTool,
   applyStructuredOutput,
   applyAssistant,
+  updateToolAssistantRefs,
   updateStructuredOutputAssistantRefs,
 } from "./src/apply.ts";
 import { deleteOrphanedResources } from "./src/delete.ts";
@@ -72,7 +73,10 @@ async function apply(): Promise<void> {
     }
   }
 
-  // Second pass: Link structured outputs to assistants
+  // Second pass: Link resources to assistants (now that assistants exist)
+  console.log("\n🔗 Linking tools to assistant destinations...\n");
+  await updateToolAssistantRefs(tools, state);
+
   console.log("\n🔗 Linking structured outputs to assistants...\n");
   await updateStructuredOutputAssistantRefs(structuredOutputs, state);
 

@@ -9,6 +9,7 @@
   "tools": {
     "transfer-call": "0a0df4e7-ee96-4e0b-95dd-e534bbcb04c6",
     "get-user": "4e7b31f8-9c2b-4032-88f3-e86f10d95e28",
-    "company-1/transfer-call": "4ebfe4bb-6887-4295-b598-30c008bb948c"
+    "company-1/transfer-call": "4ebfe4bb-6887-4295-b598-30c008bb948c",
+    "handoff": "b1429fc9-45f6-4289-ba48-96ac892e65d7"
   }
 }
