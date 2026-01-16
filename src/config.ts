@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, dirname } from "path";
+import { fileURLToPath } from "url";
 import type { Environment, ResourceType } from "./types.ts";
 import { VALID_ENVIRONMENTS } from "./types.ts";
 
@@ -12,8 +13,7 @@ function parseEnvironment(): Environment {
 
   if (!envArg) {
     console.error("❌ Environment argument is required");
-    console.error("   Usage: bun run apply.ts <env>");
-    console.error("   Or use: bun run apply:dev | apply:staging | apply:prod");
+    console.error("   Usage: npm run apply:dev | apply:prod");
     process.exit(1);
   }
 
@@ -73,7 +73,8 @@ function loadEnvFile(env: string, baseDir: string): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Base directory for the gitops project
-export const BASE_DIR = join(import.meta.dir, "..");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const BASE_DIR = join(__dirname, "..");
 
 // Parse environment and load env files
 export const VAPI_ENV = parseEnvironment();

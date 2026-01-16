@@ -2,18 +2,19 @@
   "name": "vapi-gitops",
   "version": "1.0.0",
   "description": "GitOps management for Vapi resources (Assistants, Structured Outputs, Tools)",
-  "module": "apply.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "apply:dev": "bun run apply.ts dev",
-    "apply:prod": "bun run apply.ts prod"
+    "apply:dev": "tsx src/apply.ts dev",
+    "apply:prod": "tsx src/apply.ts prod",
+    "pull:dev": "tsx src/pull.ts dev",
+    "pull:prod": "tsx src/pull.ts prod",
+    "build": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
   },
   "dependencies": {
     "yaml": "^2.7.0"

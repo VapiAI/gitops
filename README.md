@@ -37,24 +37,45 @@ Manage Vapi resources (Assistants, Structured Outputs, and Tools) via Git using 
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) installed
+- Node.js installed
 - Vapi API token
 
 ### Installation
 
 ```bash
-cd gitops
-bun install
+cd vapi-gitops
+npm install
 ```
+
+This installs all dependencies including Bun locally (no global install needed).
 
 ### Setup Environment
 
 ```bash
 # Create your .env file with your Vapi token
 echo "VAPI_TOKEN=your-token-here" > .env.dev
+```
 
-# Run the apply script
-bun run apply:dev
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run build` | Type-check the codebase |
+| `npm run pull:dev` | Pull resources from Vapi to local YAML files |
+| `npm run pull:prod` | Pull resources from prod |
+| `npm run apply:dev` | Push local YAML files to Vapi (dev) |
+| `npm run apply:prod` | Push local YAML files to Vapi (prod) |
+
+### Basic Workflow
+
+```bash
+# Pull existing resources from Vapi
+npm run pull:dev
+
+# Make changes to YAML files...
+
+# Push changes back to Vapi
+npm run apply:dev
 ```
 
 ---
@@ -92,7 +113,7 @@ server:
 **Step 3:** Apply the changes
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 The tool will be created and its UUID saved to `.vapi-state.dev.json`.
@@ -127,7 +148,7 @@ firstMessage: Hello! How can I help you?
 **Step 3:** Apply the changes
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 The apply engine will:
@@ -184,7 +205,7 @@ artifactPlan:
 **Step 3:** Apply
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 ---
@@ -217,7 +238,7 @@ rm resources/tools/my-tool-to-delete.yml
 **Step 3:** Apply
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 The apply engine will:
@@ -255,7 +276,7 @@ mv resources/tools/old-tool-name.yml resources/tools/new-tool-name.yml
 **Step 3:** Apply
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 This will:
@@ -270,13 +291,13 @@ This will:
 **Step 1:** Test in dev first
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 **Step 2:** Verify everything works, then apply to prod
 
 ```bash
-bun run apply:prod
+npm run apply:prod
 ```
 
 Each environment has its own:
@@ -306,9 +327,9 @@ Edit `package.json`:
 ```json
 {
   "scripts": {
-    "apply:dev": "bun run apply.ts dev",
-    "apply:staging": "bun run apply.ts staging",
-    "apply:prod": "bun run apply.ts prod"
+    "apply:dev": "tsx src/apply.ts dev",
+    "apply:staging": "tsx src/apply.ts staging",
+    "apply:prod": "tsx src/apply.ts prod"
   }
 }
 ```
@@ -328,7 +349,7 @@ echo '{"assistants":{},"structuredOutputs":{},"tools":{}}' > .vapi-state.staging
 **Step 5:** Apply to the new environment
 
 ```bash
-bun run apply:staging
+npm run apply:staging
 ```
 
 This creates all resources in the staging Vapi account and populates `.vapi-state.staging.json` with the new UUIDs.
@@ -392,7 +413,7 @@ assistant_ids:
 **Step 4:** Apply
 
 ```bash
-bun run apply:dev
+npm run apply:dev
 ```
 
 The state file will track both:
@@ -435,16 +456,16 @@ The apply engine strips everything after `##` when resolving references.
 ## Project Structure
 
 ```
-/gitops
-├── apply.ts                    # Main entry point
+vapi-gitops/
 ├── src/
+│   ├── apply.ts                # Apply entry point & functions
+│   ├── pull.ts                 # Pull entry point & functions
 │   ├── types.ts                # TypeScript interfaces
 │   ├── config.ts               # Environment & configuration
 │   ├── api.ts                  # Vapi HTTP client
 │   ├── state.ts                # State file management
 │   ├── resources.ts            # Resource loading
 │   ├── resolver.ts             # Reference resolution
-│   ├── apply.ts                # Apply functions
 │   └── delete.ts               # Deletion & orphan checks
 ├── resources/
 │   ├── assistants/             # Assistant YAML files
