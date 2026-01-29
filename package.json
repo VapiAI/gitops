@@ -11,6 +11,8 @@
     "pull:prod": "tsx src/pull.ts prod",
     "call:dev": "tsx src/call.ts dev",
     "call:prod": "tsx src/call.ts prod",
+    "cleanup:dev": "tsx src/cleanup.ts dev",
+    "cleanup:prod": "tsx src/cleanup.ts prod",
     "build": "tsc --noEmit"
   },
   "devDependencies": {

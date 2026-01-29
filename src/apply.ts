@@ -1,5 +1,5 @@
 import { vapiRequest } from "./api.ts";
-import { VAPI_ENV, VAPI_BASE_URL, removeExcludedKeys } from "./config.ts";
+import { VAPI_ENV, VAPI_BASE_URL, FORCE_DELETE, removeExcludedKeys } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import { loadResources } from "./resources.ts";
 import { resolveReferences, resolveAssistantIds } from "./resolver.ts";
@@ -162,8 +162,8 @@ export async function applyScenario(
   const { resourceId, data } = resource;
   const existingUuid = state.scenarios[resourceId];
 
-  // Scenarios have no external references to resolve
-  const payload = data as Record<string, unknown>;
+  // Resolve structuredOutputId references in evaluations
+  const payload = resolveReferences(data as Record<string, unknown>, state);
 
   if (existingUuid) {
     const updatePayload = removeExcludedKeys(payload, "scenarios");
@@ -301,6 +301,7 @@ async function main(): Promise<void> {
   console.log("═══════════════════════════════════════════════════════════════");
   console.log(`🚀 Vapi GitOps Apply - Environment: ${VAPI_ENV}`);
   console.log(`   API: ${VAPI_BASE_URL}`);
+  console.log(`   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (dry-run)"}`);
   console.log("═══════════════════════════════════════════════════════════════\n");
 
   // Load current state

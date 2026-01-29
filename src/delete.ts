@@ -1,4 +1,5 @@
 import { vapiDelete } from "./api.ts";
+import { FORCE_DELETE } from "./config.ts";
 import { extractReferencedIds } from "./resolver.ts";
 import type {
   ResourceFile,
@@ -137,6 +138,24 @@ export async function deleteOrphanedResources(
     state.simulationSuites
   );
 
+  // Collect all orphaned resources for summary
+  const allOrphaned = [
+    ...orphanedSimulationSuites.map((r) => ({ ...r, type: "simulation suite" as const })),
+    ...orphanedSimulations.map((r) => ({ ...r, type: "simulation" as const })),
+    ...orphanedScenarios.map((r) => ({ ...r, type: "scenario" as const })),
+    ...orphanedPersonalities.map((r) => ({ ...r, type: "personality" as const })),
+    ...orphanedSquads.map((r) => ({ ...r, type: "squad" as const })),
+    ...orphanedAssistants.map((r) => ({ ...r, type: "assistant" as const })),
+    ...orphanedOutputs.map((r) => ({ ...r, type: "structured output" as const })),
+    ...orphanedTools.map((r) => ({ ...r, type: "tool" as const })),
+  ];
+
+  // No orphaned resources - nothing to do
+  if (allOrphaned.length === 0) {
+    console.log("  ✅ No orphaned resources found\n");
+    return;
+  }
+
   // Check for orphan references before deleting
   const errors: string[] = [];
 
@@ -190,6 +209,23 @@ export async function deleteOrphanedResources(
     console.error("\n   Remove the references before deleting these resources.\n");
     throw new Error("Cannot delete resources that are still referenced");
   }
+
+  // Dry-run mode (default): show what would be deleted
+  if (!FORCE_DELETE) {
+    console.log("  ⚠️  PENDING DELETIONS (dry-run mode):\n");
+    for (const { resourceId, uuid, type } of allOrphaned) {
+      console.log(`     🗑️  ${type}: ${resourceId} (${uuid})`);
+    }
+    console.log(`\n  📋 Total: ${allOrphaned.length} resource(s) pending deletion`);
+    console.log("  ℹ️  These resources exist in Vapi but not in your local files.");
+    console.log("  ℹ️  To delete them, run with --force flag:");
+    console.log("     npm run apply:dev -- --force\n");
+    console.log("  ℹ️  Or delete manually via Vapi Dashboard.\n");
+    return;
+  }
+
+  // Force mode: actually delete
+  console.log("  ⚠️  DELETING ORPHANED RESOURCES (--force enabled):\n");
 
   // Delete in reverse dependency order:
   // 1. Simulation suites (depends on simulations)
@@ -287,5 +323,7 @@ export async function deleteOrphanedResources(
       throw error;
     }
   }
+
+  console.log(`\n  ✅ Deleted ${allOrphaned.length} orphaned resource(s)\n`);
 }
 

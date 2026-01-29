@@ -4,12 +4,25 @@ import type { StateFile } from "./types.ts";
 // ID Resolution - Convert resource IDs to Vapi UUIDs
 // ─────────────────────────────────────────────────────────────────────────────
 
+// UUID regex pattern - matches standard UUID format
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUUID(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
+
 export function resolveToolId(
   toolId: string,
   state: StateFile
 ): string | null {
   // Remove comments from YAML (e.g., "transfer-call ## Reference...")
   const cleanId = toolId.split("##")[0]?.trim() ?? "";
+  
+  // If already a UUID, return it directly
+  if (isUUID(cleanId)) {
+    return cleanId;
+  }
+  
   const uuid = state.tools[cleanId];
   if (!uuid) {
     console.warn(`  ⚠️  Tool reference not found: ${cleanId}`);
@@ -31,6 +44,12 @@ export function resolveStructuredOutputIds(
   return outputIds
     .map((refId: string) => {
       const cleanId = refId.split("##")[0]?.trim() ?? "";
+      
+      // If already a UUID, return it directly
+      if (isUUID(cleanId)) {
+        return cleanId;
+      }
+      
       const uuid = state.structuredOutputs[cleanId];
       if (!uuid) {
         console.warn(`  ⚠️  Structured output reference not found: ${cleanId}`);
@@ -46,6 +65,12 @@ export function resolveAssistantId(
   state: StateFile
 ): string | null {
   const cleanId = assistantId.split("##")[0]?.trim() ?? "";
+  
+  // If already a UUID, return it directly
+  if (isUUID(cleanId)) {
+    return cleanId;
+  }
+  
   const uuid = state.assistants[cleanId];
   if (!uuid) {
     console.warn(`  ⚠️  Assistant reference not found: ${cleanId}`);
@@ -68,6 +93,12 @@ export function resolvePersonalityId(
   state: StateFile
 ): string | null {
   const cleanId = personalityId.split("##")[0]?.trim() ?? "";
+  
+  // If already a UUID, return it directly
+  if (isUUID(cleanId)) {
+    return cleanId;
+  }
+  
   const uuid = state.personalities[cleanId];
   if (!uuid) {
     console.warn(`  ⚠️  Personality reference not found: ${cleanId}`);
@@ -81,6 +112,12 @@ export function resolveScenarioId(
   state: StateFile
 ): string | null {
   const cleanId = scenarioId.split("##")[0]?.trim() ?? "";
+  
+  // If already a UUID, return it directly
+  if (isUUID(cleanId)) {
+    return cleanId;
+  }
+  
   const uuid = state.scenarios[cleanId];
   if (!uuid) {
     console.warn(`  ⚠️  Scenario reference not found: ${cleanId}`);
@@ -94,6 +131,12 @@ export function resolveSimulationId(
   state: StateFile
 ): string | null {
   const cleanId = simulationId.split("##")[0]?.trim() ?? "";
+  
+  // If already a UUID, return it directly
+  if (isUUID(cleanId)) {
+    return cleanId;
+  }
+  
   const uuid = state.simulations[cleanId];
   if (!uuid) {
     console.warn(`  ⚠️  Simulation reference not found: ${cleanId}`);
@@ -233,6 +276,27 @@ export function resolveReferences(
       resolved.simulationIds as string[],
       state
     );
+  }
+
+  // Resolve evaluations[].structuredOutputId in scenarios
+  if (Array.isArray(resolved.evaluations)) {
+    for (const evaluation of resolved.evaluations as Record<string, unknown>[]) {
+      if (typeof evaluation.structuredOutputId === "string") {
+        const cleanId = evaluation.structuredOutputId.split("##")[0]?.trim() ?? "";
+        
+        // If already a UUID, keep it as-is
+        if (isUUID(cleanId)) {
+          evaluation.structuredOutputId = cleanId;
+        } else {
+          const uuid = state.structuredOutputs[cleanId];
+          if (uuid) {
+            evaluation.structuredOutputId = uuid;
+          } else {
+            console.warn(`  ⚠️  Structured output reference not found in evaluation: ${cleanId}`);
+          }
+        }
+      }
+    }
   }
 
   return resolved;

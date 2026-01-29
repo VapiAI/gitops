@@ -5,7 +5,7 @@ import type { Environment, ResourceType } from "./types.ts";
 import { VALID_ENVIRONMENTS } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Environment Parsing
+// CLI Argument Parsing
 // ─────────────────────────────────────────────────────────────────────────────
 
 function parseEnvironment(): Environment {
@@ -14,6 +14,7 @@ function parseEnvironment(): Environment {
   if (!envArg) {
     console.error("❌ Environment argument is required");
     console.error("   Usage: npm run apply:dev | apply:prod");
+    console.error("   Flags: --force (enable deletions)");
     process.exit(1);
   }
 
@@ -24,6 +25,13 @@ function parseEnvironment(): Environment {
   }
 
   return envArg;
+}
+
+function parseFlags(): { forceDelete: boolean } {
+  const args = process.argv.slice(3);
+  return {
+    forceDelete: args.includes("--force"),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,8 +84,9 @@ function loadEnvFile(env: string, baseDir: string): void {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const BASE_DIR = join(__dirname, "..");
 
-// Parse environment and load env files
+// Parse environment, flags, and load env files
 export const VAPI_ENV = parseEnvironment();
+export const { forceDelete: FORCE_DELETE } = parseFlags();
 loadEnvFile(VAPI_ENV, BASE_DIR);
 
 // API configuration
