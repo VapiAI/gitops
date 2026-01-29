@@ -9,6 +9,8 @@
     "apply:prod": "tsx src/apply.ts prod",
     "pull:dev": "tsx src/pull.ts dev",
     "pull:prod": "tsx src/pull.ts prod",
+    "call:dev": "tsx src/call.ts dev",
+    "call:prod": "tsx src/call.ts prod",
     "build": "tsc --noEmit"
   },
   "devDependencies": {
@@ -18,5 +20,9 @@
   },
   "dependencies": {
     "yaml": "^2.7.0"
+  },
+  "optionalDependencies": {
+    "mic": "^2.1.2",
+    "speaker": "^0.5.5"
   }
 }

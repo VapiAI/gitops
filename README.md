@@ -65,6 +65,9 @@ echo "VAPI_TOKEN=your-token-here" > .env.dev
 | `npm run pull:prod` | Pull resources from prod |
 | `npm run apply:dev` | Push local YAML files to Vapi (dev) |
 | `npm run apply:prod` | Push local YAML files to Vapi (prod) |
+| `npm run call:dev -- -a <name>` | Start a WebSocket call to an assistant (dev) |
+| `npm run call:dev -- -s <name>` | Start a WebSocket call to a squad (dev) |
+| `npm run call:prod -- -a <name>` | Start a WebSocket call to an assistant (prod) |
 
 ### Basic Workflow
 
@@ -81,6 +84,111 @@ npm run apply:dev
 ---
 
 ## How-To Guides
+
+### How to Make a WebSocket Call to an Assistant or Squad
+
+Test your assistants and squads directly from the terminal using real-time voice calls.
+
+**Prerequisites (Optional but recommended for audio):**
+
+```bash
+# For microphone input and audio playback
+npm install mic speaker
+
+# macOS may require additional setup:
+brew install sox
+```
+
+> **Note:** The call script works without these dependencies but will only show transcripts (no audio I/O).
+
+**Step 1:** Ensure your assistant/squad is deployed
+
+```bash
+npm run apply:dev
+```
+
+**Step 2:** Start the call
+
+```bash
+# Call an assistant
+bun run call:dev -a my-assistant
+
+# Call a nested assistant (in subdirectory)
+bun run call:dev -a company-1/inbound-support
+
+# Call a squad
+bun run call:dev -s my-squad
+
+# Call in production
+bun run call:prod -a my-assistant
+```
+
+**CLI Options:**
+
+| Flag | Description |
+|------|-------------|
+| `-a <name>` | Call an assistant by name |
+| `-s <name>` | Call a squad by name |
+
+**Step 3:** Grant microphone permissions
+
+On first run, the script will check for microphone permissions:
+- **macOS**: You may see a system permission prompt. Grant access in System Preferences > Security & Privacy > Privacy > Microphone
+- **Linux**: Ensure ALSA is configured and your user has access to audio devices
+- **Windows**: You may be prompted to grant microphone access
+
+**Step 4:** Speak into your microphone
+
+The terminal will show:
+- 🎤 Your speech transcripts
+- 🤖 Assistant responses
+- 📞 Call status updates
+
+**Step 5:** End the call
+
+Press `Ctrl+C` to gracefully end the call.
+
+**Example output:**
+
+```
+🚀 Starting WebSocket call
+   Environment: dev
+   assistant: my-assistant
+
+🎤 Checking microphone permissions...
+✅ Microphone permission granted
+
+   UUID: 88d807a0-854a-4a95-960f-6b69921ff877
+
+📞 Creating call...
+📞 Call ID: abc123-def456
+🔌 Connecting to WebSocket...
+✅ Connected!
+🎤 Speak into your microphone...
+   Press Ctrl+C to end the call
+
+💬 Assistant started speaking...
+🤖 Assistant: Hi there, this is Alex from TechSolutions customer support. How can I help you today?
+🎤 You: I need help with my account
+🤖 Assistant: I'd be happy to help you with your account. Could you tell me a bit more about what's happening?
+
+^C
+👋 Ending call...
+📴 Call ended (code: 1000)
+```
+
+**Troubleshooting:**
+
+| Issue | Solution |
+|-------|----------|
+| `Assistant not found` | Run `npm run apply:dev` first to deploy |
+| `Squad not found` | Ensure squads are added to the state file |
+| `mic module not installed` | Run `npm install mic` |
+| `speaker module not installed` | Run `npm install speaker` |
+| No audio on macOS | Install sox: `brew install sox` |
+| Microphone permission denied | Check system privacy settings |
+
+---
 
 ### How to Add a New Tool
 
@@ -460,6 +568,7 @@ vapi-gitops/
 ├── src/
 │   ├── apply.ts                # Apply entry point & functions
 │   ├── pull.ts                 # Pull entry point & functions
+│   ├── call.ts                 # WebSocket call script
 │   ├── types.ts                # TypeScript interfaces
 │   ├── config.ts               # Environment & configuration
 │   ├── api.ts                  # Vapi HTTP client
