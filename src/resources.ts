@@ -1,12 +1,12 @@
 import { parse as parseYaml } from "yaml";
 import { readdir, readFile, stat } from "fs/promises";
-import { join, extname, relative } from "path";
+import { join, extname, relative, resolve, dirname } from "path";
 import { existsSync } from "fs";
-import { RESOURCES_DIR } from "./config.ts";
+import { RESOURCES_DIR, BASE_DIR } from "./config.ts";
 import type { ResourceFile, ResourceType } from "./types.ts";
 
 // Map resource types to their folder paths (relative to resources/)
-const FOLDER_MAP: Record<ResourceType, string> = {
+export const FOLDER_MAP: Record<ResourceType, string> = {
   tools: "tools",
   structuredOutputs: "structuredOutputs",
   assistants: "assistants",
@@ -16,6 +16,13 @@ const FOLDER_MAP: Record<ResourceType, string> = {
   simulations: "simulations/tests",
   simulationSuites: "simulations/suites",
 };
+
+// Reverse map: folder path to resource type
+const FOLDER_TO_TYPE: Record<string, ResourceType> = Object.entries(FOLDER_MAP)
+  .reduce((acc, [type, folder]) => {
+    acc[folder] = type as ResourceType;
+    return acc;
+  }, {} as Record<string, ResourceType>);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resource Loading
@@ -172,3 +179,108 @@ export async function loadResources<T>(
   return resources;
 }
 
+/**
+ * Determine resource type from a file path
+ * Resolves both absolute and relative paths
+ */
+export function getResourceTypeFromPath(filePath: string): ResourceType | null {
+  // Resolve to absolute path
+  const absolutePath = resolve(filePath);
+  const relativeToResources = relative(RESOURCES_DIR, absolutePath);
+  
+  // Check if path is within resources directory
+  if (relativeToResources.startsWith("..")) {
+    return null;
+  }
+
+  // Find matching resource type folder
+  for (const [type, folder] of Object.entries(FOLDER_MAP)) {
+    if (relativeToResources.startsWith(folder + "/") || relativeToResources.startsWith(folder)) {
+      return type as ResourceType;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Load a single resource file by path
+ * Returns the resource with its type, or null if the path is invalid
+ */
+export async function loadSingleResource(
+  filePath: string
+): Promise<{ type: ResourceType; resource: ResourceFile } | null> {
+  // Resolve path (could be relative to cwd or absolute)
+  const absolutePath = resolve(filePath);
+  
+  if (!existsSync(absolutePath)) {
+    console.error(`  ❌ File not found: ${filePath}`);
+    return null;
+  }
+
+  const resourceType = getResourceTypeFromPath(absolutePath);
+  if (!resourceType) {
+    console.error(`  ❌ Could not determine resource type for: ${filePath}`);
+    console.error(`     File must be within resources/ directory`);
+    return null;
+  }
+
+  const folderPath = FOLDER_MAP[resourceType];
+  const resourceDir = join(RESOURCES_DIR, folderPath);
+  const ext = extname(absolutePath);
+  const relativePath = relative(resourceDir, absolutePath);
+  const resourceId = relativePath.slice(0, -ext.length);
+
+  let data: Record<string, unknown>;
+  
+  if (ext === ".ts") {
+    try {
+      const module = await import(absolutePath);
+      data = module.default as Record<string, unknown>;
+      if (data === undefined) {
+        throw new Error(`No default export found`);
+      }
+    } catch (error) {
+      throw new Error(`Failed to import TypeScript resource "${filePath}": ${error}`);
+    }
+  } else if (ext === ".md") {
+    try {
+      const content = await readFile(absolutePath, "utf-8");
+      const { config, body } = parseFrontmatter(content);
+      
+      if (body) {
+        const model = (config.model as Record<string, unknown>) || {};
+        const existingMessages = Array.isArray(model.messages) ? model.messages : [];
+        model.messages = [
+          { role: "system", content: body },
+          ...existingMessages.filter((m: { role?: string }) => m.role !== "system"),
+        ];
+        config.model = model;
+      }
+      
+      data = config;
+    } catch (error) {
+      throw new Error(`Failed to parse Markdown resource "${filePath}": ${error}`);
+    }
+  } else {
+    try {
+      const content = await readFile(absolutePath, "utf-8");
+      data = parseYaml(content) as Record<string, unknown>;
+      if (data === null || data === undefined) {
+        throw new Error(`Empty or invalid YAML`);
+      }
+      if (typeof data !== "object" || Array.isArray(data)) {
+        throw new Error(`YAML must be an object`);
+      }
+    } catch (error) {
+      throw new Error(`Failed to parse YAML resource "${filePath}": ${error}`);
+    }
+  }
+
+  console.log(`  📦 Loaded ${resourceId} (${resourceType})`);
+  
+  return {
+    type: resourceType,
+    resource: { resourceId, filePath: absolutePath, data },
+  };
+}

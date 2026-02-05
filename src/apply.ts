@@ -1,10 +1,10 @@
 import { vapiRequest } from "./api.ts";
-import { VAPI_ENV, VAPI_BASE_URL, FORCE_DELETE, removeExcludedKeys } from "./config.ts";
+import { VAPI_ENV, VAPI_BASE_URL, FORCE_DELETE, APPLY_FILTER, removeExcludedKeys } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
-import { loadResources } from "./resources.ts";
+import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
 import { resolveReferences, resolveAssistantIds } from "./resolver.ts";
 import { deleteOrphanedResources } from "./delete.ts";
-import type { ResourceFile, StateFile } from "./types.ts";
+import type { ResourceFile, StateFile, ResourceType, LoadedResources } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resource Apply Functions
@@ -294,36 +294,139 @@ export async function updateStructuredOutputAssistantRefs(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Resource Filtering
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isPartialApply(): boolean {
+  return !!(APPLY_FILTER.resourceType || APPLY_FILTER.filePaths?.length);
+}
+
+function shouldApplyResourceType(type: ResourceType): boolean {
+  // If filtering by specific files, check if any file matches this type
+  if (APPLY_FILTER.filePaths?.length) {
+    return true; // We'll filter by resourceId later
+  }
+  // If filtering by type, only include matching type
+  if (APPLY_FILTER.resourceType) {
+    return type === APPLY_FILTER.resourceType;
+  }
+  return true;
+}
+
+function filterResourcesByPaths<T>(
+  resources: ResourceFile<T>[],
+  type: ResourceType
+): ResourceFile<T>[] {
+  if (!APPLY_FILTER.filePaths?.length) return resources;
+  
+  // Get all resourceIds that match the file paths for this type
+  const matchingIds = new Set<string>();
+  
+  for (const filePath of APPLY_FILTER.filePaths) {
+    // Try to match the file path to a resourceId
+    for (const resource of resources) {
+      if (resource.filePath.endsWith(filePath) || 
+          filePath.endsWith(resource.resourceId + ".yml") ||
+          filePath.endsWith(resource.resourceId + ".yaml") ||
+          filePath.endsWith(resource.resourceId + ".md") ||
+          filePath.endsWith(resource.resourceId + ".ts") ||
+          resource.filePath === filePath ||
+          resource.resourceId === filePath.replace(/\.(yml|yaml|md|ts)$/, "")) {
+        matchingIds.add(resource.resourceId);
+      }
+    }
+  }
+  
+  return resources.filter(r => matchingIds.has(r.resourceId));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Apply Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const partial = isPartialApply();
+  
   console.log("═══════════════════════════════════════════════════════════════");
   console.log(`🚀 Vapi GitOps Apply - Environment: ${VAPI_ENV}`);
   console.log(`   API: ${VAPI_BASE_URL}`);
   console.log(`   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (dry-run)"}`);
+  if (APPLY_FILTER.resourceType) {
+    console.log(`   Filter: ${APPLY_FILTER.resourceType} only`);
+  }
+  if (APPLY_FILTER.filePaths?.length) {
+    console.log(`   Files: ${APPLY_FILTER.filePaths.join(", ")}`);
+  }
   console.log("═══════════════════════════════════════════════════════════════\n");
 
-  // Load current state
+  // Load current state (needed for reference resolution even in partial apply)
   const state = loadState();
 
-  // Load all resources
-  console.log("\n📂 Loading resources...\n");
-  const tools = await loadResources<Record<string, unknown>>("tools");
-  const structuredOutputs = await loadResources<Record<string, unknown>>("structuredOutputs");
-  const assistants = await loadResources<Record<string, unknown>>("assistants");
-  const squads = await loadResources<Record<string, unknown>>("squads");
-  const personalities = await loadResources<Record<string, unknown>>("personalities");
-  const scenarios = await loadResources<Record<string, unknown>>("scenarios");
-  const simulations = await loadResources<Record<string, unknown>>("simulations");
-  const simulationSuites = await loadResources<Record<string, unknown>>("simulationSuites");
+  // Track what was applied for summary
+  const applied: Record<ResourceType, number> = {
+    tools: 0,
+    structuredOutputs: 0,
+    assistants: 0,
+    squads: 0,
+    personalities: 0,
+    scenarios: 0,
+    simulations: 0,
+    simulationSuites: 0,
+  };
 
-  // Delete orphaned resources first (checks for orphan references, then deletes)
-  console.log("\n🗑️  Checking for deleted resources...\n");
-  await deleteOrphanedResources({ 
-    tools, structuredOutputs, assistants, squads,
-    personalities, scenarios, simulations, simulationSuites 
-  }, state);
+  // Load all resources (we need them for reference resolution and filtering)
+  console.log("\n📂 Loading resources...\n");
+  const allTools = await loadResources<Record<string, unknown>>("tools");
+  const allStructuredOutputs = await loadResources<Record<string, unknown>>("structuredOutputs");
+  const allAssistants = await loadResources<Record<string, unknown>>("assistants");
+  const allSquads = await loadResources<Record<string, unknown>>("squads");
+  const allPersonalities = await loadResources<Record<string, unknown>>("personalities");
+  const allScenarios = await loadResources<Record<string, unknown>>("scenarios");
+  const allSimulations = await loadResources<Record<string, unknown>>("simulations");
+  const allSimulationSuites = await loadResources<Record<string, unknown>>("simulationSuites");
+
+  // Filter resources based on apply filter
+  const tools = shouldApplyResourceType("tools") 
+    ? filterResourcesByPaths(allTools, "tools") 
+    : [];
+  const structuredOutputs = shouldApplyResourceType("structuredOutputs") 
+    ? filterResourcesByPaths(allStructuredOutputs, "structuredOutputs") 
+    : [];
+  const assistants = shouldApplyResourceType("assistants") 
+    ? filterResourcesByPaths(allAssistants, "assistants") 
+    : [];
+  const squads = shouldApplyResourceType("squads") 
+    ? filterResourcesByPaths(allSquads, "squads") 
+    : [];
+  const personalities = shouldApplyResourceType("personalities") 
+    ? filterResourcesByPaths(allPersonalities, "personalities") 
+    : [];
+  const scenarios = shouldApplyResourceType("scenarios") 
+    ? filterResourcesByPaths(allScenarios, "scenarios") 
+    : [];
+  const simulations = shouldApplyResourceType("simulations") 
+    ? filterResourcesByPaths(allSimulations, "simulations") 
+    : [];
+  const simulationSuites = shouldApplyResourceType("simulationSuites") 
+    ? filterResourcesByPaths(allSimulationSuites, "simulationSuites") 
+    : [];
+
+  // Skip deletion for partial applies (only do full sync on full apply)
+  if (!partial) {
+    console.log("\n🗑️  Checking for deleted resources...\n");
+    await deleteOrphanedResources({ 
+      tools: allTools, 
+      structuredOutputs: allStructuredOutputs, 
+      assistants: allAssistants, 
+      squads: allSquads,
+      personalities: allPersonalities, 
+      scenarios: allScenarios, 
+      simulations: allSimulations, 
+      simulationSuites: allSimulationSuites 
+    }, state);
+  } else {
+    console.log("\n⏭️  Skipping deletion check (partial apply)\n");
+  }
 
   // Apply in dependency order:
   // 1. Base resources (tools, structuredOutputs)
@@ -333,106 +436,134 @@ async function main(): Promise<void> {
   // 5. Simulations (references personalities, scenarios)
   // 6. Simulation suites (references simulations)
 
-  console.log("\n🔧 Applying tools...\n");
-  for (const tool of tools) {
-    try {
-      const uuid = await applyTool(tool, state);
-      state.tools[tool.resourceId] = uuid;
-    } catch (error) {
-      console.error(`  ❌ Failed to apply tool ${tool.resourceId}:`, error);
-      throw error;
+  if (tools.length > 0) {
+    console.log("\n🔧 Applying tools...\n");
+    for (const tool of tools) {
+      try {
+        const uuid = await applyTool(tool, state);
+        state.tools[tool.resourceId] = uuid;
+        applied.tools++;
+      } catch (error) {
+        console.error(`  ❌ Failed to apply tool ${tool.resourceId}:`, error);
+        throw error;
+      }
     }
   }
 
-  console.log("\n📊 Applying structured outputs...\n");
-  for (const output of structuredOutputs) {
-    try {
-      const uuid = await applyStructuredOutput(output, state);
-      state.structuredOutputs[output.resourceId] = uuid;
-    } catch (error) {
-      console.error(
-        `  ❌ Failed to apply structured output ${output.resourceId}:`,
-        error
-      );
-      throw error;
+  if (structuredOutputs.length > 0) {
+    console.log("\n📊 Applying structured outputs...\n");
+    for (const output of structuredOutputs) {
+      try {
+        const uuid = await applyStructuredOutput(output, state);
+        state.structuredOutputs[output.resourceId] = uuid;
+        applied.structuredOutputs++;
+      } catch (error) {
+        console.error(
+          `  ❌ Failed to apply structured output ${output.resourceId}:`,
+          error
+        );
+        throw error;
+      }
     }
   }
 
-  console.log("\n🤖 Applying assistants...\n");
-  for (const assistant of assistants) {
-    try {
-      const uuid = await applyAssistant(assistant, state);
-      state.assistants[assistant.resourceId] = uuid;
-    } catch (error) {
-      console.error(
-        `  ❌ Failed to apply assistant ${assistant.resourceId}:`,
-        error
-      );
-      throw error;
+  if (assistants.length > 0) {
+    console.log("\n🤖 Applying assistants...\n");
+    for (const assistant of assistants) {
+      try {
+        const uuid = await applyAssistant(assistant, state);
+        state.assistants[assistant.resourceId] = uuid;
+        applied.assistants++;
+      } catch (error) {
+        console.error(
+          `  ❌ Failed to apply assistant ${assistant.resourceId}:`,
+          error
+        );
+        throw error;
+      }
     }
   }
 
-  console.log("\n👥 Applying squads...\n");
-  for (const squad of squads) {
-    try {
-      const uuid = await applySquad(squad, state);
-      state.squads[squad.resourceId] = uuid;
-    } catch (error) {
-      console.error(`  ❌ Failed to apply squad ${squad.resourceId}:`, error);
-      throw error;
+  if (squads.length > 0) {
+    console.log("\n👥 Applying squads...\n");
+    for (const squad of squads) {
+      try {
+        const uuid = await applySquad(squad, state);
+        state.squads[squad.resourceId] = uuid;
+        applied.squads++;
+      } catch (error) {
+        console.error(`  ❌ Failed to apply squad ${squad.resourceId}:`, error);
+        throw error;
+      }
     }
   }
 
-  console.log("\n🎭 Applying personalities...\n");
-  for (const personality of personalities) {
-    try {
-      const uuid = await applyPersonality(personality, state);
-      state.personalities[personality.resourceId] = uuid;
-    } catch (error) {
-      console.error(`  ❌ Failed to apply personality ${personality.resourceId}:`, error);
-      throw error;
+  if (personalities.length > 0) {
+    console.log("\n🎭 Applying personalities...\n");
+    for (const personality of personalities) {
+      try {
+        const uuid = await applyPersonality(personality, state);
+        state.personalities[personality.resourceId] = uuid;
+        applied.personalities++;
+      } catch (error) {
+        console.error(`  ❌ Failed to apply personality ${personality.resourceId}:`, error);
+        throw error;
+      }
     }
   }
 
-  console.log("\n📋 Applying scenarios...\n");
-  for (const scenario of scenarios) {
-    try {
-      const uuid = await applyScenario(scenario, state);
-      state.scenarios[scenario.resourceId] = uuid;
-    } catch (error) {
-      console.error(`  ❌ Failed to apply scenario ${scenario.resourceId}:`, error);
-      throw error;
+  if (scenarios.length > 0) {
+    console.log("\n📋 Applying scenarios...\n");
+    for (const scenario of scenarios) {
+      try {
+        const uuid = await applyScenario(scenario, state);
+        state.scenarios[scenario.resourceId] = uuid;
+        applied.scenarios++;
+      } catch (error) {
+        console.error(`  ❌ Failed to apply scenario ${scenario.resourceId}:`, error);
+        throw error;
+      }
     }
   }
 
-  console.log("\n🧪 Applying simulations...\n");
-  for (const simulation of simulations) {
-    try {
-      const uuid = await applySimulation(simulation, state);
-      state.simulations[simulation.resourceId] = uuid;
-    } catch (error) {
-      console.error(`  ❌ Failed to apply simulation ${simulation.resourceId}:`, error);
-      throw error;
+  if (simulations.length > 0) {
+    console.log("\n🧪 Applying simulations...\n");
+    for (const simulation of simulations) {
+      try {
+        const uuid = await applySimulation(simulation, state);
+        state.simulations[simulation.resourceId] = uuid;
+        applied.simulations++;
+      } catch (error) {
+        console.error(`  ❌ Failed to apply simulation ${simulation.resourceId}:`, error);
+        throw error;
+      }
     }
   }
 
-  console.log("\n📦 Applying simulation suites...\n");
-  for (const suite of simulationSuites) {
-    try {
-      const uuid = await applySimulationSuite(suite, state);
-      state.simulationSuites[suite.resourceId] = uuid;
-    } catch (error) {
-      console.error(`  ❌ Failed to apply simulation suite ${suite.resourceId}:`, error);
-      throw error;
+  if (simulationSuites.length > 0) {
+    console.log("\n📦 Applying simulation suites...\n");
+    for (const suite of simulationSuites) {
+      try {
+        const uuid = await applySimulationSuite(suite, state);
+        state.simulationSuites[suite.resourceId] = uuid;
+        applied.simulationSuites++;
+      } catch (error) {
+        console.error(`  ❌ Failed to apply simulation suite ${suite.resourceId}:`, error);
+        throw error;
+      }
     }
   }
 
-  // Second pass: Link resources to assistants (now that assistants exist)
-  console.log("\n🔗 Linking tools to assistant destinations...\n");
-  await updateToolAssistantRefs(tools, state);
+  // Second pass: Link resources to assistants (only for tools/structuredOutputs being applied)
+  if (tools.length > 0) {
+    console.log("\n🔗 Linking tools to assistant destinations...\n");
+    await updateToolAssistantRefs(tools, state);
+  }
 
-  console.log("\n🔗 Linking structured outputs to assistants...\n");
-  await updateStructuredOutputAssistantRefs(structuredOutputs, state);
+  if (structuredOutputs.length > 0) {
+    console.log("\n🔗 Linking structured outputs to assistants...\n");
+    await updateStructuredOutputAssistantRefs(structuredOutputs, state);
+  }
 
   // Save updated state
   await saveState(state);
@@ -441,16 +572,30 @@ async function main(): Promise<void> {
   console.log("✅ Apply complete!");
   console.log("═══════════════════════════════════════════════════════════════\n");
 
-  // Summary
-  console.log("📋 Summary:");
-  console.log(`   Tools: ${Object.keys(state.tools).length}`);
-  console.log(`   Structured Outputs: ${Object.keys(state.structuredOutputs).length}`);
-  console.log(`   Assistants: ${Object.keys(state.assistants).length}`);
-  console.log(`   Squads: ${Object.keys(state.squads).length}`);
-  console.log(`   Personalities: ${Object.keys(state.personalities).length}`);
-  console.log(`   Scenarios: ${Object.keys(state.scenarios).length}`);
-  console.log(`   Simulations: ${Object.keys(state.simulations).length}`);
-  console.log(`   Simulation Suites: ${Object.keys(state.simulationSuites).length}`);
+  // Summary - show what was applied vs total in state
+  const totalApplied = Object.values(applied).reduce((a, b) => a + b, 0);
+  
+  if (partial) {
+    console.log(`📋 Applied ${totalApplied} resource(s):`);
+    if (applied.tools > 0) console.log(`   Tools: ${applied.tools}`);
+    if (applied.structuredOutputs > 0) console.log(`   Structured Outputs: ${applied.structuredOutputs}`);
+    if (applied.assistants > 0) console.log(`   Assistants: ${applied.assistants}`);
+    if (applied.squads > 0) console.log(`   Squads: ${applied.squads}`);
+    if (applied.personalities > 0) console.log(`   Personalities: ${applied.personalities}`);
+    if (applied.scenarios > 0) console.log(`   Scenarios: ${applied.scenarios}`);
+    if (applied.simulations > 0) console.log(`   Simulations: ${applied.simulations}`);
+    if (applied.simulationSuites > 0) console.log(`   Simulation Suites: ${applied.simulationSuites}`);
+  } else {
+    console.log("📋 Summary:");
+    console.log(`   Tools: ${Object.keys(state.tools).length}`);
+    console.log(`   Structured Outputs: ${Object.keys(state.structuredOutputs).length}`);
+    console.log(`   Assistants: ${Object.keys(state.assistants).length}`);
+    console.log(`   Squads: ${Object.keys(state.squads).length}`);
+    console.log(`   Personalities: ${Object.keys(state.personalities).length}`);
+    console.log(`   Scenarios: ${Object.keys(state.scenarios).length}`);
+    console.log(`   Simulations: ${Object.keys(state.simulations).length}`);
+    console.log(`   Simulation Suites: ${Object.keys(state.simulationSuites).length}`);
+  }
 }
 
 // Run the apply engine

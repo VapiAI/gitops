@@ -1,12 +1,17 @@
 import { existsSync, readFileSync } from "fs";
-import { join, basename, dirname } from "path";
+import { join, basename, dirname, resolve, relative } from "path";
 import { fileURLToPath } from "url";
 import type { Environment, ResourceType } from "./types.ts";
-import { VALID_ENVIRONMENTS } from "./types.ts";
+import { VALID_ENVIRONMENTS, VALID_RESOURCE_TYPES } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
 // ─────────────────────────────────────────────────────────────────────────────
+
+export interface ApplyFilter {
+  resourceType?: ResourceType;  // Filter by resource type (e.g., "assistants")
+  filePaths?: string[];         // Apply only specific files
+}
 
 function parseEnvironment(): Environment {
   const envArg = process.argv[2] as Environment | undefined;
@@ -15,6 +20,8 @@ function parseEnvironment(): Environment {
     console.error("❌ Environment argument is required");
     console.error("   Usage: npm run apply:dev | apply:prod");
     console.error("   Flags: --force (enable deletions)");
+    console.error("          --type <type> (apply only specific resource type)");
+    console.error("          -- <file...> (apply only specific files)");
     process.exit(1);
   }
 
@@ -27,11 +34,51 @@ function parseEnvironment(): Environment {
   return envArg;
 }
 
-function parseFlags(): { forceDelete: boolean } {
+function parseFlags(): { forceDelete: boolean; applyFilter: ApplyFilter } {
   const args = process.argv.slice(3);
-  return {
+  const result: { forceDelete: boolean; applyFilter: ApplyFilter } = {
     forceDelete: args.includes("--force"),
+    applyFilter: {},
   };
+
+  // Parse --type or -t flag
+  const typeIndex = args.findIndex(a => a === "--type" || a === "-t");
+  if (typeIndex !== -1 && args[typeIndex + 1]) {
+    const resourceType = args[typeIndex + 1] as ResourceType;
+    if (!VALID_RESOURCE_TYPES.includes(resourceType)) {
+      console.error(`❌ Invalid resource type: ${resourceType}`);
+      console.error(`   Must be one of: ${VALID_RESOURCE_TYPES.join(", ")}`);
+      process.exit(1);
+    }
+    result.applyFilter.resourceType = resourceType;
+  }
+
+  // Parse file paths and positional resource types
+  const filePaths: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg) continue;
+    // Skip flags and their values
+    if (arg === "--force" || arg === "--type" || arg === "-t") {
+      if (arg === "--type" || arg === "-t") i++; // skip the value too
+      continue;
+    }
+    // Check if it's a resource type (positional, like "npm run apply:dev assistants")
+    if (VALID_RESOURCE_TYPES.includes(arg as ResourceType) && !result.applyFilter.resourceType) {
+      result.applyFilter.resourceType = arg as ResourceType;
+      continue;
+    }
+    // If it looks like a file path (contains / or ends with .yml/.yaml/.md/.ts)
+    if (arg.includes("/") || /\.(yml|yaml|md|ts)$/.test(arg)) {
+      filePaths.push(arg);
+    }
+  }
+
+  if (filePaths.length > 0) {
+    result.applyFilter.filePaths = filePaths;
+  }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +133,7 @@ export const BASE_DIR = join(__dirname, "..");
 
 // Parse environment, flags, and load env files
 export const VAPI_ENV = parseEnvironment();
-export const { forceDelete: FORCE_DELETE } = parseFlags();
+export const { forceDelete: FORCE_DELETE, applyFilter: APPLY_FILTER } = parseFlags();
 loadEnvFile(VAPI_ENV, BASE_DIR);
 
 // API configuration

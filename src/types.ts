@@ -38,6 +38,17 @@ export type Environment = "dev" | "staging" | "prod";
 
 export const VALID_ENVIRONMENTS: readonly Environment[] = ["dev", "staging", "prod"];
 
+export const VALID_RESOURCE_TYPES: readonly ResourceType[] = [
+  "tools",
+  "structuredOutputs", 
+  "assistants",
+  "squads",
+  "personalities",
+  "scenarios",
+  "simulations",
+  "simulationSuites",
+];
+
 export interface LoadedResources {
   tools: ResourceFile<Record<string, unknown>>[];
   structuredOutputs: ResourceFile<Record<string, unknown>>[];

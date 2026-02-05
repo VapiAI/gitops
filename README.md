@@ -64,8 +64,10 @@ echo "VAPI_TOKEN=your-token-here" > .env.dev
 | `npm run build` | Type-check the codebase |
 | `npm run pull:dev` | Pull resources from Vapi to local files |
 | `npm run pull:prod` | Pull resources from prod |
-| `npm run apply:dev` | Push local files to Vapi (dev) |
-| `npm run apply:prod` | Push local files to Vapi (prod) |
+| `npm run apply:dev` | Push all local files to Vapi (dev) |
+| `npm run apply:prod` | Push all local files to Vapi (prod) |
+| `npm run apply:dev assistants` | Push only assistants (dev) |
+| `npm run apply:dev tools` | Push only tools (dev) |
 | `npm run call:dev -- -a <name>` | Start a WebSocket call to an assistant (dev) |
 | `npm run call:dev -- -s <name>` | Start a WebSocket call to a squad (dev) |
 
@@ -80,6 +82,42 @@ npm run pull:dev
 # Push changes back to Vapi
 npm run apply:dev
 ```
+
+### Selective Apply (Partial Sync)
+
+Push only specific resources instead of syncing everything:
+
+#### By Resource Type
+
+```bash
+npm run apply:dev assistants
+npm run apply:dev tools
+npm run apply:dev squads
+npm run apply:dev structuredOutputs
+npm run apply:dev personalities
+npm run apply:dev scenarios
+npm run apply:dev simulations
+npm run apply:dev simulationSuites
+```
+
+#### By Specific File(s)
+
+```bash
+# Push a single file
+npm run apply:dev resources/assistants/my-assistant.md
+
+# Push multiple files
+npm run apply:dev resources/assistants/booking.md resources/tools/my-tool.yml
+```
+
+#### Combined
+
+```bash
+# Push specific file within a type
+npm run apply:dev assistants resources/assistants/booking.md
+```
+
+**Note:** Partial applies skip deletion checks. Run full `npm run apply:dev` to sync deletions.
 
 ---
 
