@@ -34,51 +34,56 @@ export function findOrphanedResources(
 
 type ReferenceableType = "tools" | "structuredOutputs" | "assistants" | "personalities" | "scenarios" | "simulations";
 
+export interface ResourceReference {
+  resourceId: string;
+  resourceType: string;
+}
+
 export function findReferencingResources(
   targetId: string,
   targetType: ReferenceableType,
   allResources: LoadedResources
-): string[] {
-  const referencingResources: string[] = [];
+): ResourceReference[] {
+  const referencingResources: ResourceReference[] = [];
 
-  const checkResource = (resource: ResourceFile) => {
+  const checkResource = (resource: ResourceFile, resourceType: string) => {
     const refs = extractReferencedIds(resource.data as Record<string, unknown>);
 
     if (targetType === "tools" && refs.tools.includes(targetId)) {
-      referencingResources.push(resource.resourceId);
+      referencingResources.push({ resourceId: resource.resourceId, resourceType });
     }
     if (targetType === "structuredOutputs" && refs.structuredOutputs.includes(targetId)) {
-      referencingResources.push(resource.resourceId);
+      referencingResources.push({ resourceId: resource.resourceId, resourceType });
     }
     if (targetType === "assistants" && refs.assistants.includes(targetId)) {
-      referencingResources.push(resource.resourceId);
+      referencingResources.push({ resourceId: resource.resourceId, resourceType });
     }
     if (targetType === "personalities" && refs.personalities.includes(targetId)) {
-      referencingResources.push(resource.resourceId);
+      referencingResources.push({ resourceId: resource.resourceId, resourceType });
     }
     if (targetType === "scenarios" && refs.scenarios.includes(targetId)) {
-      referencingResources.push(resource.resourceId);
+      referencingResources.push({ resourceId: resource.resourceId, resourceType });
     }
     if (targetType === "simulations" && refs.simulations.includes(targetId)) {
-      referencingResources.push(resource.resourceId);
+      referencingResources.push({ resourceId: resource.resourceId, resourceType });
     }
   };
 
   // Check all resource types that might have references
   for (const resource of allResources.assistants) {
-    checkResource(resource);
+    checkResource(resource, "assistant");
   }
   for (const resource of allResources.structuredOutputs) {
-    checkResource(resource);
+    checkResource(resource, "structured output");
   }
   for (const resource of allResources.squads) {
-    checkResource(resource);
+    checkResource(resource, "squad");
   }
   for (const resource of allResources.simulations) {
-    checkResource(resource);
+    checkResource(resource, "simulation");
   }
   for (const resource of allResources.simulationSuites) {
-    checkResource(resource);
+    checkResource(resource, "simulation suite");
   }
 
   return referencingResources;
@@ -100,54 +105,62 @@ const DELETE_ENDPOINT_MAP: Record<ResourceType, string> = {
   simulationSuites: "/eval/simulation/suite",
 };
 
+// Map display type back to ReferenceableType for reference checking
+const REFERENCEABLE_TYPE_MAP: Record<string, ReferenceableType | null> = {
+  "tool": "tools",
+  "structured output": "structuredOutputs",
+  "assistant": "assistants",
+  "personality": "personalities",
+  "scenario": "scenarios",
+  "simulation": "simulations",
+  "simulation suite": null, // not referenceable by others
+  "squad": null,            // not referenceable by others
+};
+
 export async function deleteOrphanedResources(
   loadedResources: LoadedResources,
-  state: StateFile
+  state: StateFile,
+  typesToDelete?: ResourceType[]
 ): Promise<void> {
-  // Find all orphaned resources
-  const orphanedTools = findOrphanedResources(
-    loadedResources.tools.map((t) => t.resourceId),
-    state.tools
-  );
-  const orphanedOutputs = findOrphanedResources(
-    loadedResources.structuredOutputs.map((o) => o.resourceId),
-    state.structuredOutputs
-  );
-  const orphanedAssistants = findOrphanedResources(
-    loadedResources.assistants.map((a) => a.resourceId),
-    state.assistants
-  );
-  const orphanedSquads = findOrphanedResources(
-    loadedResources.squads.map((s) => s.resourceId),
-    state.squads
-  );
-  const orphanedPersonalities = findOrphanedResources(
-    loadedResources.personalities.map((p) => p.resourceId),
-    state.personalities
-  );
-  const orphanedScenarios = findOrphanedResources(
-    loadedResources.scenarios.map((s) => s.resourceId),
-    state.scenarios
-  );
-  const orphanedSimulations = findOrphanedResources(
-    loadedResources.simulations.map((s) => s.resourceId),
-    state.simulations
-  );
-  const orphanedSimulationSuites = findOrphanedResources(
-    loadedResources.simulationSuites.map((s) => s.resourceId),
-    state.simulationSuites
-  );
+  const shouldCheck = (type: ResourceType) =>
+    !typesToDelete || typesToDelete.includes(type);
 
-  // Collect all orphaned resources for summary
+  // Find orphaned resources (only for applicable types)
+  const orphanedTools = shouldCheck("tools")
+    ? findOrphanedResources(loadedResources.tools.map((t) => t.resourceId), state.tools)
+    : [];
+  const orphanedOutputs = shouldCheck("structuredOutputs")
+    ? findOrphanedResources(loadedResources.structuredOutputs.map((o) => o.resourceId), state.structuredOutputs)
+    : [];
+  const orphanedAssistants = shouldCheck("assistants")
+    ? findOrphanedResources(loadedResources.assistants.map((a) => a.resourceId), state.assistants)
+    : [];
+  const orphanedSquads = shouldCheck("squads")
+    ? findOrphanedResources(loadedResources.squads.map((s) => s.resourceId), state.squads)
+    : [];
+  const orphanedPersonalities = shouldCheck("personalities")
+    ? findOrphanedResources(loadedResources.personalities.map((p) => p.resourceId), state.personalities)
+    : [];
+  const orphanedScenarios = shouldCheck("scenarios")
+    ? findOrphanedResources(loadedResources.scenarios.map((s) => s.resourceId), state.scenarios)
+    : [];
+  const orphanedSimulations = shouldCheck("simulations")
+    ? findOrphanedResources(loadedResources.simulations.map((s) => s.resourceId), state.simulations)
+    : [];
+  const orphanedSimulationSuites = shouldCheck("simulationSuites")
+    ? findOrphanedResources(loadedResources.simulationSuites.map((s) => s.resourceId), state.simulationSuites)
+    : [];
+
+  // Collect all orphaned resources (in reverse dependency order for deletion)
   const allOrphaned = [
-    ...orphanedSimulationSuites.map((r) => ({ ...r, type: "simulation suite" as const })),
-    ...orphanedSimulations.map((r) => ({ ...r, type: "simulation" as const })),
-    ...orphanedScenarios.map((r) => ({ ...r, type: "scenario" as const })),
-    ...orphanedPersonalities.map((r) => ({ ...r, type: "personality" as const })),
-    ...orphanedSquads.map((r) => ({ ...r, type: "squad" as const })),
-    ...orphanedAssistants.map((r) => ({ ...r, type: "assistant" as const })),
-    ...orphanedOutputs.map((r) => ({ ...r, type: "structured output" as const })),
-    ...orphanedTools.map((r) => ({ ...r, type: "tool" as const })),
+    ...orphanedSimulationSuites.map((r) => ({ ...r, type: "simulation suite" as const, stateKey: "simulationSuites" as ResourceType })),
+    ...orphanedSimulations.map((r) => ({ ...r, type: "simulation" as const, stateKey: "simulations" as ResourceType })),
+    ...orphanedScenarios.map((r) => ({ ...r, type: "scenario" as const, stateKey: "scenarios" as ResourceType })),
+    ...orphanedPersonalities.map((r) => ({ ...r, type: "personality" as const, stateKey: "personalities" as ResourceType })),
+    ...orphanedSquads.map((r) => ({ ...r, type: "squad" as const, stateKey: "squads" as ResourceType })),
+    ...orphanedAssistants.map((r) => ({ ...r, type: "assistant" as const, stateKey: "assistants" as ResourceType })),
+    ...orphanedOutputs.map((r) => ({ ...r, type: "structured output" as const, stateKey: "structuredOutputs" as ResourceType })),
+    ...orphanedTools.map((r) => ({ ...r, type: "tool" as const, stateKey: "tools" as ResourceType })),
   ];
 
   // No orphaned resources - nothing to do
@@ -156,174 +169,74 @@ export async function deleteOrphanedResources(
     return;
   }
 
-  // Check for orphan references before deleting
-  const errors: string[] = [];
+  // Check references for each orphaned resource - partition into safe and blocked
+  const blocked: { resourceId: string; uuid: string; type: string; stateKey: ResourceType; refs: ResourceReference[] }[] = [];
+  const safeToDelete: typeof allOrphaned = [];
 
-  for (const { resourceId } of orphanedTools) {
-    const refs = findReferencingResources(resourceId, "tools", loadedResources);
-    if (refs.length > 0) {
-      errors.push(`Cannot delete tool "${resourceId}" - still referenced by: ${refs.join(", ")}`);
+  for (const orphan of allOrphaned) {
+    const refType = REFERENCEABLE_TYPE_MAP[orphan.type];
+    if (refType) {
+      const refs = findReferencingResources(orphan.resourceId, refType, loadedResources);
+      if (refs.length > 0) {
+        blocked.push({ ...orphan, refs });
+        continue;
+      }
     }
+    safeToDelete.push(orphan);
   }
 
-  for (const { resourceId } of orphanedOutputs) {
-    const refs = findReferencingResources(resourceId, "structuredOutputs", loadedResources);
-    if (refs.length > 0) {
-      errors.push(`Cannot delete structured output "${resourceId}" - still referenced by: ${refs.join(", ")}`);
+  // Show blocked resources
+  if (blocked.length > 0) {
+    console.log("  ⛔ Cannot delete (still referenced):\n");
+    for (const { resourceId, type, refs } of blocked) {
+      console.log(`     ${type}: ${resourceId}`);
+      for (const ref of refs) {
+        console.log(`       ↳ referenced by ${ref.resourceType}: ${ref.resourceId}`);
+      }
     }
+    console.log("\n  ℹ️  Remove the references above before these resources can be deleted.\n");
   }
 
-  for (const { resourceId } of orphanedAssistants) {
-    const refs = findReferencingResources(resourceId, "assistants", loadedResources);
-    if (refs.length > 0) {
-      errors.push(`Cannot delete assistant "${resourceId}" - still referenced by: ${refs.join(", ")}`);
-    }
-  }
-
-  for (const { resourceId } of orphanedPersonalities) {
-    const refs = findReferencingResources(resourceId, "personalities", loadedResources);
-    if (refs.length > 0) {
-      errors.push(`Cannot delete personality "${resourceId}" - still referenced by: ${refs.join(", ")}`);
-    }
-  }
-
-  for (const { resourceId } of orphanedScenarios) {
-    const refs = findReferencingResources(resourceId, "scenarios", loadedResources);
-    if (refs.length > 0) {
-      errors.push(`Cannot delete scenario "${resourceId}" - still referenced by: ${refs.join(", ")}`);
-    }
-  }
-
-  for (const { resourceId } of orphanedSimulations) {
-    const refs = findReferencingResources(resourceId, "simulations", loadedResources);
-    if (refs.length > 0) {
-      errors.push(`Cannot delete simulation "${resourceId}" - still referenced by: ${refs.join(", ")}`);
-    }
-  }
-
-  if (errors.length > 0) {
-    console.error("\n❌ Orphan reference errors:\n");
-    for (const error of errors) {
-      console.error(`   ${error}`);
-    }
-    console.error("\n   Remove the references before deleting these resources.\n");
-    throw new Error("Cannot delete resources that are still referenced");
+  // Nothing safe to delete
+  if (safeToDelete.length === 0) {
+    return;
   }
 
   // Dry-run mode (default): show what would be deleted
   if (!FORCE_DELETE) {
     console.log("  ⚠️  PENDING DELETIONS (dry-run mode):\n");
-    for (const { resourceId, uuid, type } of allOrphaned) {
+    for (const { resourceId, uuid, type } of safeToDelete) {
       console.log(`     🗑️  ${type}: ${resourceId} (${uuid})`);
     }
-    console.log(`\n  📋 Total: ${allOrphaned.length} resource(s) pending deletion`);
+    console.log(`\n  📋 Total: ${safeToDelete.length} resource(s) pending deletion`);
+    if (blocked.length > 0) {
+      console.log(`  ⛔ Skipped: ${blocked.length} resource(s) still referenced`);
+    }
     console.log("  ℹ️  These resources exist in Vapi but not in your local files.");
     console.log("  ℹ️  To delete them, run with --force flag:");
-    console.log("     npm run apply:dev -- --force\n");
-    console.log("  ℹ️  Or delete manually via Vapi Dashboard.\n");
+    console.log("     npm run apply:dev:force\n");
     return;
   }
 
-  // Force mode: actually delete
+  // Force mode: actually delete (already in reverse dependency order)
   console.log("  ⚠️  DELETING ORPHANED RESOURCES (--force enabled):\n");
 
-  // Delete in reverse dependency order:
-  // 1. Simulation suites (depends on simulations)
-  // 2. Simulations (depends on personalities, scenarios)
-  // 3. Scenarios, Personalities (no deps on other new types)
-  // 4. Squads (depends on assistants)
-  // 5. Assistants (depends on tools, structuredOutputs)
-  // 6. Structured outputs
-  // 7. Tools
-
-  for (const { resourceId, uuid } of orphanedSimulationSuites) {
+  let deleted = 0;
+  for (const { resourceId, uuid, type, stateKey } of safeToDelete) {
     try {
-      console.log(`  🗑️  Deleting simulation suite: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.simulationSuites}/${uuid}`);
-      delete state.simulationSuites[resourceId];
+      console.log(`  🗑️  Deleting ${type}: ${resourceId} (${uuid})`);
+      await vapiDelete(`${DELETE_ENDPOINT_MAP[stateKey]}/${uuid}`);
+      delete state[stateKey][resourceId];
+      deleted++;
     } catch (error) {
-      console.error(`  ❌ Failed to delete simulation suite ${resourceId}:`, error);
+      console.error(`  ❌ Failed to delete ${type} ${resourceId}:`, error);
       throw error;
     }
   }
 
-  for (const { resourceId, uuid } of orphanedSimulations) {
-    try {
-      console.log(`  🗑️  Deleting simulation: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.simulations}/${uuid}`);
-      delete state.simulations[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete simulation ${resourceId}:`, error);
-      throw error;
-    }
+  console.log(`\n  ✅ Deleted ${deleted} orphaned resource(s)`);
+  if (blocked.length > 0) {
+    console.log(`  ⛔ Skipped ${blocked.length} resource(s) still referenced`);
   }
-
-  for (const { resourceId, uuid } of orphanedScenarios) {
-    try {
-      console.log(`  🗑️  Deleting scenario: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.scenarios}/${uuid}`);
-      delete state.scenarios[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete scenario ${resourceId}:`, error);
-      throw error;
-    }
-  }
-
-  for (const { resourceId, uuid } of orphanedPersonalities) {
-    try {
-      console.log(`  🗑️  Deleting personality: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.personalities}/${uuid}`);
-      delete state.personalities[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete personality ${resourceId}:`, error);
-      throw error;
-    }
-  }
-
-  for (const { resourceId, uuid } of orphanedSquads) {
-    try {
-      console.log(`  🗑️  Deleting squad: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.squads}/${uuid}`);
-      delete state.squads[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete squad ${resourceId}:`, error);
-      throw error;
-    }
-  }
-
-  for (const { resourceId, uuid } of orphanedAssistants) {
-    try {
-      console.log(`  🗑️  Deleting assistant: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.assistants}/${uuid}`);
-      delete state.assistants[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete assistant ${resourceId}:`, error);
-      throw error;
-    }
-  }
-
-  for (const { resourceId, uuid } of orphanedOutputs) {
-    try {
-      console.log(`  🗑️  Deleting structured output: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.structuredOutputs}/${uuid}`);
-      delete state.structuredOutputs[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete structured output ${resourceId}:`, error);
-      throw error;
-    }
-  }
-
-  for (const { resourceId, uuid } of orphanedTools) {
-    try {
-      console.log(`  🗑️  Deleting tool: ${resourceId} (${uuid})`);
-      await vapiDelete(`${DELETE_ENDPOINT_MAP.tools}/${uuid}`);
-      delete state.tools[resourceId];
-    } catch (error) {
-      console.error(`  ❌ Failed to delete tool ${resourceId}:`, error);
-      throw error;
-    }
-  }
-
-  console.log(`\n  ✅ Deleted ${allOrphaned.length} orphaned resource(s)\n`);
+  console.log("");
 }
-

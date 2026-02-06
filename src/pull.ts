@@ -347,14 +347,14 @@ export async function pullResourceType(
   }
   
   console.log(`   Found ${resources.length} ${resourceType} in Vapi`);
-  
+
   const reverseMap = buildReverseMap(state, resourceType);
   const existingIds = new Set(Object.keys(state[resourceType]));
   const newStateSection: Record<string, string> = {};
-  
+
   let created = 0;
   let updated = 0;
-  
+
   for (const resource of resources) {
     // Check if we already have this resource in state (by UUID)
     let resourceId = reverseMap.get(resource.id);
@@ -369,13 +369,22 @@ export async function pullResourceType(
       updated++;
     }
     
+    // Detect platform defaults (orgId is null/missing — read-only, immutable)
+    const isPlatformDefault = resource.orgId === null || resource.orgId === undefined;
+
     // Clean and resolve references
     const cleaned = cleanResource(resource);
     const resolved = resolveReferencesToResourceIds(cleaned, state);
+
+    // Mark platform defaults so apply skips them
+    if (isPlatformDefault) {
+      resolved._platformDefault = true;
+    }
     
     // Write to file
     const filePath = await writeResourceFile(resourceType, resourceId, resolved);
-    console.log(`   ${isNew ? "✨" : "📝"} ${resourceId} -> ${filePath}`);
+    const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
+    console.log(`   ${icon} ${resourceId} -> ${filePath}${isPlatformDefault ? " (platform default, read-only)" : ""}`);
     
     // Update state
     newStateSection[resourceId] = resource.id;
