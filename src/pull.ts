@@ -141,22 +141,10 @@ function extractName(resource: VapiResource): string | undefined {
   return undefined;
 }
 
-function generateResourceId(resource: VapiResource, existingIds: Set<string>): string {
+function generateResourceId(resource: VapiResource): string {
   const name = extractName(resource);
-  const baseName = name
-    ? slugify(name)
-    : `resource-${resource.id.slice(0, 8)}`;
-  
-  let resourceId = baseName;
-  let counter = 1;
-  
-  // Ensure uniqueness
-  while (existingIds.has(resourceId)) {
-    resourceId = `${baseName}-${counter}`;
-    counter++;
-  }
-  
-  return resourceId;
+  const shortId = resource.id.slice(0, 8);
+  return name ? `${slugify(name)}-${shortId}` : `resource-${shortId}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -407,7 +395,6 @@ export async function pullResourceType(
   console.log(`   Found ${resources.length} ${resourceType} in Vapi`);
 
   const reverseMap = buildReverseMap(state, resourceType);
-  const existingIds = new Set(Object.keys(state[resourceType]));
   const newStateSection: Record<string, string> = {};
 
   let created = 0;
@@ -420,9 +407,7 @@ export async function pullResourceType(
     const isNew = !resourceId;
     
     if (!resourceId) {
-      // Generate new resource ID
-      resourceId = generateResourceId(resource, existingIds);
-      existingIds.add(resourceId);
+      resourceId = generateResourceId(resource);
     }
 
     // Skip files that have been locally modified or deleted (default mode)
