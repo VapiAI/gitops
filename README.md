@@ -62,8 +62,10 @@ echo "VAPI_TOKEN=your-token-here" > .env.dev
 | Command | Description |
 |---------|-------------|
 | `npm run build` | Type-check the codebase |
-| `npm run pull:dev` | Pull platform state, merge with local changes |
-| `npm run pull:prod` | Pull from prod, merge with local changes |
+| `npm run pull:dev` | Pull platform state, preserve local changes |
+| `npm run pull:dev:force` | Pull platform state, overwrite everything |
+| `npm run pull:prod` | Pull from prod, preserve local changes |
+| `npm run pull:prod:force` | Pull from prod, overwrite everything |
 | `npm run push:dev` | Push local files to Vapi (dev) |
 | `npm run push:prod` | Push local files to Vapi (prod) |
 | `npm run apply:dev` | Pull → Merge → Push in one shot (dev) |
@@ -76,50 +78,51 @@ echo "VAPI_TOKEN=your-token-here" > .env.dev
 ### Basic Workflow
 
 ```bash
-# First time: pull existing resources from Vapi
-npm run pull:dev
+# First time: pull all resources from Vapi
+npm run pull:dev:force
 
 # Commit the initial state
 git add . && git commit -m "initial pull"
 
 # Make changes to YAML/MD files...
 
-# Safe sync: pull latest platform changes, merge, push
-npm run apply:dev
-```
-
-#### Pull → Edit → Push (manual two-step)
-
-If you want more control over each step:
-
-```bash
-# Pull platform state (auto-merges with your local changes via git stash/pop)
-npm run pull:dev
-
-# Review the merged result, make further edits...
-
-# Push to platform
+# Push changes to Vapi
 npm run push:dev
 ```
 
-#### Handling Merge Conflicts
+#### Pulling Without Losing Local Work
 
-If platform changes conflict with your local edits, `pull` will leave standard git conflict markers in the affected files and exit:
+By default, `pull` preserves any files you've locally modified or deleted:
 
 ```bash
+# Edit an assistant locally...
+
 npm run pull:dev
-# ⚠️  Merge conflicts detected!
+# ⏭️  my-assistant (locally changed, skipping)
+# ✨  new-tool -> resources/tools/new-tool.yml
+# Your edits are preserved, new platform resources are downloaded
+```
 
-# See which files have conflicts
-git diff --name-only --diff-filter=U
+#### Force Pull (Platform as Source of Truth)
 
-# Edit files to resolve conflicts (remove <<<< ==== >>>> markers)
+When you want the platform version of everything, overwriting all local files:
 
-# Push resolved state
-npm run push:dev
+```bash
+npm run pull:dev:force
+# ⚡ Force mode: overwriting all local files with platform state
+```
 
-# Clean up the stash
-git stash drop
+#### Reviewing Platform Changes
+
+```bash
+# Pull platform state (your local changes are preserved)
+npm run pull:dev
+
+# See what changed on the platform vs your last commit
+git diff
+
+# Accept platform changes for a specific file
+git checkout -- resources/tools/some-tool.yml
 ```
 
 ### Selective Push (Partial Sync)
@@ -471,30 +474,24 @@ model:
 
 ### Sync Workflow
 
-The engine uses git's merge capabilities to safely combine local and platform changes:
+Your local files are the source of truth. The engine respects that:
 
 ```
-┌─────────┐     ┌──────────┐     ┌──────────┐
-│  pull    │ ──▸ │  merge   │ ──▸ │  push    │
-│ platform │     │ (git     │     │ to       │
-│ state    │     │  stash/  │     │ platform │
-│          │     │  pop)    │     │          │
-└─────────┘     └──────────┘     └──────────┘
+pull (default)     pull --force        push
+─────────────      ─────────────       ─────────────
+Download from      Download from       Upload local
+platform, skip     platform, overwrite files to
+locally changed    everything          platform
+files
 ```
 
-**`pull`** does the heavy lifting:
-1. Detects local uncommitted changes → `git stash`
-2. Downloads fresh platform state (overwrites resource files)
-3. Reapplies local changes on top → `git stash pop`
-4. Git's three-way merge reconciles both sets of changes
-5. If conflicts: leaves standard `<<<<<<<` markers, exits for manual resolution
-6. If clean: working tree has merged files ready to push
+**`pull`** downloads platform state. In default mode (git repo required), it detects locally modified or deleted files and skips them — your local work is preserved. New platform resources are still downloaded. Use `--force` to overwrite everything.
 
-**`push`** is the engine — reads local files and syncs them to the platform.
+**`push`** is the engine — reads local files and syncs them to the platform. Deleted files are removed from the platform.
 
-**`apply`** is the convenience wrapper — runs `pull` then `push` in sequence. Stops if pull has conflicts.
+**`apply`** is the convenience wrapper — runs `pull` then `push` in sequence.
 
-> **Note:** `pull` requires a git repo with at least one commit. Without git, it falls back to a simple overwrite (no merge support).
+> **Note:** The "skip locally changed files" feature requires a git repo with at least one commit. Without git, pull always overwrites (same as `--force`).
 
 ### Processing Order
 

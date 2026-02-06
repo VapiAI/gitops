@@ -54,7 +54,7 @@ const FOLDER_MAP: Record<ResourceType, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Git Helpers (merge support — stash local changes before pull, reapply after)
+// Git Helpers (detect locally changed files to skip during pull)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function gitCmd(args: string): string {
@@ -73,8 +73,22 @@ function gitHasCommits(): boolean {
   try { gitCmd("rev-parse HEAD"); return true; } catch { return false; }
 }
 
-function gitHasChanges(): boolean {
-  return gitCmd("status --porcelain").length > 0;
+// Returns relative paths of all locally modified, deleted, or untracked files
+function getLocallyChangedFiles(): Set<string> {
+  const status = gitCmd("status --porcelain");
+  const files = new Set<string>();
+  for (const line of status.split("\n")) {
+    if (!line.trim()) continue;
+    // format: XY filename  (or XY "filename" for special chars)
+    let filePath = line.slice(3);
+    // Handle renames: "old -> new"
+    const arrowIdx = filePath.indexOf(" -> ");
+    if (arrowIdx !== -1) filePath = filePath.slice(arrowIdx + 4);
+    // Strip quotes if present
+    filePath = filePath.replace(/^"|"$/g, "").trim();
+    files.add(filePath);
+  }
+  return files;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -373,11 +387,13 @@ async function writeResourceFile(
 export interface PullStats {
   created: number;
   updated: number;
+  skipped: number;
 }
 
 export async function pullResourceType(
   resourceType: ResourceType,
-  state: StateFile
+  state: StateFile,
+  changedFiles?: Set<string>,
 ): Promise<PullStats> {
   console.log(`\n📥 Pulling ${resourceType}...`);
   
@@ -385,7 +401,7 @@ export async function pullResourceType(
   
   if (!Array.isArray(resources)) {
     console.log(`   ⚠️  No ${resourceType} found (API returned non-array)`);
-    return { created: 0, updated: 0 };
+    return { created: 0, updated: 0, skipped: 0 };
   }
   
   console.log(`   Found ${resources.length} ${resourceType} in Vapi`);
@@ -396,6 +412,7 @@ export async function pullResourceType(
 
   let created = 0;
   let updated = 0;
+  let skipped = 0;
 
   for (const resource of resources) {
     // Check if we already have this resource in state (by UUID)
@@ -406,9 +423,19 @@ export async function pullResourceType(
       // Generate new resource ID
       resourceId = generateResourceId(resource, existingIds);
       existingIds.add(resourceId);
-      created++;
-    } else {
-      updated++;
+    }
+
+    // Skip files that have been locally modified or deleted (default mode)
+    if (changedFiles) {
+      const folderPath = FOLDER_MAP[resourceType];
+      const mdPath = join("resources", folderPath, `${resourceId}.md`);
+      const ymlPath = join("resources", folderPath, `${resourceId}.yml`);
+      if (changedFiles.has(mdPath) || changedFiles.has(ymlPath)) {
+        console.log(`   ⏭️  ${resourceId} (locally changed, skipping)`);
+        newStateSection[resourceId] = resource.id;
+        skipped++;
+        continue;
+      }
     }
     
     // Detect platform defaults (orgId is null/missing — read-only, immutable)
@@ -429,6 +456,9 @@ export async function pullResourceType(
     const relPath = relative(BASE_DIR, filePath);
     console.log(`   ${icon} ${resourceId} -> ${relPath}${isPlatformDefault ? " (platform default, read-only)" : ""}`);
     
+    if (isNew) created++;
+    else updated++;
+
     // Update state
     newStateSection[resourceId] = resource.id;
   }
@@ -436,7 +466,7 @@ export async function pullResourceType(
   // Update state with new mappings
   state[resourceType] = newStateSection;
   
-  return { created, updated };
+  return { created, updated, skipped };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -444,80 +474,74 @@ export async function pullResourceType(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const force = process.argv.includes("--force");
+
   console.log("═══════════════════════════════════════════════════════════════");
-  console.log(`🔄 Vapi GitOps Pull - Environment: ${VAPI_ENV}`);
+  console.log(`🔄 Vapi GitOps Pull - Environment: ${VAPI_ENV}${force ? " (force)" : ""}`);
   console.log(`   API: ${VAPI_BASE_URL}`);
   console.log("═══════════════════════════════════════════════════════════════");
 
-  // Git merge support: stash local changes before overwriting with platform state
-  const gitEnabled = isGitRepo() && gitHasCommits();
-  const hadLocalChanges = gitEnabled && gitHasChanges();
+  // Default mode: skip locally changed files (local is source of truth)
+  // Force mode: overwrite everything (platform is source of truth)
+  let changedFiles: Set<string> | undefined;
+  const gitEnabled = !force && isGitRepo() && gitHasCommits();
 
-  if (hadLocalChanges) {
-    console.log("\n📦 Stashing local changes before pull...");
-    gitCmd('stash push -m "gitops: stash before pull"');
-    console.log("   ✅ Local changes stashed\n");
-  } else if (gitEnabled) {
-    console.log("\n📦 No local changes to stash\n");
+  if (gitEnabled) {
+    changedFiles = getLocallyChangedFiles();
+    // Only keep resource files — non-resource changes don't matter
+    for (const f of changedFiles) {
+      if (!f.startsWith("resources/")) changedFiles.delete(f);
+    }
+    if (changedFiles.size > 0) {
+      console.log(`\n📦 ${changedFiles.size} locally changed file(s) will be preserved`);
+      console.log("   Use --force to overwrite all local files with platform state");
+    }
+  } else if (force) {
+    console.log("\n⚡ Force mode: overwriting all local files with platform state");
   }
 
   const state = loadState();
 
+  const zero: PullStats = { created: 0, updated: 0, skipped: 0 };
   const stats: Record<string, PullStats> = {
-    tools: { created: 0, updated: 0 },
-    structuredOutputs: { created: 0, updated: 0 },
-    assistants: { created: 0, updated: 0 },
-    squads: { created: 0, updated: 0 },
-    personalities: { created: 0, updated: 0 },
-    scenarios: { created: 0, updated: 0 },
-    simulations: { created: 0, updated: 0 },
-    simulationSuites: { created: 0, updated: 0 },
+    tools: { ...zero },
+    structuredOutputs: { ...zero },
+    assistants: { ...zero },
+    squads: { ...zero },
+    personalities: { ...zero },
+    scenarios: { ...zero },
+    simulations: { ...zero },
+    simulationSuites: { ...zero },
   };
 
   // Pull in dependency order
-  stats.tools = await pullResourceType("tools", state);
-  stats.structuredOutputs = await pullResourceType("structuredOutputs", state);
-  stats.assistants = await pullResourceType("assistants", state);
-  stats.squads = await pullResourceType("squads", state);
-  stats.personalities = await pullResourceType("personalities", state);
-  stats.scenarios = await pullResourceType("scenarios", state);
-  stats.simulations = await pullResourceType("simulations", state);
-  stats.simulationSuites = await pullResourceType("simulationSuites", state);
+  stats.tools = await pullResourceType("tools", state, changedFiles);
+  stats.structuredOutputs = await pullResourceType("structuredOutputs", state, changedFiles);
+  stats.assistants = await pullResourceType("assistants", state, changedFiles);
+  stats.squads = await pullResourceType("squads", state, changedFiles);
+  stats.personalities = await pullResourceType("personalities", state, changedFiles);
+  stats.scenarios = await pullResourceType("scenarios", state, changedFiles);
+  stats.simulations = await pullResourceType("simulations", state, changedFiles);
+  stats.simulationSuites = await pullResourceType("simulationSuites", state, changedFiles);
 
-  // Reapply local changes on top of pulled platform state
-  let hasConflicts = false;
-  if (hadLocalChanges) {
-    console.log("\n📦 Reapplying local changes...");
-    try {
-      gitCmd("stash pop");
-      console.log("   ✅ Local changes merged cleanly\n");
-    } catch {
-      hasConflicts = true;
-    }
-  }
-
-  // Always save state last — overwrites any stash-induced changes to the state file
   await saveState(state);
 
-  if (hasConflicts) {
-    console.error("\n⚠️  Merge conflicts detected!");
-    console.error("   Platform changes conflict with your local changes.\n");
-    console.error("   To see conflicted files:");
-    console.error("     git diff --name-only --diff-filter=U\n");
-    console.error("   After resolving conflicts:");
-    console.error(`     npm run push:${VAPI_ENV}    # push to platform`);
-    console.error("     git stash drop              # clean up the stash\n");
-    process.exit(1);
-  }
-
   // Summary
+  const totalSkipped = Object.values(stats).reduce((sum, s) => sum + s.skipped, 0);
   console.log("\n═══════════════════════════════════════════════════════════════");
   console.log("✅ Pull complete!");
   console.log("═══════════════════════════════════════════════════════════════\n");
 
   console.log("📋 Summary:");
-  for (const [type, { created, updated }] of Object.entries(stats)) {
-    console.log(`   ${type}: ${created} new, ${updated} existing`);
+  for (const [type, { created, updated, skipped }] of Object.entries(stats)) {
+    const parts = [`${created} new`, `${updated} updated`];
+    if (skipped > 0) parts.push(`${skipped} skipped`);
+    console.log(`   ${type}: ${parts.join(", ")}`);
+  }
+
+  if (totalSkipped > 0) {
+    console.log(`\n   ℹ️  ${totalSkipped} file(s) preserved (locally changed)`);
+    console.log("   Run with --force to overwrite: npm run pull:dev:force");
   }
 }
 
