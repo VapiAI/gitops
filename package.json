@@ -7,6 +7,10 @@
   "scripts": {
     "apply:dev": "tsx src/apply.ts dev",
     "apply:prod": "tsx src/apply.ts prod",
+    "push:dev": "tsx src/push.ts dev",
+    "push:prod": "tsx src/push.ts prod",
+    "push:dev:force": "tsx src/push.ts dev --force",
+    "push:prod:force": "tsx src/push.ts prod --force",
     "pull:dev": "tsx src/pull.ts dev",
     "pull:prod": "tsx src/pull.ts prod",
     "call:dev": "tsx src/call.ts dev",
