@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import { mkdir, writeFile } from "fs/promises";
 import { join, dirname, relative } from "path";
 import { stringify } from "yaml";
-import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN, RESOURCES_DIR, BASE_DIR } from "./config.ts";
+import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN, RESOURCES_DIR, BASE_DIR, APPLY_FILTER } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import type { StateFile, ResourceType } from "./types.ts";
 
@@ -461,9 +461,14 @@ export async function pullResourceType(
 async function main(): Promise<void> {
   const force = process.argv.includes("--force");
 
+  const typeFilter = APPLY_FILTER.resourceTypes;
+
   console.log("═══════════════════════════════════════════════════════════════");
   console.log(`🔄 Vapi GitOps Pull - Environment: ${VAPI_ENV}${force ? " (force)" : ""}`);
   console.log(`   API: ${VAPI_BASE_URL}`);
+  if (typeFilter?.length) {
+    console.log(`   Filter: ${typeFilter.join(", ")}`);
+  }
   console.log("═══════════════════════════════════════════════════════════════");
 
   // Default mode: skip locally changed files (local is source of truth)
@@ -499,15 +504,19 @@ async function main(): Promise<void> {
     simulationSuites: { ...zero },
   };
 
-  // Pull in dependency order
-  stats.tools = await pullResourceType("tools", state, changedFiles);
-  stats.structuredOutputs = await pullResourceType("structuredOutputs", state, changedFiles);
-  stats.assistants = await pullResourceType("assistants", state, changedFiles);
-  stats.squads = await pullResourceType("squads", state, changedFiles);
-  stats.personalities = await pullResourceType("personalities", state, changedFiles);
-  stats.scenarios = await pullResourceType("scenarios", state, changedFiles);
-  stats.simulations = await pullResourceType("simulations", state, changedFiles);
-  stats.simulationSuites = await pullResourceType("simulationSuites", state, changedFiles);
+  // Pull in reverse-resolution order: pull resources that are referenced by others first,
+  // so their state is populated when resolving references (UUID → resourceId) in dependent types.
+  // e.g. structuredOutputs reference assistants, so assistants must be pulled first.
+  const shouldPull = (type: ResourceType) => !typeFilter?.length || typeFilter.includes(type);
+
+  if (shouldPull("tools")) stats.tools = await pullResourceType("tools", state, changedFiles);
+  if (shouldPull("assistants")) stats.assistants = await pullResourceType("assistants", state, changedFiles);
+  if (shouldPull("structuredOutputs")) stats.structuredOutputs = await pullResourceType("structuredOutputs", state, changedFiles);
+  if (shouldPull("squads")) stats.squads = await pullResourceType("squads", state, changedFiles);
+  if (shouldPull("personalities")) stats.personalities = await pullResourceType("personalities", state, changedFiles);
+  if (shouldPull("scenarios")) stats.scenarios = await pullResourceType("scenarios", state, changedFiles);
+  if (shouldPull("simulations")) stats.simulations = await pullResourceType("simulations", state, changedFiles);
+  if (shouldPull("simulationSuites")) stats.simulationSuites = await pullResourceType("simulationSuites", state, changedFiles);
 
   await saveState(state);
 

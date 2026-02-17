@@ -44,8 +44,9 @@ async function main(): Promise<void> {
   console.log("   Pull → Merge → Push");
   console.log("═══════════════════════════════════════════════════════════════\n");
 
-  // Step 1: Pull with merge
-  const pullExit = runPassthrough(`npx tsx src/pull.ts ${env}`);
+  // Step 1: Pull with merge (forward filters so only matching types are pulled)
+  const pullCmd = `npx tsx src/pull.ts ${env} ${extraArgs}`.trim();
+  const pullExit = runPassthrough(pullCmd);
   if (pullExit !== 0) {
     console.error("\n❌ Pull had issues. Resolve conflicts before pushing.");
     process.exit(1);
