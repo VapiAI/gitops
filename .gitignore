@@ -5,6 +5,7 @@ node_modules/
 .env
 .env.dev
 .env.staging
+.env.stg
 .env.prod
 .env.local
 .env.*.local
