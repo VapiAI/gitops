@@ -13,7 +13,7 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
 
-const VALID_ENVIRONMENTS = ["dev", "staging", "prod"] as const;
+const VALID_ENVIRONMENTS = ["dev", "stg", "prod"] as const;
 
 function runPassthrough(cmd: string): number {
   try {
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   const extraArgs = process.argv.slice(3).join(" ");
 
   if (!env || !VALID_ENVIRONMENTS.includes(env as typeof VALID_ENVIRONMENTS[number])) {
-    console.error("Usage: npm run apply:dev | apply:prod");
+    console.error("Usage: npm run apply:dev | apply:stg | apply:prod");
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");

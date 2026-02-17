@@ -34,9 +34,9 @@ export type ResourceType =
   | "simulations"
   | "simulationSuites";
 
-export type Environment = "dev" | "staging" | "prod";
+export type Environment = "dev" | "stg" | "prod";
 
-export const VALID_ENVIRONMENTS: readonly Environment[] = ["dev", "staging", "prod"];
+export const VALID_ENVIRONMENTS: readonly Environment[] = ["dev", "stg", "prod"];
 
 export const VALID_RESOURCE_TYPES: readonly ResourceType[] = [
   "tools",

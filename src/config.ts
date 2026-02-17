@@ -31,7 +31,7 @@ function parseEnvironment(): Environment {
 
   if (!envArg) {
     console.error("❌ Environment argument is required");
-    console.error("   Usage: npm run apply:dev | apply:prod");
+    console.error("   Usage: npm run apply:dev | apply:stg | apply:prod");
     console.error("   Flags: --force (enable deletions)");
     console.error("          --type <type> (apply only specific resource type)");
     console.error("          -- <file...> (apply only specific files)");
@@ -127,7 +127,7 @@ function parseFlags(): { forceDelete: boolean; applyFilter: ApplyFilter } {
 
 function loadEnvFile(env: string, baseDir: string): void {
   const envFiles = [
-    join(baseDir, `.env.${env}`),       // .env.dev, .env.staging, .env.prod
+    join(baseDir, `.env.${env}`),       // .env.dev, .env.stg, .env.prod
     join(baseDir, `.env.${env}.local`), // .env.dev.local (for local overrides)
     join(baseDir, ".env.local"),        // .env.local (always loaded last)
   ];
