@@ -161,6 +161,38 @@ npm run push:dev assistants resources/assistants/booking.md
 
 **Note:** Partial pushes skip deletion checks. Run full `npm run push:dev` to sync deletions.
 
+#### Auto-Dependency Resolution
+
+Partial push is ideal for promoting specific squads or assistants to staging/prod without pushing everything. The engine automatically detects and creates missing dependencies:
+
+```bash
+# Push a single squad to staging — tools, structured outputs, and
+# assistants are created automatically if they don't exist yet
+npm run push:stg resources/squads/everblue-voice-squad-20374c37.yml
+
+# Push assistants to prod — missing tools and structured outputs
+# are auto-applied first so references resolve correctly
+npm run push:prod assistants
+```
+
+The dependency chain resolves recursively:
+
+```
+Squad push
+  └─ missing assistants? → auto-create them first
+       └─ missing tools / structured outputs? → auto-create those first
+            └─ then create the assistant
+  └─ all references resolved → create the squad ✓
+
+Assistant push
+  └─ missing tools / structured outputs? → auto-create them first
+  └─ all references resolved → create the assistant ✓
+```
+
+If a dependency already exists on the platform (UUID in the state file) but its nested dependencies don't, those are still auto-created and the parent resource is updated to reference them.
+
+This means you can work on everything in dev, then selectively push a single squad or assistant to staging or prod — no need for a full `push` that touches every resource.
+
 ---
 
 ## Project Structure

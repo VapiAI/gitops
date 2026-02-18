@@ -2,7 +2,7 @@ import { vapiRequest, VapiApiError } from "./api.ts";
 import { VAPI_ENV, VAPI_BASE_URL, FORCE_DELETE, APPLY_FILTER, removeExcludedKeys } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
-import { resolveReferences, resolveAssistantIds } from "./resolver.ts";
+import { resolveReferences, resolveAssistantIds, extractReferencedIds } from "./resolver.ts";
 import { credentialForwardMap, deepReplaceValues } from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
 import type { ResourceFile, StateFile, ResourceType, LoadedResources } from "./types.ts";
@@ -383,6 +383,121 @@ function filterResourcesByPaths<T>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Auto-Dependency Resolution
+// When pushing a resource with missing dependencies, auto-apply them first
+// Chain: squads → assistants → tools + structuredOutputs
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DependencyContext {
+  allTools: ResourceFile<Record<string, unknown>>[];
+  allStructuredOutputs: ResourceFile<Record<string, unknown>>[];
+  allAssistants: ResourceFile<Record<string, unknown>>[];
+  state: StateFile;
+  applied: Record<ResourceType, number>;
+  autoApplied: Set<string>;
+  autoAppliedTools: ResourceFile<Record<string, unknown>>[];
+  autoAppliedStructuredOutputs: ResourceFile<Record<string, unknown>>[];
+}
+
+async function ensureToolExists(toolId: string, ctx: DependencyContext): Promise<void> {
+  if (UUID_REGEX.test(toolId) || ctx.state.tools[toolId] || ctx.autoApplied.has(`tools:${toolId}`)) return;
+
+  const tool = ctx.allTools.find(t => t.resourceId === toolId);
+  if (!tool) return;
+
+  console.log(`  📦 Auto-applying dependency → tool: ${toolId}`);
+  try {
+    const uuid = await applyTool(tool, ctx.state);
+    ctx.state.tools[tool.resourceId] = uuid;
+    ctx.applied.tools++;
+    ctx.autoApplied.add(`tools:${toolId}`);
+    ctx.autoAppliedTools.push(tool);
+  } catch (error) {
+    console.error(formatApiError(toolId, error));
+    throw error;
+  }
+}
+
+async function ensureStructuredOutputExists(outputId: string, ctx: DependencyContext): Promise<void> {
+  if (UUID_REGEX.test(outputId) || ctx.state.structuredOutputs[outputId] || ctx.autoApplied.has(`structuredOutputs:${outputId}`)) return;
+
+  const output = ctx.allStructuredOutputs.find(o => o.resourceId === outputId);
+  if (!output) return;
+
+  console.log(`  📦 Auto-applying dependency → structured output: ${outputId}`);
+  try {
+    const uuid = await applyStructuredOutput(output, ctx.state);
+    ctx.state.structuredOutputs[output.resourceId] = uuid;
+    ctx.applied.structuredOutputs++;
+    ctx.autoApplied.add(`structuredOutputs:${outputId}`);
+    ctx.autoAppliedStructuredOutputs.push(output);
+  } catch (error) {
+    console.error(formatApiError(outputId, error));
+    throw error;
+  }
+}
+
+async function ensureAssistantDepsExist(assistantId: string, ctx: DependencyContext): Promise<boolean> {
+  if (UUID_REGEX.test(assistantId)) return false;
+
+  const assistant = ctx.allAssistants.find(a => a.resourceId === assistantId);
+  if (!assistant) return false;
+
+  const refs = extractReferencedIds(assistant.data as Record<string, unknown>);
+  let depsCreated = false;
+
+  for (const toolId of refs.tools) {
+    if (!UUID_REGEX.test(toolId) && !ctx.state.tools[toolId]) {
+      await ensureToolExists(toolId, ctx);
+      if (ctx.state.tools[toolId]) depsCreated = true;
+    }
+  }
+  for (const outputId of refs.structuredOutputs) {
+    if (!UUID_REGEX.test(outputId) && !ctx.state.structuredOutputs[outputId]) {
+      await ensureStructuredOutputExists(outputId, ctx);
+      if (ctx.state.structuredOutputs[outputId]) depsCreated = true;
+    }
+  }
+
+  return depsCreated;
+}
+
+async function ensureAssistantExists(assistantId: string, ctx: DependencyContext): Promise<void> {
+  if (UUID_REGEX.test(assistantId)) return;
+
+  // Always resolve tool/SO deps, even if the assistant already exists in state
+  const depsCreated = await ensureAssistantDepsExist(assistantId, ctx);
+
+  // Assistant already on platform — update it if we just created missing deps
+  if (ctx.state.assistants[assistantId]) {
+    if (depsCreated) {
+      const assistant = ctx.allAssistants.find(a => a.resourceId === assistantId);
+      if (assistant) {
+        console.log(`  🔄 Updating assistant with new dependencies: ${assistantId}`);
+        await applyAssistant(assistant, ctx.state);
+      }
+    }
+    return;
+  }
+
+  if (ctx.autoApplied.has(`assistants:${assistantId}`)) return;
+
+  const assistant = ctx.allAssistants.find(a => a.resourceId === assistantId);
+  if (!assistant) return;
+
+  console.log(`  📦 Auto-applying dependency → assistant: ${assistantId}`);
+  try {
+    const uuid = await applyAssistant(assistant, ctx.state);
+    ctx.state.assistants[assistant.resourceId] = uuid;
+    ctx.applied.assistants++;
+    ctx.autoApplied.add(`assistants:${assistantId}`);
+  } catch (error) {
+    console.error(formatApiError(assistantId, error));
+    throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Apply Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -488,6 +603,16 @@ async function main(): Promise<void> {
     ? filterResourcesByPaths(allSimulationSuites, "simulationSuites") 
     : [];
 
+  // Auto-dependency resolution context
+  const autoApplied = new Set<string>();
+  const autoAppliedTools: ResourceFile<Record<string, unknown>>[] = [];
+  const autoAppliedStructuredOutputs: ResourceFile<Record<string, unknown>>[] = [];
+  const depCtx: DependencyContext = {
+    allTools, allStructuredOutputs, allAssistants,
+    state, applied, autoApplied,
+    autoAppliedTools, autoAppliedStructuredOutputs,
+  };
+
   // Determine which types to check for orphaned deletions
   // Full apply: check all types. Partial apply: only check the filtered type(s).
   let typesToDelete: ResourceType[] | undefined;
@@ -562,7 +687,18 @@ async function main(): Promise<void> {
 
   if (assistants.length > 0) {
     console.log("\n🤖 Applying assistants...\n");
+    // Auto-resolve missing tool & structured output dependencies
     for (const assistant of assistants) {
+      const refs = extractReferencedIds(assistant.data as Record<string, unknown>);
+      for (const toolId of refs.tools) {
+        await ensureToolExists(toolId, depCtx);
+      }
+      for (const outputId of refs.structuredOutputs) {
+        await ensureStructuredOutputExists(outputId, depCtx);
+      }
+    }
+    for (const assistant of assistants) {
+      if (autoApplied.has(`assistants:${assistant.resourceId}`)) continue;
       try {
         const uuid = await applyAssistant(assistant, state);
         state.assistants[assistant.resourceId] = uuid;
@@ -576,6 +712,13 @@ async function main(): Promise<void> {
 
   if (squads.length > 0) {
     console.log("\n👥 Applying squads...\n");
+    // Auto-resolve missing assistant dependencies (recursively resolves tools/SOs)
+    for (const squad of squads) {
+      const refs = extractReferencedIds(squad.data as Record<string, unknown>);
+      for (const assistantId of refs.assistants) {
+        await ensureAssistantExists(assistantId, depCtx);
+      }
+    }
     for (const squad of squads) {
       try {
         const uuid = await applySquad(squad, state);
@@ -644,15 +787,17 @@ async function main(): Promise<void> {
     }
   }
 
-  // Second pass: Link resources to assistants (only for tools/structuredOutputs being applied)
-  if (tools.length > 0) {
+  // Second pass: Link resources to assistants (include auto-applied deps)
+  const allAppliedTools = [...tools, ...autoAppliedTools];
+  if (allAppliedTools.length > 0) {
     console.log("\n🔗 Linking tools to assistant destinations...\n");
-    await updateToolAssistantRefs(tools, state);
+    await updateToolAssistantRefs(allAppliedTools, state);
   }
 
-  if (structuredOutputs.length > 0) {
+  const allAppliedOutputs = [...structuredOutputs, ...autoAppliedStructuredOutputs];
+  if (allAppliedOutputs.length > 0) {
     console.log("\n🔗 Linking structured outputs to assistants...\n");
-    await updateStructuredOutputAssistantRefs(structuredOutputs, state);
+    await updateStructuredOutputAssistantRefs(allAppliedOutputs, state);
   }
 
   // Save updated state
