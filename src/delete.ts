@@ -1,4 +1,4 @@
-import { vapiDelete } from "./api.ts";
+import { vapiDelete, VapiApiError } from "./api.ts";
 import { FORCE_DELETE } from "./config.ts";
 import { extractReferencedIds } from "./resolver.ts";
 import type {
@@ -229,7 +229,8 @@ export async function deleteOrphanedResources(
       delete state[stateKey][resourceId];
       deleted++;
     } catch (error) {
-      console.error(`  ❌ Failed to delete ${type} ${resourceId}:`, error);
+      const msg = error instanceof VapiApiError ? error.apiMessage : (error instanceof Error ? error.message : String(error));
+      console.error(`  ❌ Failed to delete ${type} ${resourceId}: ${msg}`);
       throw error;
     }
   }

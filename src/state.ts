@@ -9,6 +9,7 @@ import type { StateFile } from "./types.ts";
 
 function createEmptyState(): StateFile {
   return {
+    credentials: {},
     assistants: {},
     structuredOutputs: {},
     tools: {},

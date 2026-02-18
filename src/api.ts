@@ -5,6 +5,28 @@ import type { VapiResponse } from "./types.ts";
 // HTTP Client for Vapi API
 // ─────────────────────────────────────────────────────────────────────────────
 
+export class VapiApiError extends Error {
+  constructor(
+    public readonly method: string,
+    public readonly endpoint: string,
+    public readonly statusCode: number,
+    public readonly apiMessage: string,
+    public readonly rawBody: string,
+  ) {
+    super(`API ${method} ${endpoint} failed (${statusCode}): ${apiMessage}`);
+    this.name = "VapiApiError";
+  }
+}
+
+function parseApiMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    if (typeof parsed.message === "string") return parsed.message;
+    if (Array.isArray(parsed.message)) return parsed.message.join("; ");
+  } catch { /* not JSON, use raw body */ }
+  return body;
+}
+
 const MAX_RETRIES = 5;
 const INITIAL_DELAY_MS = 2000;
 const REQUEST_DELAY_MS = 700; // Delay between requests to avoid rate limits
@@ -55,12 +77,10 @@ export async function vapiRequest<T = VapiResponse>(
     }
 
     const errorText = await response.text();
-    throw new Error(
-      `API ${method} ${endpoint} failed (${response.status}): ${errorText}`
-    );
+    throw new VapiApiError(method, endpoint, response.status, parseApiMessage(errorText), errorText);
   }
 
-  throw new Error(`API ${method} ${endpoint} failed: max retries exceeded`);
+  throw new VapiApiError(method, endpoint, 429, "max retries exceeded", "");
 }
 
 export async function vapiDelete(endpoint: string): Promise<void> {
@@ -88,11 +108,9 @@ export async function vapiDelete(endpoint: string): Promise<void> {
     }
 
     const errorText = await response.text();
-    throw new Error(
-      `API DELETE ${endpoint} failed (${response.status}): ${errorText}`
-    );
+    throw new VapiApiError("DELETE", endpoint, response.status, parseApiMessage(errorText), errorText);
   }
 
-  throw new Error(`API DELETE ${endpoint} failed: max retries exceeded`);
+  throw new VapiApiError("DELETE", endpoint, 429, "max retries exceeded", "");
 }
 

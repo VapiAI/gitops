@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface StateFile {
+  credentials: Record<string, string>;
   assistants: Record<string, string>;
   structuredOutputs: Record<string, string>;
   tools: Record<string, string>;

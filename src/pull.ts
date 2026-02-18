@@ -1,9 +1,11 @@
 import { execSync } from "child_process";
+import { existsSync, readdirSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { join, dirname, relative } from "path";
 import { stringify } from "yaml";
 import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN, RESOURCES_DIR, BASE_DIR, APPLY_FILTER } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
+import { credentialReverseMap, deepReplaceValues } from "./credentials.ts";
 import type { StateFile, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,7 +110,9 @@ export async function fetchAllResources(resourceType: ResourceType): Promise<Vap
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`API GET ${endpoint} failed (${response.status}): ${errorText}`);
+    let apiMessage = errorText;
+    try { const parsed = JSON.parse(errorText); if (typeof parsed.message === "string") apiMessage = parsed.message; } catch {}
+    throw new Error(`API GET ${endpoint} failed (${response.status}): ${apiMessage}`);
   }
 
   const data = await response.json();
@@ -119,6 +123,64 @@ export async function fetchAllResources(resourceType: ResourceType): Promise<Vap
   }
   
   return data as VapiResource[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Credential Fetching
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface VapiCredential {
+  id: string;
+  name?: string;
+  provider: string;
+  [key: string]: unknown;
+}
+
+async function fetchCredentials(): Promise<VapiCredential[]> {
+  const url = `${VAPI_BASE_URL}/credential`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    let apiMessage = errorText;
+    try { const parsed = JSON.parse(errorText); if (typeof parsed.message === "string") apiMessage = parsed.message; } catch {}
+    throw new Error(`API GET /credential failed (${response.status}): ${apiMessage}`);
+  }
+
+  return (await response.json()) as VapiCredential[];
+}
+
+function credentialSlug(cred: VapiCredential): string {
+  const base = cred.name || cred.provider || "credential";
+  return slugify(base);
+}
+
+async function pullCredentials(state: StateFile): Promise<void> {
+  console.log("\n🔑 Pulling credentials...");
+  const credentials = await fetchCredentials();
+  console.log(`   Found ${credentials.length} credentials in Vapi`);
+
+  const newSection: Record<string, string> = {};
+  // Build reverse map from existing state to preserve slug stability
+  const existingReverse = new Map<string, string>();
+  for (const [slug, uuid] of Object.entries(state.credentials)) {
+    existingReverse.set(uuid, slug);
+  }
+
+  for (const cred of credentials) {
+    // Reuse existing slug if available, otherwise generate a new one
+    let slug = existingReverse.get(cred.id);
+    if (!slug) {
+      slug = credentialSlug(cred);
+    }
+    newSection[slug] = cred.id;
+    console.log(`   🔑 ${slug} -> ${cred.id}`);
+  }
+
+  state.credentials = newSection;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,6 +207,28 @@ function generateResourceId(resource: VapiResource): string {
   const name = extractName(resource);
   const shortId = resource.id.slice(0, 8);
   return name ? `${slugify(name)}-${shortId}` : `resource-${shortId}`;
+}
+
+// When pulling a new environment, a resource may already exist on disk under a
+// different UUID suffix (e.g., `end-call-tool-8102e715` from dev). Match by
+// name-slug so we reuse the existing file instead of creating a duplicate.
+function findExistingResourceId(
+  resourceType: ResourceType,
+  resource: VapiResource,
+): string | undefined {
+  const name = extractName(resource);
+  if (!name) return undefined;
+
+  const nameSlug = slugify(name);
+  const dir = join(RESOURCES_DIR, FOLDER_MAP[resourceType]);
+  if (!existsSync(dir)) return undefined;
+
+  const matches = readdirSync(dir)
+    .filter((f) => /\.(yml|yaml|md)$/.test(f))
+    .map((f) => f.replace(/\.(yml|yaml|md)$/, ""))
+    .filter((id) => id === nameSlug || id.startsWith(nameSlug + "-"));
+
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -395,6 +479,7 @@ export async function pullResourceType(
   console.log(`   Found ${resources.length} ${resourceType} in Vapi`);
 
   const reverseMap = buildReverseMap(state, resourceType);
+  const credReverse = credentialReverseMap(state);
   const newStateSection: Record<string, string> = {};
 
   let created = 0;
@@ -407,7 +492,9 @@ export async function pullResourceType(
     const isNew = !resourceId;
     
     if (!resourceId) {
-      resourceId = generateResourceId(resource);
+      // Reuse an existing file's resourceId if the name matches (cross-env pull)
+      resourceId = findExistingResourceId(resourceType, resource)
+        ?? generateResourceId(resource);
     }
 
     // Skip files that have been locally modified or deleted (default mode)
@@ -426,17 +513,18 @@ export async function pullResourceType(
     // Detect platform defaults (orgId is null/missing — read-only, immutable)
     const isPlatformDefault = resource.orgId === null || resource.orgId === undefined;
 
-    // Clean and resolve references
+    // Clean, resolve resource references, and replace credential UUIDs with names
     const cleaned = cleanResource(resource);
     const resolved = resolveReferencesToResourceIds(cleaned, state);
+    const withCredNames = deepReplaceValues(resolved, credReverse);
 
     // Mark platform defaults so apply skips them
     if (isPlatformDefault) {
-      resolved._platformDefault = true;
+      withCredNames._platformDefault = true;
     }
     
     // Write to file
-    const filePath = await writeResourceFile(resourceType, resourceId, resolved);
+    const filePath = await writeResourceFile(resourceType, resourceId, withCredNames);
     const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
     const relPath = relative(BASE_DIR, filePath);
     console.log(`   ${icon} ${resourceId} -> ${relPath}${isPlatformDefault ? " (platform default, read-only)" : ""}`);
@@ -492,6 +580,9 @@ async function main(): Promise<void> {
 
   const state = loadState();
 
+  // Credentials are always pulled first — they're needed to reverse-resolve UUIDs in resource files
+  await pullCredentials(state);
+
   const zero: PullStats = { created: 0, updated: 0, skipped: 0 };
   const stats: Record<string, PullStats> = {
     tools: { ...zero },
@@ -541,6 +632,6 @@ async function main(): Promise<void> {
 
 // Run the pull engine
 main().catch((error) => {
-  console.error("\n❌ Pull failed:", error);
+  console.error("\n❌ Pull failed:", error instanceof Error ? error.message : error);
   process.exit(1);
 });

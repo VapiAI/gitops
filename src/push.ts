@@ -1,10 +1,52 @@
-import { vapiRequest } from "./api.ts";
+import { vapiRequest, VapiApiError } from "./api.ts";
 import { VAPI_ENV, VAPI_BASE_URL, FORCE_DELETE, APPLY_FILTER, removeExcludedKeys } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
 import { resolveReferences, resolveAssistantIds } from "./resolver.ts";
+import { credentialForwardMap, deepReplaceValues } from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
 import type { ResourceFile, StateFile, ResourceType, LoadedResources } from "./types.ts";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Error Formatting
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatApiError(resourceId: string, error: unknown): string {
+  if (error instanceof VapiApiError) {
+    return [
+      `  ❌ Failed: ${resourceId}`,
+      `     ${error.method} ${error.endpoint} → ${error.statusCode}`,
+      `     ${error.apiMessage}`,
+    ].join("\n");
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return `  ❌ Failed: ${resourceId}\n     ${msg}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Credential Validation — warn about unresolved credential names
+// ─────────────────────────────────────────────────────────────────────────────
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function warnUnresolvedCredentials(resourceId: string, data: Record<string, unknown>): void {
+  walkForCredentials(resourceId, data);
+}
+
+// Recursively find any `credentialId` field whose value isn't a UUID
+function walkForCredentials(resourceId: string, obj: unknown): void {
+  if (obj === null || obj === undefined || typeof obj !== "object") return;
+  if (Array.isArray(obj)) {
+    for (const item of obj) walkForCredentials(resourceId, item);
+    return;
+  }
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (key === "credentialId" && typeof value === "string" && !UUID_REGEX.test(value)) {
+      console.warn(`  ⚠️  Unresolved credential in ${resourceId}: credentialId="${value}" — run pull to populate credentials in state`);
+    }
+    if (typeof value === "object") walkForCredentials(resourceId, value);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resource Apply Functions
@@ -385,6 +427,21 @@ async function main(): Promise<void> {
   const allSimulationsRaw = await loadResources<Record<string, unknown>>("simulations");
   const allSimulationSuitesRaw = await loadResources<Record<string, unknown>>("simulationSuites");
 
+  // Resolve credential names → UUIDs in all resource data before applying
+  const credMap = credentialForwardMap(state);
+  if (credMap.size > 0) {
+    console.log(`\n🔑 Resolving credentials (${credMap.size} mapped)...\n`);
+  } else {
+    console.log("\n🔑 No credentials in state — run pull first to populate credential mappings");
+  }
+
+  const resolveCredentials = <T>(resources: ResourceFile<T>[]): ResourceFile<T>[] =>
+    resources.map((r) => {
+      const resolved = deepReplaceValues(r.data, credMap);
+      warnUnresolvedCredentials(r.resourceId, resolved as Record<string, unknown>);
+      return { ...r, data: resolved };
+    });
+
   // Filter out platform defaults (read-only, cannot be updated via API)
   const filterDefaults = <T extends Record<string, unknown>>(resources: ResourceFile<T>[]) => {
     const defaults = resources.filter(r => (r.data as Record<string, unknown>)._platformDefault === true);
@@ -396,14 +453,14 @@ async function main(): Promise<void> {
     return resources.filter(r => (r.data as Record<string, unknown>)._platformDefault !== true);
   };
 
-  const allTools = filterDefaults(allToolsRaw);
-  const allStructuredOutputs = filterDefaults(allStructuredOutputsRaw);
-  const allAssistants = filterDefaults(allAssistantsRaw);
-  const allSquads = filterDefaults(allSquadsRaw);
-  const allPersonalities = filterDefaults(allPersonalitiesRaw);
-  const allScenarios = filterDefaults(allScenariosRaw);
-  const allSimulations = filterDefaults(allSimulationsRaw);
-  const allSimulationSuites = filterDefaults(allSimulationSuitesRaw);
+  const allTools = resolveCredentials(filterDefaults(allToolsRaw));
+  const allStructuredOutputs = resolveCredentials(filterDefaults(allStructuredOutputsRaw));
+  const allAssistants = resolveCredentials(filterDefaults(allAssistantsRaw));
+  const allSquads = resolveCredentials(filterDefaults(allSquadsRaw));
+  const allPersonalities = resolveCredentials(filterDefaults(allPersonalitiesRaw));
+  const allScenarios = resolveCredentials(filterDefaults(allScenariosRaw));
+  const allSimulations = resolveCredentials(filterDefaults(allSimulationsRaw));
+  const allSimulationSuites = resolveCredentials(filterDefaults(allSimulationSuitesRaw));
 
   // Filter resources based on apply filter
   const tools = shouldApplyResourceType("tools") 
@@ -483,7 +540,7 @@ async function main(): Promise<void> {
         state.tools[tool.resourceId] = uuid;
         applied.tools++;
       } catch (error) {
-        console.error(`  ❌ Failed to apply tool ${tool.resourceId}:`, error);
+        console.error(formatApiError(tool.resourceId, error));
         throw error;
       }
     }
@@ -497,10 +554,7 @@ async function main(): Promise<void> {
         state.structuredOutputs[output.resourceId] = uuid;
         applied.structuredOutputs++;
       } catch (error) {
-        console.error(
-          `  ❌ Failed to apply structured output ${output.resourceId}:`,
-          error
-        );
+        console.error(formatApiError(output.resourceId, error));
         throw error;
       }
     }
@@ -514,10 +568,7 @@ async function main(): Promise<void> {
         state.assistants[assistant.resourceId] = uuid;
         applied.assistants++;
       } catch (error) {
-        console.error(
-          `  ❌ Failed to apply assistant ${assistant.resourceId}:`,
-          error
-        );
+        console.error(formatApiError(assistant.resourceId, error));
         throw error;
       }
     }
@@ -531,7 +582,7 @@ async function main(): Promise<void> {
         state.squads[squad.resourceId] = uuid;
         applied.squads++;
       } catch (error) {
-        console.error(`  ❌ Failed to apply squad ${squad.resourceId}:`, error);
+        console.error(formatApiError(squad.resourceId, error));
         throw error;
       }
     }
@@ -545,7 +596,7 @@ async function main(): Promise<void> {
         state.personalities[personality.resourceId] = uuid;
         applied.personalities++;
       } catch (error) {
-        console.error(`  ❌ Failed to apply personality ${personality.resourceId}:`, error);
+        console.error(formatApiError(personality.resourceId, error));
         throw error;
       }
     }
@@ -559,7 +610,7 @@ async function main(): Promise<void> {
         state.scenarios[scenario.resourceId] = uuid;
         applied.scenarios++;
       } catch (error) {
-        console.error(`  ❌ Failed to apply scenario ${scenario.resourceId}:`, error);
+        console.error(formatApiError(scenario.resourceId, error));
         throw error;
       }
     }
@@ -573,7 +624,7 @@ async function main(): Promise<void> {
         state.simulations[simulation.resourceId] = uuid;
         applied.simulations++;
       } catch (error) {
-        console.error(`  ❌ Failed to apply simulation ${simulation.resourceId}:`, error);
+        console.error(formatApiError(simulation.resourceId, error));
         throw error;
       }
     }
@@ -587,7 +638,7 @@ async function main(): Promise<void> {
         state.simulationSuites[suite.resourceId] = uuid;
         applied.simulationSuites++;
       } catch (error) {
-        console.error(`  ❌ Failed to apply simulation suite ${suite.resourceId}:`, error);
+        console.error(formatApiError(suite.resourceId, error));
         throw error;
       }
     }
@@ -639,6 +690,10 @@ async function main(): Promise<void> {
 
 // Run the apply engine
 main().catch((error) => {
-  console.error("\n❌ Apply failed:", error);
+  if (error instanceof VapiApiError) {
+    console.error(`\n❌ Apply failed: ${error.apiMessage}`);
+  } else {
+    console.error("\n❌ Apply failed:", error instanceof Error ? error.message : error);
+  }
   process.exit(1);
 });

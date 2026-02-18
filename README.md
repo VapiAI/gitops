@@ -178,6 +178,7 @@ vapi-gitops/
 │   ├── state.ts                # State file management
 │   ├── resources.ts            # Resource loading (YAML, MD, TS)
 │   ├── resolver.ts             # Reference resolution
+│   ├── credentials.ts          # Credential resolution (name ↔ UUID)
 │   └── delete.ts               # Deletion & orphan checks
 ├── resources/
 │   ├── assistants/             # Assistant files (.md or .yml)
@@ -527,12 +528,53 @@ toolIds:
   - "uuid-1234-5678-abcd"
 ```
 
+### Credential Management
+
+Credentials (API keys, JWT secrets, etc.) are environment-specific and managed automatically through the state file. No secrets are stored in resource files or git.
+
+**How it works:**
+
+1. **Pull** fetches all credentials from `GET /credential` and stores `name-slug → UUID` in the state file
+2. **Pull** replaces credential UUIDs with human-readable names in resource files
+3. **Push** reverses the mapping — resolves credential names back to UUIDs before sending to the API
+
+```yaml
+# Resource file stores credential NAME (environment-agnostic)
+server:
+  url: https://my-api.com/endpoint
+  credentialId: my-server-credential    # ← human-readable name
+```
+
+```json
+// State file stores credential UUID (environment-specific)
+{
+  "credentials": {
+    "my-server-credential": "2f6db611-ad08-4099-8bd8-74db37b0a07e"
+  }
+}
+```
+
+**Cross-environment workflow:**
+
+Each environment has its own state file with its own credential UUIDs. The same resource file works across all environments — only the state file differs:
+
+```
+.vapi-state.dev.json  → "my-cred": "uuid-for-dev"
+.vapi-state.stg.json  → "my-cred": "uuid-for-stg"
+.vapi-state.prod.json → "my-cred": "uuid-for-prod"
+```
+
+> **Note:** Credentials are auto-discovered from the Vapi API by name. Create credentials with the same name in each environment's Vapi org, and pull will populate the mappings automatically.
+
 ### State File
 
 Tracks mapping between resource IDs and Vapi UUIDs:
 
 ```json
 {
+  "credentials": {
+    "my-server-credential": "uuid-0000"
+  },
   "tools": {
     "my-tool": "uuid-1234"
   },
@@ -592,6 +634,17 @@ Check the state file has correct UUID:
 1. Open `.vapi-state.{env}.json`
 2. Find the resource entry
 3. If incorrect, delete entry and re-run push
+
+### "Credential with ID not found" errors
+
+The credential UUID doesn't exist in the target environment. Fix:
+1. Run `npm run pull:{env}` to fetch credentials into the state file
+2. If the credential doesn't exist in the target org, create it in the Vapi dashboard with the same name
+3. Pull again — the mapping will be auto-populated
+
+### "Unresolved credential" warnings
+
+A resource file has a `credentialId` that couldn't be resolved to a UUID. This means the credential name isn't in the state file. Run `pull` to populate credential mappings.
 
 ### "property X should not exist" API errors
 
