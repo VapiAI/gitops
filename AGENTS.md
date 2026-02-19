@@ -427,6 +427,7 @@ schema:
 - `assistant_ids` uses **Vapi UUIDs** (not local filenames) — these are the IDs of assistants this output applies to
 - `target: messages` means the LLM analyzes the full message history
 - `type: ai` means an LLM generates the output (vs. `type: code` for programmatic)
+- **`schema.type` must be a simple string** (e.g. `type: string`, `type: boolean`, `type: object`). Do NOT use a YAML array like `type: [string, "null"]` — the Vapi dashboard calls `.toLowerCase()` on this field and will crash with `TypeError: .toLowerCase is not a function` if it receives an array. For nullable values, express nullability in the `description` instead (e.g. "Return null if no follow-up is needed")
 
 ---
 
