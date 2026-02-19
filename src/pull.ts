@@ -466,6 +466,7 @@ export async function pullResourceType(
   resourceType: ResourceType,
   state: StateFile,
   changedFiles?: Set<string>,
+  force?: boolean,
 ): Promise<PullStats> {
   console.log(`\n📥 Pulling ${resourceType}...`);
   
@@ -497,13 +498,29 @@ export async function pullResourceType(
         ?? generateResourceId(resource);
     }
 
-    // Skip files that have been locally modified or deleted (default mode)
+    // Skip files that have been locally modified (git detection)
     if (changedFiles) {
       const folderPath = FOLDER_MAP[resourceType];
       const mdPath = join("resources", folderPath, `${resourceId}.md`);
       const ymlPath = join("resources", folderPath, `${resourceId}.yml`);
       if (changedFiles.has(mdPath) || changedFiles.has(ymlPath)) {
         console.log(`   ⏭️  ${resourceId} (locally changed, skipping)`);
+        newStateSection[resourceId] = resource.id;
+        skipped++;
+        continue;
+      }
+    }
+
+    // Skip resources whose local file was deleted (works without git)
+    // A resource that was previously tracked (in state) but has no local file = intentional deletion
+    if (!force && !isNew) {
+      const folderPath = FOLDER_MAP[resourceType];
+      const dir = join(RESOURCES_DIR, folderPath);
+      const fileExists = existsSync(join(dir, `${resourceId}.md`))
+        || existsSync(join(dir, `${resourceId}.yml`))
+        || existsSync(join(dir, `${resourceId}.yaml`));
+      if (!fileExists) {
+        console.log(`   ⏭️  ${resourceId} (locally deleted, skipping)`);
         newStateSection[resourceId] = resource.id;
         skipped++;
         continue;
@@ -600,14 +617,14 @@ async function main(): Promise<void> {
   // e.g. structuredOutputs reference assistants, so assistants must be pulled first.
   const shouldPull = (type: ResourceType) => !typeFilter?.length || typeFilter.includes(type);
 
-  if (shouldPull("tools")) stats.tools = await pullResourceType("tools", state, changedFiles);
-  if (shouldPull("assistants")) stats.assistants = await pullResourceType("assistants", state, changedFiles);
-  if (shouldPull("structuredOutputs")) stats.structuredOutputs = await pullResourceType("structuredOutputs", state, changedFiles);
-  if (shouldPull("squads")) stats.squads = await pullResourceType("squads", state, changedFiles);
-  if (shouldPull("personalities")) stats.personalities = await pullResourceType("personalities", state, changedFiles);
-  if (shouldPull("scenarios")) stats.scenarios = await pullResourceType("scenarios", state, changedFiles);
-  if (shouldPull("simulations")) stats.simulations = await pullResourceType("simulations", state, changedFiles);
-  if (shouldPull("simulationSuites")) stats.simulationSuites = await pullResourceType("simulationSuites", state, changedFiles);
+  if (shouldPull("tools")) stats.tools = await pullResourceType("tools", state, changedFiles, force);
+  if (shouldPull("assistants")) stats.assistants = await pullResourceType("assistants", state, changedFiles, force);
+  if (shouldPull("structuredOutputs")) stats.structuredOutputs = await pullResourceType("structuredOutputs", state, changedFiles, force);
+  if (shouldPull("squads")) stats.squads = await pullResourceType("squads", state, changedFiles, force);
+  if (shouldPull("personalities")) stats.personalities = await pullResourceType("personalities", state, changedFiles, force);
+  if (shouldPull("scenarios")) stats.scenarios = await pullResourceType("scenarios", state, changedFiles, force);
+  if (shouldPull("simulations")) stats.simulations = await pullResourceType("simulations", state, changedFiles, force);
+  if (shouldPull("simulationSuites")) stats.simulationSuites = await pullResourceType("simulationSuites", state, changedFiles, force);
 
   await saveState(state);
 

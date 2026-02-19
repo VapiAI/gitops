@@ -11,15 +11,21 @@ function isUUID(value: string): boolean {
   return UUID_REGEX.test(value);
 }
 
+// Check if a UUID is tracked in a state section (reverse lookup)
+function isKnownUUID(uuid: string, stateSection: Record<string, string>): boolean {
+  return Object.values(stateSection).includes(uuid);
+}
+
 export function resolveToolId(
   toolId: string,
   state: StateFile
 ): string | null {
-  // Remove comments from YAML (e.g., "transfer-call ## Reference...")
   const cleanId = toolId.split("##")[0]?.trim() ?? "";
   
-  // If already a UUID, return it directly
   if (isUUID(cleanId)) {
+    if (!isKnownUUID(cleanId, state.tools)) {
+      console.warn(`  ⚠️  Untracked tool UUID (possibly deleted): ${cleanId}`);
+    }
     return cleanId;
   }
   
@@ -45,8 +51,10 @@ export function resolveStructuredOutputIds(
     .map((refId: string) => {
       const cleanId = refId.split("##")[0]?.trim() ?? "";
       
-      // If already a UUID, return it directly
       if (isUUID(cleanId)) {
+        if (!isKnownUUID(cleanId, state.structuredOutputs)) {
+          console.warn(`  ⚠️  Untracked structured output UUID (possibly deleted): ${cleanId}`);
+        }
         return cleanId;
       }
       
@@ -66,8 +74,11 @@ export function resolveAssistantId(
 ): string | null {
   const cleanId = assistantId.split("##")[0]?.trim() ?? "";
   
-  // If already a UUID, return it directly
   if (isUUID(cleanId)) {
+    if (!isKnownUUID(cleanId, state.assistants)) {
+      console.warn(`  ⚠️  Untracked assistant UUID (possibly deleted): ${cleanId}`);
+      return null;
+    }
     return cleanId;
   }
   

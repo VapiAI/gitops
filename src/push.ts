@@ -122,7 +122,7 @@ export async function applyStructuredOutput(
   if (existingUuid) {
     const updatePayload = removeExcludedKeys(payload, "structuredOutputs");
     console.log(`  🔄 Updating structured output: ${resourceId} (${existingUuid})`);
-    await vapiRequest("PATCH", `/structured-output/${existingUuid}`, updatePayload);
+    await vapiRequest("PATCH", `/structured-output/${existingUuid}?schemaOverride=true`, updatePayload);
     return existingUuid;
   } else {
     console.log(`  ✨ Creating structured output: ${resourceId}`);

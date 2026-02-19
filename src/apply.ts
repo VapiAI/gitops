@@ -26,35 +26,45 @@ function runPassthrough(cmd: string): number {
 
 async function main(): Promise<void> {
   const env = process.argv[2];
-  const extraArgs = process.argv.slice(3).join(" ");
+  const allArgs = process.argv.slice(3);
+  const hasForce = allArgs.includes("--force");
+
+  // Pull never gets --force (apply's pull should always preserve local changes/deletions)
+  const pullArgs = allArgs.filter(a => a !== "--force").join(" ");
+  const pushArgs = allArgs.join(" ");
 
   if (!env || !VALID_ENVIRONMENTS.includes(env as typeof VALID_ENVIRONMENTS[number])) {
-    console.error("Usage: npm run apply:dev | apply:stg | apply:prod");
+    console.error("Usage: npm run apply:dev [--force]");
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");
-    console.error("  Pulls latest platform state, merges with your local");
-    console.error("  changes, and pushes the result back to the platform.");
-    console.error("  Stops on merge conflicts for manual resolution.");
+    console.error("  Pulls latest platform state (preserving local changes),");
+    console.error("  then pushes the result back to the platform.");
+    console.error("");
+    console.error("  --force   Enable deletions: resources you deleted locally");
+    console.error("            will also be deleted from the platform.");
     process.exit(1);
   }
 
   console.log("═══════════════════════════════════════════════════════════════");
   console.log(`🔄 Vapi GitOps Apply - Environment: ${env}`);
   console.log("   Pull → Merge → Push");
+  if (hasForce) {
+    console.log("   ⚠️  Deletions enabled (--force)");
+  }
   console.log("═══════════════════════════════════════════════════════════════\n");
 
-  // Step 1: Pull with merge (forward filters so only matching types are pulled)
-  const pullCmd = `npx tsx src/pull.ts ${env} ${extraArgs}`.trim();
+  // Step 1: Pull (never forced — always preserves local deletions/changes)
+  const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
   const pullExit = runPassthrough(pullCmd);
   if (pullExit !== 0) {
     console.error("\n❌ Pull had issues. Resolve conflicts before pushing.");
     process.exit(1);
   }
 
-  // Step 2: Push merged state
+  // Step 2: Push merged state (--force forwarded here for deletions)
   console.log("\n🚀 Pushing merged state to platform...\n");
-  const pushCmd = `npx tsx src/push.ts ${env} ${extraArgs}`.trim();
+  const pushCmd = `npx tsx src/push.ts ${env} ${pushArgs}`.trim();
   const pushExit = runPassthrough(pushCmd);
   if (pushExit !== 0) {
     console.error("\n❌ Push failed!");
