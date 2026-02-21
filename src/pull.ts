@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, writeFile, unlink } from "fs/promises";
 import { join, dirname, relative } from "path";
 import { stringify } from "yaml";
 import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN, RESOURCES_DIR, BASE_DIR, APPLY_FILTER } from "./config.ts";
@@ -335,6 +335,21 @@ function resolveReferencesToResourceIds(
           return dest;
         });
       }
+      // Resolve assistantId in assistantOverrides["tools:append"][].destinations[]
+      const overrides = resolvedMember.assistantOverrides as Record<string, unknown> | undefined;
+      const toolsAppend = overrides?.["tools:append"] as Record<string, unknown>[] | undefined;
+      if (Array.isArray(toolsAppend)) {
+        for (const tool of toolsAppend) {
+          if (Array.isArray(tool.destinations)) {
+            tool.destinations = (tool.destinations as Record<string, unknown>[]).map((dest) => {
+              if (typeof dest.assistantId === "string") {
+                return { ...dest, assistantId: assistantsMap.get(dest.assistantId) ?? dest.assistantId };
+              }
+              return dest;
+            });
+          }
+        }
+      }
       return resolvedMember;
     });
   }
@@ -553,6 +568,25 @@ export async function pullResourceType(
     newStateSection[resourceId] = resource.id;
   }
   
+  // In force mode, delete local files for resources removed from the platform
+  if (force) {
+    const oldStateSection = state[resourceType];
+    for (const [resourceId] of Object.entries(oldStateSection)) {
+      if (newStateSection[resourceId]) continue;
+      const folderPath = FOLDER_MAP[resourceType];
+      const dir = join(RESOURCES_DIR, folderPath);
+      for (const ext of [".md", ".yml", ".yaml"]) {
+        const filePath = join(dir, `${resourceId}${ext}`);
+        if (existsSync(filePath)) {
+          await unlink(filePath);
+          const relPath = relative(BASE_DIR, filePath);
+          console.log(`   🗑️  ${resourceId} -> ${relPath} (removed from platform)`);
+          break;
+        }
+      }
+    }
+  }
+
   // Update state with new mappings
   state[resourceType] = newStateSection;
   
