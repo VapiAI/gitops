@@ -1,0 +1,232 @@
+name: starlight_qa_engagement
+type: ai
+target: messages
+description: |
+  Evaluates the ENGAGEMENT quality of a Brent Council Housing Benefits call.
+  This is 1 of 4 equally-weighted QA categories for the Starlight project.
+
+  IMPORTANT - AUTO-FAIL RULES:
+  Questions 1.3, 1.4, and 1.5 are auto-fail. If ANY of these receives a "no" result,
+  set auto_fail to true. When auto_fail is true across ANY of the 4 QA categories,
+  the ENTIRE call evaluation fails (not just this section).
+
+  MULTILINGUAL TRANSCRIPTS:
+  The call may be conducted in any language. Evaluate the transcript in whatever language
+  it occurs in. Do not penalise the agent for using a language other than English if the
+  caller initiated in that language.
+
+  AI AGENT ADAPTATION NOTES:
+  - Question 1.3 (data security check): Use not_applicable if the call scenario did not
+    require identity verification (e.g. general enquiry with no account lookup).
+  - Question 1.6 (hold time): Use not_applicable if no hold occurred during the call.
+  - Question 1.7 (after call work): Use not_applicable as AI agents do not perform ACW.
+
+  GLOSSARY OF BRENT COUNCIL TERMS:
+  RSF - Resident Support Fund | DHP - Discretionary Housing Payment |
+  CIC/s - Change in Circumstances | CTS - Council Tax Support |
+  HB - Housing Benefit | UC - Universal Credit | Recons - Reconsideration |
+  Portal/My Account/CAS - Citizen Access Service (customer self-service portal) |
+  Non Dep - Non dependants | OP - Overpayments | LHA - Local Housing Allowance |
+  HSF - Household Support Fund | SB - Switchboard |
+  Welfare Benefit - PIP, Disability Allowance, ESA, etc.
+model:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0
+assistant_ids: []
+workflow_ids: []
+schema:
+  type: object
+  description: "Engagement QA evaluation for Brent Council Housing Benefits calls."
+  properties:
+    question_1_1:
+      type: object
+      description: "1.1 Warm greeting, gave service and own name and asked for their name if not SB."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent provided a warm greeting with service name and own name and asked for caller name; no if not; not_applicable if this was a switchboard transfer."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given, referencing specific parts of the conversation."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript supporting the evaluation."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation where this occurred."
+    question_1_2:
+      type: object
+      description: "1.2 Apology given for the long wait / acknowledged and recognised service failure if mentioned."
+      properties:
+        result:
+          type: string
+          description: "yes if an apology or acknowledgement was given when appropriate; no if the caller mentioned a wait or service failure and it was not acknowledged; not_applicable if the caller did not mention any wait or service failure."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_1_3:
+      type: object
+      description: "1.3 Completed data security check. AUTO-FAIL: If result is 'no', the entire evaluation fails."
+      properties:
+        result:
+          type: string
+          description: "yes if identity/security verification was completed before accessing account details; no if account details were accessed without verification; not_applicable if the call did not require account access."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_1_4:
+      type: object
+      description: "1.4 Controlled the call and maintained professionalism throughout. AUTO-FAIL: If result is 'no', the entire evaluation fails."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent maintained control and professionalism throughout; no if the agent lost control or was unprofessional at any point; not_applicable only in exceptional circumstances."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_1_5:
+      type: object
+      description: "1.5 Listened actively, positive tone, showed interest, empathy, patience and helpfulness. AUTO-FAIL: If result is 'no', the entire evaluation fails."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent demonstrated active listening, positive tone, interest, empathy, patience and helpfulness; no if the agent was dismissive, impatient, or unhelpful; not_applicable only in exceptional circumstances."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_1_6:
+      type: object
+      description: "1.6 Explained any hold time, kept the customer updated, apologised for the hold."
+      properties:
+        result:
+          type: string
+          description: "yes if hold time was explained and apology given; no if the caller was put on hold without explanation or apology; not_applicable if no hold occurred during the call."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_1_7:
+      type: object
+      description: "1.7 Was the After Call Work necessary and justified for the full duration?"
+      properties:
+        result:
+          type: string
+          description: "yes if ACW was necessary and justified; no if ACW was unnecessary or excessive; not_applicable if this is an AI agent call (AI agents do not perform ACW)."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    auto_fail:
+      type: boolean
+      description: "Set to true if ANY auto-fail question (1.3, 1.4, 1.5) received a 'no' result. When true, the ENTIRE call evaluation fails across all categories."
+    overall_pass:
+      type: boolean
+      description: "Set to true only if auto_fail is false. When auto_fail is true, this must be false regardless of other question results."
+    category_score:
+      type: string
+      description: "Fraction of questions that received 'yes' out of total applicable questions, e.g. '5/7' or '4/5'. Exclude not_applicable questions from both numerator and denominator."
