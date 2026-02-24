@@ -1,0 +1,102 @@
+name: starlight_qa_signposting
+type: ai
+target: messages
+description: |
+  Evaluates the SIGNPOSTING quality of a Brent Council Housing Benefits call.
+  This is 1 of 4 equally-weighted QA categories for the Starlight project.
+
+  AUTO-FAIL RULES:
+  This category has no auto-fail questions. However, if any OTHER category (Engagement,
+  Right First Time, Explaining) triggers an auto-fail, the entire call evaluation still
+  fails. The consuming application must check auto_fail across all 4 categories.
+
+  MULTILINGUAL TRANSCRIPTS:
+  The call may be conducted in any language. Evaluate the transcript in whatever language
+  it occurs in. Do not penalise the agent for using a language other than English if the
+  caller initiated in that language.
+
+  SIGNPOSTING CONTEXT:
+  Signposting means directing the caller to the correct service, department, or resource
+  for their enquiry. This includes directing to online self-service portals (My Account /
+  CAS), other council departments, external agencies (DWP for UC, etc.), or community
+  support services (RSF, HSF, DHP).
+
+  GLOSSARY OF BRENT COUNCIL TERMS:
+  RSF - Resident Support Fund | DHP - Discretionary Housing Payment |
+  CIC/s - Change in Circumstances | CTS - Council Tax Support |
+  HB - Housing Benefit | UC - Universal Credit | Recons - Reconsideration |
+  Portal/My Account/CAS - Citizen Access Service (customer self-service portal) |
+  Non Dep - Non dependants | OP - Overpayments | LHA - Local Housing Allowance |
+  HSF - Household Support Fund | SB - Switchboard |
+  Welfare Benefit - PIP, Disability Allowance, ESA, etc.
+model:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0
+assistant_ids: []
+workflow_ids: []
+schema:
+  type: object
+  description: "Signposting QA evaluation for Brent Council Housing Benefits calls."
+  properties:
+    question_3_1:
+      type: object
+      description: "3.1 Correctly signposted."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent correctly directed the caller to the appropriate service, department, or resource; no if the agent provided incorrect signposting or failed to signpost when needed; not_applicable if the call did not require any signposting."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given, referencing specific parts of the conversation."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript supporting the evaluation."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation where this occurred."
+    question_3_2:
+      type: object
+      description: "3.2 Self-help options promoted and customer guided where appropriate."
+      properties:
+        result:
+          type: string
+          description: "yes if self-service options (My Account, CAS portal, online forms) were promoted and the caller was guided on how to use them; no if self-service options existed but were not mentioned; not_applicable if self-service was not relevant to this enquiry."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    auto_fail:
+      type: boolean
+      description: "Always false for this category as it has no auto-fail questions. The consuming application must still check auto_fail across all 4 QA categories."
+    overall_pass:
+      type: boolean
+      description: "Set to true if the agent performed well on signposting. Since there are no auto-fail questions in this category, this is based purely on the question results."
+    category_score:
+      type: string
+      description: "Fraction of questions that received 'yes' out of total applicable questions, e.g. '2/2' or '1/1'. Exclude not_applicable questions from both numerator and denominator."
