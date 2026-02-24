@@ -29,7 +29,8 @@ async function main(): Promise<void> {
   const allArgs = process.argv.slice(3);
   const hasForce = allArgs.includes("--force");
 
-  const pullArgs = allArgs.join(" ");
+  // Pull never gets --force (apply's pull should always preserve local changes/deletions)
+  const pullArgs = allArgs.filter(a => a !== "--force").join(" ");
   const pushArgs = allArgs.join(" ");
 
   if (!env || !VALID_ENVIRONMENTS.includes(env as typeof VALID_ENVIRONMENTS[number])) {
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
   }
   console.log("═══════════════════════════════════════════════════════════════\n");
 
-  // Step 1: Pull (--force forwarded: platform becomes source of truth, deletes orphaned local files)
+  // Step 1: Pull (never forced — always preserves local deletions/changes)
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
   const pullExit = runPassthrough(pullCmd);
   if (pullExit !== 0) {

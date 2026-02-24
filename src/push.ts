@@ -400,13 +400,12 @@ interface DependencyContext {
 }
 
 async function ensureToolExists(toolId: string, ctx: DependencyContext): Promise<void> {
-  if (UUID_REGEX.test(toolId) || ctx.autoApplied.has(`tools:${toolId}`)) return;
+  if (UUID_REGEX.test(toolId) || ctx.state.tools[toolId] || ctx.autoApplied.has(`tools:${toolId}`)) return;
 
   const tool = ctx.allTools.find(t => t.resourceId === toolId);
   if (!tool) return;
 
-  const isUpdate = !!ctx.state.tools[toolId];
-  console.log(`  📦 Auto-applying dependency → tool: ${toolId}${isUpdate ? " (update)" : ""}`);
+  console.log(`  📦 Auto-applying dependency → tool: ${toolId}`);
   try {
     const uuid = await applyTool(tool, ctx.state);
     ctx.state.tools[tool.resourceId] = uuid;
@@ -420,13 +419,12 @@ async function ensureToolExists(toolId: string, ctx: DependencyContext): Promise
 }
 
 async function ensureStructuredOutputExists(outputId: string, ctx: DependencyContext): Promise<void> {
-  if (UUID_REGEX.test(outputId) || ctx.autoApplied.has(`structuredOutputs:${outputId}`)) return;
+  if (UUID_REGEX.test(outputId) || ctx.state.structuredOutputs[outputId] || ctx.autoApplied.has(`structuredOutputs:${outputId}`)) return;
 
   const output = ctx.allStructuredOutputs.find(o => o.resourceId === outputId);
   if (!output) return;
 
-  const isUpdate = !!ctx.state.structuredOutputs[outputId];
-  console.log(`  📦 Auto-applying dependency → structured output: ${outputId}${isUpdate ? " (update)" : ""}`);
+  console.log(`  📦 Auto-applying dependency → structured output: ${outputId}`);
   try {
     const uuid = await applyStructuredOutput(output, ctx.state);
     ctx.state.structuredOutputs[output.resourceId] = uuid;
@@ -439,32 +437,55 @@ async function ensureStructuredOutputExists(outputId: string, ctx: DependencyCon
   }
 }
 
-async function ensureAssistantDepsExist(assistantId: string, ctx: DependencyContext): Promise<void> {
-  if (UUID_REGEX.test(assistantId)) return;
+async function ensureAssistantDepsExist(assistantId: string, ctx: DependencyContext): Promise<boolean> {
+  if (UUID_REGEX.test(assistantId)) return false;
 
   const assistant = ctx.allAssistants.find(a => a.resourceId === assistantId);
-  if (!assistant) return;
+  if (!assistant) return false;
 
   const refs = extractReferencedIds(assistant.data as Record<string, unknown>);
+  let depsCreated = false;
 
   for (const toolId of refs.tools) {
-    await ensureToolExists(toolId, ctx);
+    if (!UUID_REGEX.test(toolId) && !ctx.state.tools[toolId]) {
+      await ensureToolExists(toolId, ctx);
+      if (ctx.state.tools[toolId]) depsCreated = true;
+    }
   }
   for (const outputId of refs.structuredOutputs) {
-    await ensureStructuredOutputExists(outputId, ctx);
+    if (!UUID_REGEX.test(outputId) && !ctx.state.structuredOutputs[outputId]) {
+      await ensureStructuredOutputExists(outputId, ctx);
+      if (ctx.state.structuredOutputs[outputId]) depsCreated = true;
+    }
   }
+
+  return depsCreated;
 }
 
 async function ensureAssistantExists(assistantId: string, ctx: DependencyContext): Promise<void> {
-  if (UUID_REGEX.test(assistantId) || ctx.autoApplied.has(`assistants:${assistantId}`)) return;
+  if (UUID_REGEX.test(assistantId)) return;
 
-  await ensureAssistantDepsExist(assistantId, ctx);
+  // Always resolve tool/SO deps, even if the assistant already exists in state
+  const depsCreated = await ensureAssistantDepsExist(assistantId, ctx);
+
+  // Assistant already on platform — update it if we just created missing deps
+  if (ctx.state.assistants[assistantId]) {
+    if (depsCreated) {
+      const assistant = ctx.allAssistants.find(a => a.resourceId === assistantId);
+      if (assistant) {
+        console.log(`  🔄 Updating assistant with new dependencies: ${assistantId}`);
+        await applyAssistant(assistant, ctx.state);
+      }
+    }
+    return;
+  }
+
+  if (ctx.autoApplied.has(`assistants:${assistantId}`)) return;
 
   const assistant = ctx.allAssistants.find(a => a.resourceId === assistantId);
   if (!assistant) return;
 
-  const isUpdate = !!ctx.state.assistants[assistantId];
-  console.log(`  📦 Auto-applying dependency → assistant: ${assistantId}${isUpdate ? " (update)" : ""}`);
+  console.log(`  📦 Auto-applying dependency → assistant: ${assistantId}`);
   try {
     const uuid = await applyAssistant(assistant, ctx.state);
     ctx.state.assistants[assistant.resourceId] = uuid;

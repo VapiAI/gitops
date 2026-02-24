@@ -262,23 +262,6 @@ export function resolveReferences(
           }
         }
       }
-      // Resolve assistantId in assistantOverrides["tools:append"][].destinations[]
-      const overrides = member.assistantOverrides as Record<string, unknown> | undefined;
-      const toolsAppend = overrides?.["tools:append"] as Record<string, unknown>[] | undefined;
-      if (Array.isArray(toolsAppend)) {
-        for (const tool of toolsAppend) {
-          if (Array.isArray(tool.destinations)) {
-            for (const dest of tool.destinations as Record<string, unknown>[]) {
-              if (typeof dest.assistantId === "string") {
-                const resolvedId = resolveAssistantId(dest.assistantId, state);
-                if (resolvedId) {
-                  dest.assistantId = resolvedId;
-                }
-              }
-            }
-          }
-        }
-      }
     }
   }
 
@@ -415,20 +398,6 @@ export function extractReferencedIds(data: Record<string, unknown>): ExtractedRe
         for (const dest of member.assistantDestinations as Record<string, unknown>[]) {
           if (typeof dest.assistantId === "string") {
             assistants.push(cleanId(dest.assistantId));
-          }
-        }
-      }
-      // Check assistantOverrides["tools:append"][].destinations[].assistantId
-      const overrides = member.assistantOverrides as Record<string, unknown> | undefined;
-      const toolsAppend = overrides?.["tools:append"] as Record<string, unknown>[] | undefined;
-      if (Array.isArray(toolsAppend)) {
-        for (const tool of toolsAppend) {
-          if (Array.isArray(tool.destinations)) {
-            for (const dest of tool.destinations as Record<string, unknown>[]) {
-              if (typeof dest.assistantId === "string") {
-                assistants.push(cleanId(dest.assistantId));
-              }
-            }
           }
         }
       }
