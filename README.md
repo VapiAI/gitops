@@ -40,9 +40,9 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 ## How to Use This Repo
 
 1. **Sync from Vapi first** using `pull` so local files reflect platform state.
-2. **Edit declarative resources** in `resources/` (`.md` assistants, `.yml` tools/squads/etc.).
+2. **Edit declarative resources** in `resources/<env>/` (`.md` assistants, `.yml` tools/squads/etc.).
 3. **Push selectively while iterating** (resource type or file path), then run a full push before release.
-4. **Promote by environment** (`dev` -> `stg` -> `prod`) using the same resource files with environment-specific state and credentials.
+4. **Promote by environment** (`dev` -> `stg` -> `prod`) by copying files between `resources/dev/`, `resources/stg/`, and `resources/prod/`.
 
 Use:
 - `pull` when Vapi might have changed
@@ -117,11 +117,13 @@ npm run push:dev
 Promotion example:
 
 ```bash
-# After validating in dev, promote selectively to staging
-npm run push:stg resources/squads/your-squad.yml
+# After validating in dev, copy to staging and push
+cp resources/dev/squads/your-squad.yml resources/stg/squads/
+npm run push:stg
 
 # Promote to prod when ready
-npm run push:prod resources/squads/your-squad.yml
+cp resources/stg/squads/your-squad.yml resources/prod/squads/
+npm run push:prod
 ```
 
 #### Pulling Without Losing Local Work
@@ -133,7 +135,7 @@ By default, `pull` preserves any files you've locally modified or deleted:
 
 npm run pull:dev
 # ⏭️  my-assistant (locally changed, skipping)
-# ✨  new-tool -> resources/tools/new-tool.yml
+# ✨  new-tool -> resources/dev/tools/new-tool.yml
 # Your edits are preserved, new platform resources are downloaded
 ```
 
@@ -156,7 +158,7 @@ npm run pull:dev
 git diff
 
 # Accept platform changes for a specific file
-git checkout -- resources/tools/some-tool.yml
+git checkout -- resources/dev/tools/some-tool.yml
 ```
 
 ### Selective Push (Partial Sync)
@@ -180,17 +182,17 @@ npm run push:dev simulationSuites
 
 ```bash
 # Push a single file
-npm run push:dev resources/assistants/my-assistant.md
+npm run push:dev resources/dev/assistants/my-assistant.md
 
 # Push multiple files
-npm run push:dev resources/assistants/booking.md resources/tools/my-tool.yml
+npm run push:dev resources/dev/assistants/booking.md resources/dev/tools/my-tool.yml
 ```
 
 #### Combined
 
 ```bash
 # Push specific file within a type
-npm run push:dev assistants resources/assistants/booking.md
+npm run push:dev assistants resources/dev/assistants/booking.md
 ```
 
 **Note:** Partial pushes skip deletion checks. Run full `npm run push:dev` to sync deletions.
@@ -202,7 +204,7 @@ Partial push is ideal for promoting specific squads or assistants to staging/pro
 ```bash
 # Push a single squad to staging — tools, structured outputs, and
 # assistants are created automatically if they don't exist yet
-npm run push:stg resources/squads/everblue-voice-squad-20374c37.yml
+npm run push:stg resources/stg/squads/everblue-voice-squad-20374c37.yml
 
 # Push assistants to prod — missing tools and structured outputs
 # are auto-applied first so references resolve correctly
@@ -257,7 +259,8 @@ The mock server exposes:
 vapi-gitops/
 ├── docs/
 │   ├── Vapi Prompt Optimization Guide.md   # Prompt authoring reference
-│   └── changelog.md                        # Significant change log
+│   ├── environment-scoped-resources.md     # Env isolation & promotion workflow
+│   └── changelog.md                        # Template for per-customer change tracking
 ├── src/
 │   ├── pull.ts                 # Pull platform state (with git stash/pop merge)
 │   ├── push.ts                 # Push local state to platform
@@ -272,15 +275,16 @@ vapi-gitops/
 │   ├── credentials.ts          # Credential resolution (name ↔ UUID)
 │   └── delete.ts               # Deletion & orphan checks
 ├── resources/
-│   ├── assistants/             # Assistant files (.md or .yml)
-│   ├── tools/                  # Tool YAML files
-│   ├── structuredOutputs/      # Structured output YAML files
-│   ├── squads/                 # Squad YAML files
-│   └── simulations/            # Simulation resources
-│       ├── personalities/      # Personality YAML files
-│       ├── scenarios/          # Scenario YAML files
-│       ├── tests/              # Simulation YAML files
-│       └── suites/             # Simulation suite YAML files
+│   ├── dev/                    # Dev environment resources (push:dev reads here)
+│   │   ├── assistants/
+│   │   ├── tools/
+│   │   ├── squads/
+│   │   ├── structuredOutputs/
+│   │   └── simulations/
+│   ├── stg/                    # Staging resources (push:stg reads here)
+│   │   └── (same structure)
+│   └── prod/                   # Production resources (push:prod reads here)
+│       └── (same structure)
 ├── scripts/
 │   └── mock-vapi-webhook-server.ts # Local server message receiver
 ├── .env.example                # Example env var file
@@ -440,7 +444,7 @@ simulationIds:
 
 **Option 1: With System Prompt (recommended)**
 
-Create `resources/assistants/my-assistant.md`:
+Create `resources/dev/assistants/my-assistant.md`:
 
 ```markdown
 ---
@@ -461,7 +465,7 @@ Instructions for the assistant...
 
 **Option 2: Without System Prompt**
 
-Create `resources/assistants/my-assistant.yml`:
+Create `resources/dev/assistants/my-assistant.yml`:
 
 ```yaml
 name: My Assistant
@@ -481,7 +485,7 @@ npm run push:dev
 
 ### How to Add a Tool
 
-Create `resources/tools/my-tool.yml`:
+Create `resources/dev/tools/my-tool.yml`:
 
 ```yaml
 type: function
@@ -507,29 +511,29 @@ Use the **filename without extension** as the resource ID:
 # In an assistant
 model:
   toolIds:
-    - my-tool              # → resources/tools/my-tool.yml
-    - utils/helper-tool    # → resources/tools/utils/helper-tool.yml
+    - my-tool              # → resources/<env>/tools/my-tool.yml
+    - utils/helper-tool    # → resources/<env>/tools/utils/helper-tool.yml
 artifactPlan:
   structuredOutputIds:
-    - call-summary         # → resources/structuredOutputs/call-summary.yml
+    - call-summary         # → resources/<env>/structuredOutputs/call-summary.yml
 ```
 
 ```yaml
 # In a squad
 members:
-  - assistantId: intake-agent    # → resources/assistants/intake-agent.md
+  - assistantId: intake-agent    # → resources/<env>/assistants/intake-agent.md
 ```
 
 ```yaml
 # In a simulation
-personalityId: skeptical-sam     # → resources/simulations/personalities/skeptical-sam.yml
-scenarioId: happy-path           # → resources/simulations/scenarios/happy-path.yml
+personalityId: skeptical-sam     # → resources/<env>/simulations/personalities/skeptical-sam.yml
+scenarioId: happy-path           # → resources/<env>/simulations/scenarios/happy-path.yml
 ```
 
 ### How to Delete a Resource
 
 1. **Remove references** to the resource from other files
-2. **Delete the file**: `rm resources/tools/my-tool.yml`
+2. **Delete the file**: `rm resources/dev/tools/my-tool.yml`
 3. **Push**: `npm run push:dev`
 
 The engine will:
@@ -543,7 +547,7 @@ The engine will:
 Create subdirectories for multi-tenant or feature organization:
 
 ```
-resources/
+resources/<env>/
 ├── assistants/
 │   ├── shared/
 │   │   └── fallback.md

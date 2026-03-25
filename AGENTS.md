@@ -6,24 +6,26 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **Prompt quality:** Whenever you create a new assistant or change an existing assistant’s system prompt, read **`docs/Vapi Prompt Optimization Guide.md`** first. It goes deeper on structure, voice constraints, tool usage, and evaluation than the summary in this file.
 
+**Environment-scoped resources:** Resources live in `resources/<env>/` (e.g. `resources/dev/`, `resources/prod/`). Each environment directory is isolated — `push:dev` only touches `resources/dev/`, `push:prod` only touches `resources/prod/`. See **`docs/environment-scoped-resources.md`** for the full promotion workflow and rationale.
+
 ---
 
 ## Quick Reference
 
 | I want to...                        | What to do                                                      |
 |-------------------------------------|-----------------------------------------------------------------|
-| Edit an assistant's system prompt   | Edit the markdown body in `resources/assistants/<name>.md`      |
+| Edit an assistant's system prompt   | Edit the markdown body in `resources/<env>/assistants/<name>.md` |
 | Change assistant settings           | Edit the YAML frontmatter in the same `.md` file                |
-| Add a new tool                      | Create `resources/tools/<name>.yml`                             |
-| Add a new assistant                 | Create `resources/assistants/<name>.md`                         |
-| Create a multi-agent squad          | Create `resources/squads/<name>.yml`                            |
-| Add post-call analysis              | Create `resources/structuredOutputs/<name>.yml`                 |
-| Write test simulations              | Create files under `resources/simulations/`                     |
+| Add a new tool                      | Create `resources/<env>/tools/<name>.yml`                       |
+| Add a new assistant                 | Create `resources/<env>/assistants/<name>.md`                   |
+| Create a multi-agent squad          | Create `resources/<env>/squads/<name>.yml`                      |
+| Add post-call analysis              | Create `resources/<env>/structuredOutputs/<name>.yml`           |
+| Write test simulations              | Create files under `resources/<env>/simulations/`               |
+| Promote resources across envs       | Copy files from `resources/dev/` to `resources/stg/` or `resources/prod/` |
 | Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                |
-| Track significant config updates    | Update `docs/changelog.md`                                      |
 | Push changes to Vapi                | `npm run push:dev` or `npm run push:prod`                       |
 | Pull latest from Vapi               | `npm run pull:dev` or `npm run pull:dev:force`                  |
-| Push only one file                  | `npm run push:dev resources/assistants/my-agent.md`             |
+| Push only one file                  | `npm run push:dev resources/dev/assistants/my-agent.md`         |
 | Test a call                         | `npm run call:dev -- -a <assistant-name>`                       |
 
 ---
@@ -32,19 +34,21 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 ```
 docs/
-├── Vapi Prompt Optimization Guide.md   # In-depth prompt authoring (use when creating or editing assistants)
-└── changelog.md                        # Significant resource/config changes over time
+├── Vapi Prompt Optimization Guide.md          # In-depth prompt authoring
+├── environment-scoped-resources.md            # Environment isolation & promotion workflow
+└── changelog.md                               # Template for tracking per-customer config changes
 
 resources/
-├── assistants/              # Voice agent definitions (.md or .yml)
-├── tools/                   # Tool/function definitions (.yml)
-├── structuredOutputs/       # Post-call analysis schemas (.yml)
-├── squads/                  # Multi-agent squad configs (.yml)
-└── simulations/             # Test infrastructure
-    ├── personalities/       # Simulated caller personas (.yml)
-    ├── scenarios/           # Test case scripts (.yml)
-    ├── tests/               # Simulation runs (.yml)
-    └── suites/              # Grouped simulation batches (.yml)
+├── dev/                     # Dev environment resources (push:dev reads here)
+│   ├── assistants/
+│   ├── tools/
+│   ├── squads/
+│   ├── structuredOutputs/
+│   └── simulations/
+├── stg/                     # Staging environment resources (push:stg reads here)
+│   └── (same structure)
+└── prod/                    # Production environment resources (push:prod reads here)
+    └── (same structure)
 
 scripts/
 └── mock-vapi-webhook-server.ts        # Local webhook receiver for server message testing
@@ -58,7 +62,7 @@ scripts/
 
 Assistants are voice agents that handle phone calls. They are defined as **Markdown files with YAML frontmatter**.
 
-**File:** `resources/assistants/<name>.md`
+**File:** `resources/<env>/assistants/<name>.md`
 
 ```markdown
 ---
@@ -266,7 +270,7 @@ artifactPlan:
 
 Tools are functions the assistant can call during a conversation.
 
-**File:** `resources/tools/<name>.yml`
+**File:** `resources/<env>/tools/<name>.yml`
 
 #### Function Tool (calls a webhook)
 
@@ -365,7 +369,7 @@ function:
 
 Structured outputs extract data from call transcripts after the call ends. They run LLM analysis on the conversation.
 
-**File:** `resources/structuredOutputs/<name>.yml`
+**File:** `resources/<env>/structuredOutputs/<name>.yml`
 
 #### Boolean Output (yes/no evaluation)
 
@@ -446,12 +450,12 @@ schema:
 
 Squads define multi-agent systems where assistants can hand off to each other.
 
-**File:** `resources/squads/<name>.yml`
+**File:** `resources/<env>/squads/<name>.yml`
 
 ```yaml
 name: My Squad
 members:
-  - assistantId: intake-agent-a1b2c3d4         # References resources/assistants/<id>.md
+  - assistantId: intake-agent-a1b2c3d4         # References resources/<env>/assistants/<id>.md
     assistantOverrides:                       # Override assistant settings within this squad
       metadata:
         position:                             # Visual position in dashboard editor
@@ -678,7 +682,7 @@ npm run pull:dev              # Pull from Vapi (preserve local changes)
 npm run pull:dev:force        # Pull from Vapi (overwrite everything)
 npm run push:dev              # Push all local changes to Vapi
 npm run push:dev assistants   # Push only assistants
-npm run push:dev resources/assistants/my-agent.md  # Push single file
+npm run push:dev resources/dev/assistants/my-agent.md  # Push single file
 
 # Testing
 npm run call:dev -- -a <assistant-name>   # Call an assistant via WebSocket

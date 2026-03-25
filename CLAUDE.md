@@ -11,19 +11,3 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
 
 1. Read `AGENTS.md` first.
 2. Then read this file (`CLAUDE.md`) for additional policy constraints.
-
-## Changelog Discipline
-
-Always update `docs/changelog.md` when making significant configuration changes.
-
-Significant changes include:
-- Assistant updates (prompt or YAML frontmatter)
-- Tool updates (new tools, changed parameters, changed behavior)
-- Squad updates (members, handoffs, overrides)
-- Other behavior-impacting resource changes (structured outputs, simulations)
-
-Each changelog update should state:
-- Date (`YYYY-MM-DD`)
-- Files/resources changed
-- Why the change was made
-- Expected impact

@@ -3,7 +3,14 @@ import { existsSync, readdirSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { join, dirname, relative } from "path";
 import { stringify } from "yaml";
-import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN, RESOURCES_DIR, BASE_DIR, APPLY_FILTER } from "./config.ts";
+import {
+  VAPI_ENV,
+  VAPI_BASE_URL,
+  VAPI_TOKEN,
+  RESOURCES_DIR,
+  BASE_DIR,
+  APPLY_FILTER,
+} from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import { credentialReverseMap, deepReplaceValues } from "./credentials.ts";
 import type { StateFile, ResourceType } from "./types.ts";
@@ -27,8 +34,8 @@ const EXCLUDED_FIELDS = [
   "analyticsMetadata",
   "isDeleted",
   // Computed/derived fields that shouldn't be synced back
-  "isServerUrlSecretSet",  // Computed: indicates if server URL secret is set
-  "workflowIds",           // Server-managed: workflows are a separate resource type
+  "isServerUrlSecretSet", // Computed: indicates if server URL secret is set
+  "workflowIds", // Server-managed: workflows are a separate resource type
 ];
 
 // Map resource types to their API endpoints
@@ -68,11 +75,21 @@ function gitCmd(args: string): string {
 }
 
 function isGitRepo(): boolean {
-  try { gitCmd("rev-parse --is-inside-work-tree"); return true; } catch { return false; }
+  try {
+    gitCmd("rev-parse --is-inside-work-tree");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function gitHasCommits(): boolean {
-  try { gitCmd("rev-parse HEAD"); return true; } catch { return false; }
+  try {
+    gitCmd("rev-parse HEAD");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Returns relative paths of all locally modified, deleted, or untracked files
@@ -97,10 +114,12 @@ function getLocallyChangedFiles(): Set<string> {
 // API Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function fetchAllResources(resourceType: ResourceType): Promise<VapiResource[]> {
+export async function fetchAllResources(
+  resourceType: ResourceType,
+): Promise<VapiResource[]> {
   const endpoint = ENDPOINT_MAP[resourceType];
   const url = `${VAPI_BASE_URL}${endpoint}`;
-  
+
   const response = await fetch(url, {
     method: "GET",
     headers: {
@@ -111,17 +130,27 @@ export async function fetchAllResources(resourceType: ResourceType): Promise<Vap
   if (!response.ok) {
     const errorText = await response.text();
     let apiMessage = errorText;
-    try { const parsed = JSON.parse(errorText); if (typeof parsed.message === "string") apiMessage = parsed.message; } catch {}
-    throw new Error(`API GET ${endpoint} failed (${response.status}): ${apiMessage}`);
+    try {
+      const parsed = JSON.parse(errorText);
+      if (typeof parsed.message === "string") apiMessage = parsed.message;
+    } catch {}
+    throw new Error(
+      `API GET ${endpoint} failed (${response.status}): ${apiMessage}`,
+    );
   }
 
   const data = await response.json();
-  
+
   // Handle paginated response format (e.g., structured-output returns { results: [], metadata: {} })
-  if (data && typeof data === "object" && "results" in data && Array.isArray(data.results)) {
+  if (
+    data &&
+    typeof data === "object" &&
+    "results" in data &&
+    Array.isArray(data.results)
+  ) {
     return data.results as VapiResource[];
   }
-  
+
   return data as VapiResource[];
 }
 
@@ -146,8 +175,13 @@ async function fetchCredentials(): Promise<VapiCredential[]> {
   if (!response.ok) {
     const errorText = await response.text();
     let apiMessage = errorText;
-    try { const parsed = JSON.parse(errorText); if (typeof parsed.message === "string") apiMessage = parsed.message; } catch {}
-    throw new Error(`API GET /credential failed (${response.status}): ${apiMessage}`);
+    try {
+      const parsed = JSON.parse(errorText);
+      if (typeof parsed.message === "string") apiMessage = parsed.message;
+    } catch {}
+    throw new Error(
+      `API GET /credential failed (${response.status}): ${apiMessage}`,
+    );
   }
 
   return (await response.json()) as VapiCredential[];
@@ -237,25 +271,32 @@ function findExistingResourceId(
 
 function cleanResource(resource: VapiResource): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
-  
+
   for (const [key, value] of Object.entries(resource)) {
-    if (!EXCLUDED_FIELDS.includes(key) && value !== null && value !== undefined) {
+    if (
+      !EXCLUDED_FIELDS.includes(key) &&
+      value !== null &&
+      value !== undefined
+    ) {
       cleaned[key] = value;
     }
   }
-  
+
   return cleaned;
 }
 
-function buildReverseMap(state: StateFile, resourceType: ResourceType): Map<string, string> {
+function buildReverseMap(
+  state: StateFile,
+  resourceType: ResourceType,
+): Map<string, string> {
   // uuid -> resourceId
   const map = new Map<string, string>();
   const stateSection = state[resourceType];
-  
+
   for (const [resourceId, uuid] of Object.entries(stateSection)) {
     map.set(uuid, resourceId);
   }
-  
+
   return map;
 }
 
@@ -265,7 +306,7 @@ function buildReverseMap(state: StateFile, resourceType: ResourceType): Map<stri
 
 function resolveReferencesToResourceIds(
   resource: Record<string, unknown>,
-  state: StateFile
+  state: StateFile,
 ): Record<string, unknown> {
   const toolsMap = buildReverseMap(state, "tools");
   const assistantsMap = buildReverseMap(state, "assistants");
@@ -273,42 +314,46 @@ function resolveReferencesToResourceIds(
   const personalitiesMap = buildReverseMap(state, "personalities");
   const scenariosMap = buildReverseMap(state, "scenarios");
   const simulationsMap = buildReverseMap(state, "simulations");
-  
+
   const resolved = { ...resource };
-  
+
   // Resolve toolIds in model
   if (resolved.model && typeof resolved.model === "object") {
     const model = { ...(resolved.model as Record<string, unknown>) };
     if (Array.isArray(model.toolIds)) {
-      model.toolIds = model.toolIds.map((uuid: string) => 
-        toolsMap.get(uuid) ?? uuid
+      model.toolIds = model.toolIds.map(
+        (uuid: string) => toolsMap.get(uuid) ?? uuid,
       );
     }
     resolved.model = model;
   }
-  
+
   // Resolve structuredOutputIds in artifactPlan
   if (resolved.artifactPlan && typeof resolved.artifactPlan === "object") {
-    const artifactPlan = { ...(resolved.artifactPlan as Record<string, unknown>) };
+    const artifactPlan = {
+      ...(resolved.artifactPlan as Record<string, unknown>),
+    };
     if (Array.isArray(artifactPlan.structuredOutputIds)) {
-      artifactPlan.structuredOutputIds = artifactPlan.structuredOutputIds.map((uuid: string) =>
-        structuredOutputsMap.get(uuid) ?? uuid
+      artifactPlan.structuredOutputIds = artifactPlan.structuredOutputIds.map(
+        (uuid: string) => structuredOutputsMap.get(uuid) ?? uuid,
       );
     }
     resolved.artifactPlan = artifactPlan;
   }
-  
+
   // Resolve assistantIds in structured outputs (API returns camelCase)
   if (Array.isArray(resolved.assistantIds)) {
-    resolved.assistant_ids = (resolved.assistantIds as string[]).map((uuid: string) =>
-      assistantsMap.get(uuid) ?? uuid
+    resolved.assistant_ids = (resolved.assistantIds as string[]).map(
+      (uuid: string) => assistantsMap.get(uuid) ?? uuid,
     );
     delete resolved.assistantIds;
   }
-  
+
   // Resolve assistantId in tool destinations (handoff tools)
   if (Array.isArray(resolved.destinations)) {
-    resolved.destinations = (resolved.destinations as Record<string, unknown>[]).map((dest) => {
+    resolved.destinations = (
+      resolved.destinations as Record<string, unknown>[]
+    ).map((dest) => {
       if (typeof dest.assistantId === "string") {
         return {
           ...dest,
@@ -318,44 +363,55 @@ function resolveReferencesToResourceIds(
       return dest;
     });
   }
-  
+
   // Resolve members[].assistantId in squads
   if (Array.isArray(resolved.members)) {
-    resolved.members = (resolved.members as Record<string, unknown>[]).map((member) => {
-      const resolvedMember = { ...member };
-      if (typeof member.assistantId === "string") {
-        resolvedMember.assistantId = assistantsMap.get(member.assistantId) ?? member.assistantId;
-      }
-      // Resolve assistantDestinations[].assistantId
-      if (Array.isArray(member.assistantDestinations)) {
-        resolvedMember.assistantDestinations = (member.assistantDestinations as Record<string, unknown>[]).map((dest) => {
-          if (typeof dest.assistantId === "string") {
-            return { ...dest, assistantId: assistantsMap.get(dest.assistantId) ?? dest.assistantId };
-          }
-          return dest;
-        });
-      }
-      return resolvedMember;
-    });
-  }
-  
-  // Resolve personalityId in simulations
-  if (typeof resolved.personalityId === "string") {
-    resolved.personalityId = personalitiesMap.get(resolved.personalityId) ?? resolved.personalityId;
-  }
-  
-  // Resolve scenarioId in simulations
-  if (typeof resolved.scenarioId === "string") {
-    resolved.scenarioId = scenariosMap.get(resolved.scenarioId) ?? resolved.scenarioId;
-  }
-  
-  // Resolve simulationIds in simulation suites
-  if (Array.isArray(resolved.simulationIds)) {
-    resolved.simulationIds = (resolved.simulationIds as string[]).map((uuid: string) =>
-      simulationsMap.get(uuid) ?? uuid
+    resolved.members = (resolved.members as Record<string, unknown>[]).map(
+      (member) => {
+        const resolvedMember = { ...member };
+        if (typeof member.assistantId === "string") {
+          resolvedMember.assistantId =
+            assistantsMap.get(member.assistantId) ?? member.assistantId;
+        }
+        // Resolve assistantDestinations[].assistantId
+        if (Array.isArray(member.assistantDestinations)) {
+          resolvedMember.assistantDestinations = (
+            member.assistantDestinations as Record<string, unknown>[]
+          ).map((dest) => {
+            if (typeof dest.assistantId === "string") {
+              return {
+                ...dest,
+                assistantId:
+                  assistantsMap.get(dest.assistantId) ?? dest.assistantId,
+              };
+            }
+            return dest;
+          });
+        }
+        return resolvedMember;
+      },
     );
   }
-  
+
+  // Resolve personalityId in simulations
+  if (typeof resolved.personalityId === "string") {
+    resolved.personalityId =
+      personalitiesMap.get(resolved.personalityId) ?? resolved.personalityId;
+  }
+
+  // Resolve scenarioId in simulations
+  if (typeof resolved.scenarioId === "string") {
+    resolved.scenarioId =
+      scenariosMap.get(resolved.scenarioId) ?? resolved.scenarioId;
+  }
+
+  // Resolve simulationIds in simulation suites
+  if (Array.isArray(resolved.simulationIds)) {
+    resolved.simulationIds = (resolved.simulationIds as string[]).map(
+      (uuid: string) => simulationsMap.get(uuid) ?? uuid,
+    );
+  }
+
   return resolved;
 }
 
@@ -367,34 +423,37 @@ function resolveReferencesToResourceIds(
  * Extract system prompt from model.messages if present
  * Returns the system prompt content and the cleaned data (without system message)
  */
-function extractSystemPrompt(data: Record<string, unknown>): { systemPrompt: string | null; cleanedData: Record<string, unknown> } {
+function extractSystemPrompt(data: Record<string, unknown>): {
+  systemPrompt: string | null;
+  cleanedData: Record<string, unknown>;
+} {
   const model = data.model as Record<string, unknown> | undefined;
   if (!model || !Array.isArray(model.messages)) {
     return { systemPrompt: null, cleanedData: data };
   }
-  
+
   const messages = model.messages as Array<{ role?: string; content?: string }>;
-  const systemMessage = messages.find(m => m.role === "system");
-  
+  const systemMessage = messages.find((m) => m.role === "system");
+
   if (!systemMessage?.content) {
     return { systemPrompt: null, cleanedData: data };
   }
-  
+
   // Remove system message from messages array
-  const remainingMessages = messages.filter(m => m.role !== "system");
-  
+  const remainingMessages = messages.filter((m) => m.role !== "system");
+
   // Create cleaned data without system message
   const cleanedData = { ...data };
   const cleanedModel = { ...model };
-  
+
   if (remainingMessages.length > 0) {
     cleanedModel.messages = remainingMessages;
   } else {
     delete cleanedModel.messages;
   }
-  
+
   cleanedData.model = cleanedModel;
-  
+
   return { systemPrompt: systemMessage.content, cleanedData };
 }
 
@@ -418,37 +477,37 @@ const YAML_OPTIONS = {
 async function writeResourceFile(
   resourceType: ResourceType,
   resourceId: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ): Promise<string> {
   const folderPath = FOLDER_MAP[resourceType];
   const dir = join(RESOURCES_DIR, folderPath);
-  
+
   // For assistants, check if there's a system prompt to extract
   if (resourceType === "assistants") {
     const { systemPrompt, cleanedData } = extractSystemPrompt(data);
-    
+
     if (systemPrompt) {
       // Write as .md with frontmatter
       const filePath = join(dir, `${resourceId}.md`);
       await mkdir(dirname(filePath), { recursive: true });
-      
+
       const yamlContent = stringify(cleanedData, YAML_OPTIONS);
-      
+
       const mdContent = `---\n${yamlContent}---\n\n${systemPrompt}\n`;
       await writeFile(filePath, mdContent);
-      
+
       return filePath;
     }
   }
-  
+
   // Default: write as .yml
   const filePath = join(dir, `${resourceId}.yml`);
   await mkdir(dirname(filePath), { recursive: true });
-  
+
   const yamlContent = stringify(data, YAML_OPTIONS);
-  
+
   await writeFile(filePath, yamlContent);
-  
+
   return filePath;
 }
 
@@ -469,14 +528,14 @@ export async function pullResourceType(
   force?: boolean,
 ): Promise<PullStats> {
   console.log(`\n📥 Pulling ${resourceType}...`);
-  
-  const resources = await fetchAllResources(resourceType) ?? [];
-  
+
+  const resources = (await fetchAllResources(resourceType)) ?? [];
+
   if (!Array.isArray(resources)) {
     console.log(`   ⚠️  No ${resourceType} found (API returned non-array)`);
     return { created: 0, updated: 0, skipped: 0 };
   }
-  
+
   console.log(`   Found ${resources.length} ${resourceType} in Vapi`);
 
   const reverseMap = buildReverseMap(state, resourceType);
@@ -491,18 +550,29 @@ export async function pullResourceType(
     // Check if we already have this resource in state (by UUID)
     let resourceId = reverseMap.get(resource.id);
     const isNew = !resourceId;
-    
+
     if (!resourceId) {
       // Reuse an existing file's resourceId if the name matches (cross-env pull)
-      resourceId = findExistingResourceId(resourceType, resource)
-        ?? generateResourceId(resource);
+      resourceId =
+        findExistingResourceId(resourceType, resource) ??
+        generateResourceId(resource);
     }
 
     // Skip files that have been locally modified (git detection)
     if (changedFiles) {
       const folderPath = FOLDER_MAP[resourceType];
-      const mdPath = join("resources", folderPath, `${resourceId}.md`);
-      const ymlPath = join("resources", folderPath, `${resourceId}.yml`);
+      const mdPath = join(
+        "resources",
+        VAPI_ENV,
+        folderPath,
+        `${resourceId}.md`,
+      );
+      const ymlPath = join(
+        "resources",
+        VAPI_ENV,
+        folderPath,
+        `${resourceId}.yml`,
+      );
       if (changedFiles.has(mdPath) || changedFiles.has(ymlPath)) {
         console.log(`   ⏭️  ${resourceId} (locally changed, skipping)`);
         newStateSection[resourceId] = resource.id;
@@ -516,9 +586,10 @@ export async function pullResourceType(
     if (!force && !isNew) {
       const folderPath = FOLDER_MAP[resourceType];
       const dir = join(RESOURCES_DIR, folderPath);
-      const fileExists = existsSync(join(dir, `${resourceId}.md`))
-        || existsSync(join(dir, `${resourceId}.yml`))
-        || existsSync(join(dir, `${resourceId}.yaml`));
+      const fileExists =
+        existsSync(join(dir, `${resourceId}.md`)) ||
+        existsSync(join(dir, `${resourceId}.yml`)) ||
+        existsSync(join(dir, `${resourceId}.yaml`));
       if (!fileExists) {
         console.log(`   ⏭️  ${resourceId} (locally deleted, skipping)`);
         newStateSection[resourceId] = resource.id;
@@ -526,9 +597,10 @@ export async function pullResourceType(
         continue;
       }
     }
-    
+
     // Detect platform defaults (orgId is null/missing — read-only, immutable)
-    const isPlatformDefault = resource.orgId === null || resource.orgId === undefined;
+    const isPlatformDefault =
+      resource.orgId === null || resource.orgId === undefined;
 
     // Clean, resolve resource references, and replace credential UUIDs with names
     const cleaned = cleanResource(resource);
@@ -539,23 +611,29 @@ export async function pullResourceType(
     if (isPlatformDefault) {
       withCredNames._platformDefault = true;
     }
-    
+
     // Write to file
-    const filePath = await writeResourceFile(resourceType, resourceId, withCredNames);
+    const filePath = await writeResourceFile(
+      resourceType,
+      resourceId,
+      withCredNames,
+    );
     const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
     const relPath = relative(BASE_DIR, filePath);
-    console.log(`   ${icon} ${resourceId} -> ${relPath}${isPlatformDefault ? " (platform default, read-only)" : ""}`);
-    
+    console.log(
+      `   ${icon} ${resourceId} -> ${relPath}${isPlatformDefault ? " (platform default, read-only)" : ""}`,
+    );
+
     if (isNew) created++;
     else updated++;
 
     // Update state
     newStateSection[resourceId] = resource.id;
   }
-  
+
   // Update state with new mappings
   state[resourceType] = newStateSection;
-  
+
   return { created, updated, skipped };
 }
 
@@ -568,13 +646,19 @@ async function main(): Promise<void> {
 
   const typeFilter = APPLY_FILTER.resourceTypes;
 
-  console.log("═══════════════════════════════════════════════════════════════");
-  console.log(`🔄 Vapi GitOps Pull - Environment: ${VAPI_ENV}${force ? " (force)" : ""}`);
+  console.log(
+    "═══════════════════════════════════════════════════════════════",
+  );
+  console.log(
+    `🔄 Vapi GitOps Pull - Environment: ${VAPI_ENV}${force ? " (force)" : ""}`,
+  );
   console.log(`   API: ${VAPI_BASE_URL}`);
   if (typeFilter?.length) {
     console.log(`   Filter: ${typeFilter.join(", ")}`);
   }
-  console.log("═══════════════════════════════════════════════════════════════");
+  console.log(
+    "═══════════════════════════════════════════════════════════════",
+  );
 
   // Default mode: skip locally changed files (local is source of truth)
   // Force mode: overwrite everything (platform is source of truth)
@@ -585,14 +669,20 @@ async function main(): Promise<void> {
     changedFiles = getLocallyChangedFiles();
     // Only keep resource files — non-resource changes don't matter
     for (const f of changedFiles) {
-      if (!f.startsWith("resources/")) changedFiles.delete(f);
+      if (!f.startsWith(`resources/${VAPI_ENV}/`)) changedFiles.delete(f);
     }
     if (changedFiles.size > 0) {
-      console.log(`\n📦 ${changedFiles.size} locally changed file(s) will be preserved`);
-      console.log("   Use --force to overwrite all local files with platform state");
+      console.log(
+        `\n📦 ${changedFiles.size} locally changed file(s) will be preserved`,
+      );
+      console.log(
+        "   Use --force to overwrite all local files with platform state",
+      );
     }
   } else if (force) {
-    console.log("\n⚡ Force mode: overwriting all local files with platform state");
+    console.log(
+      "\n⚡ Force mode: overwriting all local files with platform state",
+    );
   }
 
   const state = loadState();
@@ -615,24 +705,70 @@ async function main(): Promise<void> {
   // Pull in reverse-resolution order: pull resources that are referenced by others first,
   // so their state is populated when resolving references (UUID → resourceId) in dependent types.
   // e.g. structuredOutputs reference assistants, so assistants must be pulled first.
-  const shouldPull = (type: ResourceType) => !typeFilter?.length || typeFilter.includes(type);
+  const shouldPull = (type: ResourceType) =>
+    !typeFilter?.length || typeFilter.includes(type);
 
-  if (shouldPull("tools")) stats.tools = await pullResourceType("tools", state, changedFiles, force);
-  if (shouldPull("assistants")) stats.assistants = await pullResourceType("assistants", state, changedFiles, force);
-  if (shouldPull("structuredOutputs")) stats.structuredOutputs = await pullResourceType("structuredOutputs", state, changedFiles, force);
-  if (shouldPull("squads")) stats.squads = await pullResourceType("squads", state, changedFiles, force);
-  if (shouldPull("personalities")) stats.personalities = await pullResourceType("personalities", state, changedFiles, force);
-  if (shouldPull("scenarios")) stats.scenarios = await pullResourceType("scenarios", state, changedFiles, force);
-  if (shouldPull("simulations")) stats.simulations = await pullResourceType("simulations", state, changedFiles, force);
-  if (shouldPull("simulationSuites")) stats.simulationSuites = await pullResourceType("simulationSuites", state, changedFiles, force);
+  if (shouldPull("tools"))
+    stats.tools = await pullResourceType("tools", state, changedFiles, force);
+  if (shouldPull("assistants"))
+    stats.assistants = await pullResourceType(
+      "assistants",
+      state,
+      changedFiles,
+      force,
+    );
+  if (shouldPull("structuredOutputs"))
+    stats.structuredOutputs = await pullResourceType(
+      "structuredOutputs",
+      state,
+      changedFiles,
+      force,
+    );
+  if (shouldPull("squads"))
+    stats.squads = await pullResourceType("squads", state, changedFiles, force);
+  if (shouldPull("personalities"))
+    stats.personalities = await pullResourceType(
+      "personalities",
+      state,
+      changedFiles,
+      force,
+    );
+  if (shouldPull("scenarios"))
+    stats.scenarios = await pullResourceType(
+      "scenarios",
+      state,
+      changedFiles,
+      force,
+    );
+  if (shouldPull("simulations"))
+    stats.simulations = await pullResourceType(
+      "simulations",
+      state,
+      changedFiles,
+      force,
+    );
+  if (shouldPull("simulationSuites"))
+    stats.simulationSuites = await pullResourceType(
+      "simulationSuites",
+      state,
+      changedFiles,
+      force,
+    );
 
   await saveState(state);
 
   // Summary
-  const totalSkipped = Object.values(stats).reduce((sum, s) => sum + s.skipped, 0);
-  console.log("\n═══════════════════════════════════════════════════════════════");
+  const totalSkipped = Object.values(stats).reduce(
+    (sum, s) => sum + s.skipped,
+    0,
+  );
+  console.log(
+    "\n═══════════════════════════════════════════════════════════════",
+  );
   console.log("✅ Pull complete!");
-  console.log("═══════════════════════════════════════════════════════════════\n");
+  console.log(
+    "═══════════════════════════════════════════════════════════════\n",
+  );
 
   console.log("📋 Summary:");
   for (const [type, { created, updated, skipped }] of Object.entries(stats)) {
@@ -649,6 +785,9 @@ async function main(): Promise<void> {
 
 // Run the pull engine
 main().catch((error) => {
-  console.error("\n❌ Pull failed:", error instanceof Error ? error.message : error);
+  console.error(
+    "\n❌ Pull failed:",
+    error instanceof Error ? error.message : error,
+  );
   process.exit(1);
 });

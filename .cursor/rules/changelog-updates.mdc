@@ -1,11 +1,15 @@
 ---
-description: Require changelog updates for significant config changes
+description: Require changelog updates for significant config changes in customer deployments
 alwaysApply: true
 ---
 
 # Changelog Update Requirement
 
-When making significant configuration changes, update `docs/changelog.md` in the same change.
+This rule applies to **customer deployment clones** of the gitops repo, not the root template repo itself.
+
+**How to tell the difference:** If `docs/changelog.md` still contains the placeholder section header `## YYYY-MM-DD`, this is the unmodified template and you should NOT update the changelog. Once that placeholder has been replaced with real dated entries, this is a customer deployment and the rule below applies.
+
+When making significant configuration changes in a customer deployment, update `docs/changelog.md` in the same change.
 
 Significant changes include:
 - Assistant changes (prompt/body/frontmatter updates)
