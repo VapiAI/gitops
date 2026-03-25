@@ -37,6 +37,20 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 
 ---
 
+## How to Use This Repo
+
+1. **Sync from Vapi first** using `pull` so local files reflect platform state.
+2. **Edit declarative resources** in `resources/` (`.md` assistants, `.yml` tools/squads/etc.).
+3. **Push selectively while iterating** (resource type or file path), then run a full push before release.
+4. **Promote by environment** (`dev` -> `stg` -> `prod`) using the same resource files with environment-specific state and credentials.
+
+Use:
+- `pull` when Vapi might have changed
+- `push` for explicit deploys
+- `apply` (`pull -> merge -> push`) when you want one command for sync + deploy
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -53,8 +67,13 @@ npm install
 ### Setup Environment
 
 ```bash
-# Create your .env file with your Vapi token
-echo "VAPI_TOKEN=your-token-here" > .env.dev
+# Copy example values, then set real keys
+cp .env.example .env.dev
+cp .env.example .env.stg
+cp .env.example .env.prod
+
+# Add the correct VAPI_TOKEN for each org/environment
+# Note: this repo uses .env.stg (not .env.staging)
 ```
 
 ### Commands
@@ -63,31 +82,46 @@ echo "VAPI_TOKEN=your-token-here" > .env.dev
 |---------|-------------|
 | `npm run build` | Type-check the codebase |
 | `npm run pull:dev` | Pull platform state, preserve local changes |
+| `npm run pull:stg` | Pull staging state, preserve local changes |
 | `npm run pull:dev:force` | Pull platform state, overwrite everything |
+| `npm run pull:stg:force` | Pull staging state, overwrite everything |
 | `npm run pull:prod` | Pull from prod, preserve local changes |
 | `npm run pull:prod:force` | Pull from prod, overwrite everything |
 | `npm run push:dev` | Push local files to Vapi (dev) |
+| `npm run push:stg` | Push local files to Vapi (staging) |
 | `npm run push:prod` | Push local files to Vapi (prod) |
 | `npm run apply:dev` | Pull → Merge → Push in one shot (dev) |
+| `npm run apply:stg` | Pull → Merge → Push in one shot (staging) |
 | `npm run apply:prod` | Pull → Merge → Push in one shot (prod) |
 | `npm run push:dev assistants` | Push only assistants (dev) |
 | `npm run push:dev tools` | Push only tools (dev) |
 | `npm run call:dev -- -a <name>` | Start a WebSocket call to an assistant (dev) |
 | `npm run call:dev -- -s <name>` | Start a WebSocket call to a squad (dev) |
+| `npm run mock:webhook` | Run local webhook receiver for Vapi server messages |
 
 ### Basic Workflow
 
 ```bash
-# First time: pull all resources from Vapi
+# First time: pull all resources from Vapi for your target env
 npm run pull:dev:force
 
 # Commit the initial state
 git add . && git commit -m "initial pull"
 
-# Make changes to YAML/MD files...
+# Make changes to YAML/MD files under resources/
 
-# Push changes to Vapi
+# Push your changes (full sync)
 npm run push:dev
+```
+
+Promotion example:
+
+```bash
+# After validating in dev, promote selectively to staging
+npm run push:stg resources/squads/your-squad.yml
+
+# Promote to prod when ready
+npm run push:prod resources/squads/your-squad.yml
 ```
 
 #### Pulling Without Losing Local Work
@@ -193,12 +227,37 @@ If a dependency already exists on the platform (UUID in the state file) but its 
 
 This means you can work on everything in dev, then selectively push a single squad or assistant to staging or prod — no need for a full `push` that touches every resource.
 
+### Webhook Local Testing
+
+Use the local mock receiver when validating Vapi `serverMessages` delivery.
+
+```bash
+# 1) Run local receiver
+npm run mock:webhook
+
+# 2) Expose localhost (example)
+ngrok http 8787
+```
+
+Then set your assistant `server.url` to the ngrok HTTPS URL and include event types like:
+- `speech-update`
+- `status-update`
+- `end-of-call-report`
+
+The mock server exposes:
+- `POST /webhook` (or `POST /`)
+- `GET /health`
+- `GET /events`
+
 ---
 
 ## Project Structure
 
 ```
 vapi-gitops/
+├── docs/
+│   ├── Vapi Prompt Optimization Guide.md   # Prompt authoring reference
+│   └── changelog.md                        # Significant change log
 ├── src/
 │   ├── pull.ts                 # Pull platform state (with git stash/pop merge)
 │   ├── push.ts                 # Push local state to platform
@@ -222,9 +281,14 @@ vapi-gitops/
 │       ├── scenarios/          # Scenario YAML files
 │       ├── tests/              # Simulation YAML files
 │       └── suites/             # Simulation suite YAML files
+├── scripts/
+│   └── mock-vapi-webhook-server.ts # Local server message receiver
+├── .env.example                # Example env var file
 ├── .env.dev                    # Dev environment secrets (gitignored)
+├── .env.stg                    # Staging environment secrets (gitignored)
 ├── .env.prod                   # Prod environment secrets (gitignored)
 ├── .vapi-state.dev.json        # Dev state file
+├── .vapi-state.stg.json        # Staging state file
 └── .vapi-state.prod.json       # Prod state file
 ```
 

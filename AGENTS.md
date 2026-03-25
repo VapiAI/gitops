@@ -4,6 +4,8 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **You do NOT need to know how Vapi works internally.** This guide tells you everything you need to author and modify resources.
 
+**Prompt quality:** Whenever you create a new assistant or change an existing assistant’s system prompt, read **`docs/Vapi Prompt Optimization Guide.md`** first. It goes deeper on structure, voice constraints, tool usage, and evaluation than the summary in this file.
+
 ---
 
 ## Quick Reference
@@ -17,6 +19,8 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Create a multi-agent squad          | Create `resources/squads/<name>.yml`                            |
 | Add post-call analysis              | Create `resources/structuredOutputs/<name>.yml`                 |
 | Write test simulations              | Create files under `resources/simulations/`                     |
+| Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                |
+| Track significant config updates    | Update `docs/changelog.md`                                      |
 | Push changes to Vapi                | `npm run push:dev` or `npm run push:prod`                       |
 | Pull latest from Vapi               | `npm run pull:dev` or `npm run pull:dev:force`                  |
 | Push only one file                  | `npm run push:dev resources/assistants/my-agent.md`             |
@@ -27,6 +31,10 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 ## Project Structure
 
 ```
+docs/
+├── Vapi Prompt Optimization Guide.md   # In-depth prompt authoring (use when creating or editing assistants)
+└── changelog.md                        # Significant resource/config changes over time
+
 resources/
 ├── assistants/              # Voice agent definitions (.md or .yml)
 ├── tools/                   # Tool/function definitions (.yml)
@@ -37,6 +45,9 @@ resources/
     ├── scenarios/           # Test case scripts (.yml)
     ├── tests/               # Simulation runs (.yml)
     └── suites/              # Grouped simulation batches (.yml)
+
+scripts/
+└── mock-vapi-webhook-server.ts        # Local webhook receiver for server message testing
 ```
 
 ---
@@ -601,6 +612,8 @@ The gitops engine resolves these local filenames to Vapi UUIDs automatically dur
 
 The markdown body of an assistant `.md` file is the system prompt — the core instructions that define how the AI behaves on a call. This is the most important part to get right.
 
+**Before drafting or changing prompts:** work through **`docs/Vapi Prompt Optimization Guide.md`** so structure, guardrails, and voice-specific habits stay consistent across agents.
+
 ### Recommended Structure
 
 ```markdown
@@ -670,6 +683,7 @@ npm run push:dev resources/assistants/my-agent.md  # Push single file
 # Testing
 npm run call:dev -- -a <assistant-name>   # Call an assistant via WebSocket
 npm run call:dev -- -s <squad-name>       # Call a squad via WebSocket
+npm run mock:webhook                       # Run local webhook receiver for server message testing
 
 # Build
 npm run build                 # Type-check
@@ -750,3 +764,13 @@ When transferring to human:
 3. Create simulations (pair personality + scenario)
 4. Create suites (batch simulations together)
 5. Run via Vapi dashboard or API
+
+### Mock Server Testing (Webhook/Message Receipt)
+
+If you need a local mock server to validate webhook payloads or message delivery behavior, you can add scripts under `/scripts` (for example: `scripts/mock-vapi-webhook-server.ts`) and run them locally during testing.
+
+- Default expectation: no provider API key is needed for local receive-only mock testing.
+- If a provider-specific key is required, refer to the Vapi monorepo secrets workflow and use `dotenvx` to decrypt the needed values.
+- Assume decryption only works when the corresponding private keys are already available in your zsh environment.
+- For local webhook validation, prioritize core `serverMessages` event types such as `speech-update`, `status-update`, and `end-of-call-report`.
+- To test callbacks from Vapi into your local machine, expose the mock server with a tunnel like `ngrok` and use that public HTTPS URL in `assistant.server.url`.

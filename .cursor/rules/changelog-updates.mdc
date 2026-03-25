@@ -1,0 +1,19 @@
+---
+description: Require changelog updates for significant config changes
+alwaysApply: true
+---
+
+# Changelog Update Requirement
+
+When making significant configuration changes, update `docs/changelog.md` in the same change.
+
+Significant changes include:
+- Assistant changes (prompt/body/frontmatter updates)
+- Tool changes (new tools, parameter/behavior changes)
+- Squad changes (members, handoffs, overrides, routing)
+- Structured output or simulation changes that affect behavior
+
+Changelog entries should include:
+- Date section (`YYYY-MM-DD`)
+- Resource type and file path(s)
+- What changed, why it changed, and expected impact

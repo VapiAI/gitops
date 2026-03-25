@@ -9,13 +9,18 @@ import { VALID_ENVIRONMENTS, VALID_RESOURCE_TYPES } from "./types.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ApplyFilter {
-  resourceTypes?: ResourceType[];  // Filter by resource types
-  filePaths?: string[];            // Apply only specific files
+  resourceTypes?: ResourceType[]; // Filter by resource types
+  filePaths?: string[]; // Apply only specific files
 }
 
 // Group aliases: expand a shorthand into multiple resource types
 const RESOURCE_GROUP_MAP: Record<string, ResourceType[]> = {
-  simulations: ["personalities", "scenarios", "simulations", "simulationSuites"],
+  simulations: [
+    "personalities",
+    "scenarios",
+    "simulations",
+    "simulationSuites",
+  ],
 };
 
 // Path-based aliases: folder paths to resource types
@@ -33,7 +38,9 @@ function parseEnvironment(): Environment {
     console.error("❌ Environment argument is required");
     console.error("   Usage: npm run apply:dev | apply:stg | apply:prod");
     console.error("   Flags: --force (enable deletions)");
-    console.error("          --type <type> (apply only specific resource type)");
+    console.error(
+      "          --type <type> (apply only specific resource type)",
+    );
     console.error("          -- <file...> (apply only specific files)");
     process.exit(1);
   }
@@ -78,7 +85,7 @@ function parseFlags(): { forceDelete: boolean; applyFilter: ApplyFilter } {
   };
 
   // Parse --type or -t flag
-  const typeIndex = args.findIndex(a => a === "--type" || a === "-t");
+  const typeIndex = args.findIndex((a) => a === "--type" || a === "-t");
   if (typeIndex !== -1 && args[typeIndex + 1]) {
     const typeArg = args[typeIndex + 1]!;
     const resolved = resolveResourceTypes(typeArg);
@@ -127,9 +134,9 @@ function parseFlags(): { forceDelete: boolean; applyFilter: ApplyFilter } {
 
 function loadEnvFile(env: string, baseDir: string): void {
   const envFiles = [
-    join(baseDir, `.env.${env}`),       // .env.dev, .env.staging, .env.prod
+    join(baseDir, `.env.${env}`), // .env.dev, .env.stg, .env.prod
     join(baseDir, `.env.${env}.local`), // .env.dev.local (for local overrides)
-    join(baseDir, ".env.local"),        // .env.local (always loaded last)
+    join(baseDir, ".env.local"), // .env.local (always loaded last)
   ];
 
   for (const envFile of envFiles) {
@@ -173,7 +180,8 @@ export const BASE_DIR = join(__dirname, "..");
 
 // Parse environment, flags, and load env files
 export const VAPI_ENV = parseEnvironment();
-export const { forceDelete: FORCE_DELETE, applyFilter: APPLY_FILTER } = parseFlags();
+export const { forceDelete: FORCE_DELETE, applyFilter: APPLY_FILTER } =
+  parseFlags();
 
 loadEnvFile(VAPI_ENV, BASE_DIR);
 
@@ -209,7 +217,7 @@ export const UPDATE_EXCLUDED_KEYS: Record<ResourceType, string[]> = {
 
 export function removeExcludedKeys(
   payload: Record<string, unknown>,
-  resourceType: ResourceType
+  resourceType: ResourceType,
 ): Record<string, unknown> {
   const excludedKeys = UPDATE_EXCLUDED_KEYS[resourceType];
   if (excludedKeys.length === 0) return payload;

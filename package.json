@@ -30,6 +30,7 @@
     "cleanup:dev": "tsx src/cleanup.ts dev",
     "cleanup:stg": "tsx src/cleanup.ts stg",
     "cleanup:prod": "tsx src/cleanup.ts prod",
+    "mock:webhook": "tsx scripts/mock-vapi-webhook-server.ts",
     "build": "tsc --noEmit"
   },
   "devDependencies": {
