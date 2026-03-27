@@ -4,15 +4,15 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 
 ## Why GitOps?
 
-| | Dashboard / Ad-hoc API | GitOps |
-|---|---|---|
-| **History** | Limited visibility of who changed what | Full git history with blame |
-| **Review** | Changes go live immediately (can break things) | PR review before deploy |
-| **Rollback** | Manual recreation | `git revert` + push |
-| **Environments** | Tedious to copy-paste between envs | Same config, different state files |
-| **Collaboration** | One person at a time. Need to duplicate assistants, tools, etc. | Team can collaborate and use git branching |
-| **Reproducibility** | "It worked on my assistant!" | Declarative, version-controlled |
-| **Disaster Recovery** | Hope you have backups | Re-apply from git |
+|                       | Dashboard / Ad-hoc API                                          | GitOps                                     |
+| --------------------- | --------------------------------------------------------------- | ------------------------------------------ |
+| **History**           | Limited visibility of who changed what                          | Full git history with blame                |
+| **Review**            | Changes go live immediately (can break things)                  | PR review before deploy                    |
+| **Rollback**          | Manual recreation                                               | `git revert` + push                        |
+| **Environments**      | Tedious to copy-paste between envs                              | Same config, different state files         |
+| **Collaboration**     | One person at a time. Need to duplicate assistants, tools, etc. | Team can collaborate and use git branching |
+| **Reproducibility**   | "It worked on my assistant!"                                    | Declarative, version-controlled            |
+| **Disaster Recovery** | Hope you have backups                                           | Re-apply from git                          |
 
 ### Key Benefits
 
@@ -24,16 +24,16 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 
 ### Supported Resources
 
-| Resource | Status | Format |
-|----------|--------|--------|
-| **Assistants** | ✅ | `.md` (with system prompt) or `.yml` |
-| **Tools** | ✅ | `.yml` |
-| **Structured Outputs** | ✅ | `.yml` |
-| **Squads** | ✅ | `.yml` |
-| **Personalities** | ✅ | `.yml` |
-| **Scenarios** | ✅ | `.yml` |
-| **Simulations** | ✅ | `.yml` |
-| **Simulation Suites** | ✅ | `.yml` |
+| Resource               | Status | Format                               |
+| ---------------------- | ------ | ------------------------------------ |
+| **Assistants**         | ✅     | `.md` (with system prompt) or `.yml` |
+| **Tools**              | ✅     | `.yml`                               |
+| **Structured Outputs** | ✅     | `.yml`                               |
+| **Squads**             | ✅     | `.yml`                               |
+| **Personalities**      | ✅     | `.yml`                               |
+| **Scenarios**          | ✅     | `.yml`                               |
+| **Simulations**        | ✅     | `.yml`                               |
+| **Simulation Suites**  | ✅     | `.yml`                               |
 
 ---
 
@@ -45,6 +45,7 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 4. **Promote by environment** (`dev` -> `stg` -> `prod`) by copying files between `resources/dev/`, `resources/stg/`, and `resources/prod/`.
 
 Use:
+
 - `pull` when Vapi might have changed
 - `push` for explicit deploys
 - `apply` (`pull -> merge -> push`) when you want one command for sync + deploy
@@ -78,26 +79,26 @@ cp .env.example .env.prod
 
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `npm run build` | Type-check the codebase |
-| `npm run pull:dev` | Pull platform state, preserve local changes |
-| `npm run pull:stg` | Pull staging state, preserve local changes |
-| `npm run pull:dev:force` | Pull platform state, overwrite everything |
-| `npm run pull:stg:force` | Pull staging state, overwrite everything |
-| `npm run pull:prod` | Pull from prod, preserve local changes |
-| `npm run pull:prod:force` | Pull from prod, overwrite everything |
-| `npm run push:dev` | Push local files to Vapi (dev) |
-| `npm run push:stg` | Push local files to Vapi (staging) |
-| `npm run push:prod` | Push local files to Vapi (prod) |
-| `npm run apply:dev` | Pull → Merge → Push in one shot (dev) |
-| `npm run apply:stg` | Pull → Merge → Push in one shot (staging) |
-| `npm run apply:prod` | Pull → Merge → Push in one shot (prod) |
-| `npm run push:dev assistants` | Push only assistants (dev) |
-| `npm run push:dev tools` | Push only tools (dev) |
-| `npm run call:dev -- -a <name>` | Start a WebSocket call to an assistant (dev) |
-| `npm run call:dev -- -s <name>` | Start a WebSocket call to a squad (dev) |
-| `npm run mock:webhook` | Run local webhook receiver for Vapi server messages |
+| Command                         | Description                                         |
+| ------------------------------- | --------------------------------------------------- |
+| `npm run build`                 | Type-check the codebase                             |
+| `npm run pull:dev`              | Pull platform state, preserve local changes         |
+| `npm run pull:stg`              | Pull staging state, preserve local changes          |
+| `npm run pull:dev:force`        | Pull platform state, overwrite everything           |
+| `npm run pull:stg:force`        | Pull staging state, overwrite everything            |
+| `npm run pull:prod`             | Pull from prod, preserve local changes              |
+| `npm run pull:prod:force`       | Pull from prod, overwrite everything                |
+| `npm run push:dev`              | Push local files to Vapi (dev)                      |
+| `npm run push:stg`              | Push local files to Vapi (staging)                  |
+| `npm run push:prod`             | Push local files to Vapi (prod)                     |
+| `npm run apply:dev`             | Pull → Merge → Push in one shot (dev)               |
+| `npm run apply:stg`             | Pull → Merge → Push in one shot (staging)           |
+| `npm run apply:prod`            | Pull → Merge → Push in one shot (prod)              |
+| `npm run push:dev assistants`   | Push only assistants (dev)                          |
+| `npm run push:dev tools`        | Push only tools (dev)                               |
+| `npm run call:dev -- -a <name>` | Start a WebSocket call to an assistant (dev)        |
+| `npm run call:dev -- -s <name>` | Start a WebSocket call to a squad (dev)             |
+| `npm run mock:webhook`          | Run local webhook receiver for Vapi server messages |
 
 ### Basic Workflow
 
@@ -242,11 +243,13 @@ ngrok http 8787
 ```
 
 Then set your assistant `server.url` to the ngrok HTTPS URL and include event types like:
+
 - `speech-update`
 - `status-update`
 - `end-of-call-report`
 
 The mock server exposes:
+
 - `POST /webhook` (or `POST /`)
 - `GET /health`
 - `GET /events`
@@ -319,19 +322,23 @@ firstMessage: Hello! How can I help you?
 ---
 
 # Identity & Purpose
-You are a helpful assistant for Acme Corp.
+
+You are a helpful assistant for the business you represent.
 
 # Conversation Flow
+
 1. Greet the user
 2. Ask how you can help
 3. Resolve their issue
 
 # Rules
+
 - Always be polite
 - Never make up information
 ```
 
 **Benefits:**
+
 - System prompts are readable Markdown (not escaped YAML strings)
 - Proper syntax highlighting in editors
 - Easy to write headers, lists, tables
@@ -405,6 +412,7 @@ members:
 ### Simulations
 
 **Personality** (`simulations/personalities/`):
+
 ```yaml
 name: Skeptical Sam
 description: A doubtful caller who questions everything
@@ -412,6 +420,7 @@ prompt: You are skeptical and need convincing before trusting information.
 ```
 
 **Scenario** (`simulations/scenarios/`):
+
 ```yaml
 name: Happy Path - New Customer
 description: New customer calling to schedule an appointment
@@ -421,6 +430,7 @@ prompt: |
 ```
 
 **Simulation** (`simulations/tests/`):
+
 ```yaml
 name: Booking Test Case 1
 personalityId: skeptical-sam
@@ -428,6 +438,7 @@ scenarioId: happy-path-new-customer
 ```
 
 **Simulation Suite** (`simulations/suites/`):
+
 ```yaml
 name: Booking Flow Tests
 simulationIds:
@@ -460,6 +471,7 @@ model:
 ---
 
 # Your System Prompt Here
+
 Instructions for the assistant...
 ```
 
@@ -511,23 +523,23 @@ Use the **filename without extension** as the resource ID:
 # In an assistant
 model:
   toolIds:
-    - my-tool              # → resources/<env>/tools/my-tool.yml
-    - utils/helper-tool    # → resources/<env>/tools/utils/helper-tool.yml
+    - my-tool # → resources/<env>/tools/my-tool.yml
+    - utils/helper-tool # → resources/<env>/tools/utils/helper-tool.yml
 artifactPlan:
   structuredOutputIds:
-    - call-summary         # → resources/<env>/structuredOutputs/call-summary.yml
+    - call-summary # → resources/<env>/structuredOutputs/call-summary.yml
 ```
 
 ```yaml
 # In a squad
 members:
-  - assistantId: intake-agent    # → resources/<env>/assistants/intake-agent.md
+  - assistantId: intake-agent # → resources/<env>/assistants/intake-agent.md
 ```
 
 ```yaml
 # In a simulation
-personalityId: skeptical-sam     # → resources/<env>/simulations/personalities/skeptical-sam.yml
-scenarioId: happy-path           # → resources/<env>/simulations/scenarios/happy-path.yml
+personalityId: skeptical-sam # → resources/<env>/simulations/personalities/skeptical-sam.yml
+scenarioId: happy-path # → resources/<env>/simulations/scenarios/happy-path.yml
 ```
 
 ### How to Delete a Resource
@@ -537,6 +549,7 @@ scenarioId: happy-path           # → resources/<env>/simulations/scenarios/hap
 3. **Push**: `npm run push:dev`
 
 The engine will:
+
 - Detect the resource is in state but not in filesystem
 - Check for orphan references (will error if still referenced)
 - Delete from Vapi
@@ -544,20 +557,20 @@ The engine will:
 
 ### How to Organize Resources into Folders
 
-Create subdirectories for multi-tenant or feature organization:
+Create subdirectories only when they help organize related resources by feature or workflow:
 
 ```
 resources/<env>/
 ├── assistants/
 │   ├── shared/
 │   │   └── fallback.md
-│   └── client-a/
-│       └── support.md
+│   └── support/
+│       └── intake.md
 ├── tools/
 │   ├── shared/
 │   │   └── transfer-call.yml
-│   └── client-a/
-│       └── custom-api.yml
+│   └── support/
+│       └── lookup-customer.yml
 ```
 
 Reference using full paths:
@@ -566,7 +579,7 @@ Reference using full paths:
 model:
   toolIds:
     - shared/transfer-call
-    - client-a/custom-api
+    - support/lookup-customer
 ```
 
 ---
@@ -597,6 +610,7 @@ files
 ### Processing Order
 
 **Pull** (dependency order):
+
 1. Tools
 2. Structured Outputs
 3. Assistants
@@ -607,12 +621,14 @@ files
 8. Simulation Suites
 
 **Push** (dependency order):
+
 1. Tools → 2. Structured Outputs → 3. Assistants → 4. Squads
-5. Personalities → 6. Scenarios → 7. Simulations → 8. Simulation Suites
+2. Personalities → 6. Scenarios → 7. Simulations → 8. Simulation Suites
 
 **Delete** (reverse dependency order):
+
 1. Simulation Suites → 2. Simulations → 3. Scenarios → 4. Personalities
-5. Squads → 6. Assistants → 7. Structured Outputs → 8. Tools
+2. Squads → 6. Assistants → 7. Structured Outputs → 8. Tools
 
 ### Reference Resolution
 
@@ -642,7 +658,7 @@ Credentials (API keys, JWT secrets, etc.) are environment-specific and managed a
 # Resource file stores credential NAME (environment-agnostic)
 server:
   url: https://my-api.com/endpoint
-  credentialId: my-server-credential    # ← human-readable name
+  credentialId: my-server-credential # ← human-readable name
 ```
 
 ```json
@@ -696,10 +712,10 @@ Tracks mapping between resource IDs and Vapi UUIDs:
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VAPI_TOKEN` | ✅ | API authentication token |
-| `VAPI_BASE_URL` | ❌ | API base URL (defaults to `https://api.vapi.ai`) |
+| Variable        | Required | Description                                      |
+| --------------- | -------- | ------------------------------------------------ |
+| `VAPI_TOKEN`    | ✅       | API authentication token                         |
+| `VAPI_BASE_URL` | ❌       | API base URL (defaults to `https://api.vapi.ai`) |
 
 ### Excluded Fields
 
@@ -716,6 +732,7 @@ Some fields are excluded when writing to files (server-managed):
 ### "Reference not found" warnings
 
 The referenced resource doesn't exist. Check:
+
 1. File exists in correct folder
 2. Filename matches exactly (case-sensitive)
 3. Using filename without extension
@@ -731,6 +748,7 @@ The referenced resource doesn't exist. Check:
 ### Resource not updating
 
 Check the state file has correct UUID:
+
 1. Open `.vapi-state.{env}.json`
 2. Find the resource entry
 3. If incorrect, delete entry and re-run push
@@ -738,6 +756,7 @@ Check the state file has correct UUID:
 ### "Credential with ID not found" errors
 
 The credential UUID doesn't exist in the target environment. Fix:
+
 1. Run `npm run pull:{env}` to fetch credentials into the state file
 2. If the credential doesn't exist in the target org, create it in the Vapi dashboard with the same name
 3. Pull again — the mapping will be auto-populated

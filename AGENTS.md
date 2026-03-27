@@ -12,21 +12,21 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 ## Quick Reference
 
-| I want to...                        | What to do                                                      |
-|-------------------------------------|-----------------------------------------------------------------|
-| Edit an assistant's system prompt   | Edit the markdown body in `resources/<env>/assistants/<name>.md` |
-| Change assistant settings           | Edit the YAML frontmatter in the same `.md` file                |
-| Add a new tool                      | Create `resources/<env>/tools/<name>.yml`                       |
-| Add a new assistant                 | Create `resources/<env>/assistants/<name>.md`                   |
-| Create a multi-agent squad          | Create `resources/<env>/squads/<name>.yml`                      |
-| Add post-call analysis              | Create `resources/<env>/structuredOutputs/<name>.yml`           |
-| Write test simulations              | Create files under `resources/<env>/simulations/`               |
+| I want to...                        | What to do                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| Edit an assistant's system prompt   | Edit the markdown body in `resources/<env>/assistants/<name>.md`          |
+| Change assistant settings           | Edit the YAML frontmatter in the same `.md` file                          |
+| Add a new tool                      | Create `resources/<env>/tools/<name>.yml`                                 |
+| Add a new assistant                 | Create `resources/<env>/assistants/<name>.md`                             |
+| Create a multi-agent squad          | Create `resources/<env>/squads/<name>.yml`                                |
+| Add post-call analysis              | Create `resources/<env>/structuredOutputs/<name>.yml`                     |
+| Write test simulations              | Create files under `resources/<env>/simulations/`                         |
 | Promote resources across envs       | Copy files from `resources/dev/` to `resources/stg/` or `resources/prod/` |
-| Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                |
-| Push changes to Vapi                | `npm run push:dev` or `npm run push:prod`                       |
-| Pull latest from Vapi               | `npm run pull:dev` or `npm run pull:dev:force`                  |
-| Push only one file                  | `npm run push:dev resources/dev/assistants/my-agent.md`         |
-| Test a call                         | `npm run call:dev -- -a <assistant-name>`                       |
+| Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                          |
+| Push changes to Vapi                | `npm run push:dev` or `npm run push:prod`                                 |
+| Pull latest from Vapi               | `npm run pull:dev` or `npm run pull:dev:force`                            |
+| Push only one file                  | `npm run push:dev resources/dev/assistants/my-agent.md`                   |
+| Test a call                         | `npm run call:dev -- -a <assistant-name>`                                 |
 
 ---
 
@@ -98,58 +98,62 @@ backgroundSound: off
 ---
 
 # Identity & Purpose
-You are a virtual assistant for Acme Corp...
+
+You are a virtual assistant for the business you represent...
 
 # Workflow
+
 ## STEP 1: Greeting
+
 ...
 ```
 
 **How it works:**
+
 - Everything between `---` markers = **YAML configuration** (voice, model, tools, etc.)
 - Everything below the second `---` = **system prompt** (markdown, sent as the LLM system message)
 - The system prompt IS the core behavior definition — write it like detailed instructions for an AI
 
 #### Key Assistant Settings
 
-| Setting | Purpose | Common Values |
-|---------|---------|---------------|
-| `name` | Display name in Vapi dashboard | Any string |
-| `firstMessage` | What the assistant says first when a call connects | Greeting text (supports SSML like `<break time='0.3s'/>`) |
-| `firstMessageMode` | How the first message is generated | `assistant-speaks-first` (default, uses `firstMessage`), `assistant-speaks-first-with-model-generated-message` (LLM generates it) |
-| `voice` | Text-to-speech configuration | See Voice section below |
-| `model` | LLM configuration | See Model section below |
-| `transcriber` | Speech-to-text configuration | See Transcriber section below |
-| `endCallFunctionEnabled` | Allow the assistant to hang up | `true` / `false` |
-| `endCallMessage` | What to say when ending the call | Text string |
-| `silenceTimeoutSeconds` | Hang up after N seconds of silence | `30` typical |
-| `maxDurationSeconds` | Maximum call duration | `600` (10 min) typical |
-| `backgroundDenoisingEnabled` | Reduce background noise | `true` / `false` |
-| `backgroundSound` | Ambient sound during pauses | `off`, `office` |
-| `voicemailMessage` | Message to leave if voicemail detected | Text string |
-| `hooks` | Event-driven actions (see Hooks section) | Array of hook objects |
-| `messagePlan` | Idle message behavior | See below |
-| `startSpeakingPlan` | Endpointing configuration | See below |
-| `stopSpeakingPlan` | Interruption sensitivity | See below |
-| `server` | Webhook server for tool calls | `{ url, timeoutSeconds, credentialId }` |
-| `serverMessages` | Which events to send to webhook | `["end-of-call-report", "status-update"]` |
-| `analysisPlan` | Post-call analysis configuration | See below |
-| `artifactPlan` | What to save after calls | See below |
-| `observabilityPlan` | Logging/monitoring | `{ provider: "langfuse", tags: [...] }` |
-| `compliancePlan` | HIPAA/PCI compliance | `{ hipaaEnabled: false, pciEnabled: false }` |
+| Setting                      | Purpose                                            | Common Values                                                                                                                     |
+| ---------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                       | Display name in Vapi dashboard                     | Any string                                                                                                                        |
+| `firstMessage`               | What the assistant says first when a call connects | Greeting text (supports SSML like `<break time='0.3s'/>`)                                                                         |
+| `firstMessageMode`           | How the first message is generated                 | `assistant-speaks-first` (default, uses `firstMessage`), `assistant-speaks-first-with-model-generated-message` (LLM generates it) |
+| `voice`                      | Text-to-speech configuration                       | See Voice section below                                                                                                           |
+| `model`                      | LLM configuration                                  | See Model section below                                                                                                           |
+| `transcriber`                | Speech-to-text configuration                       | See Transcriber section below                                                                                                     |
+| `endCallFunctionEnabled`     | Allow the assistant to hang up                     | `true` / `false`                                                                                                                  |
+| `endCallMessage`             | What to say when ending the call                   | Text string                                                                                                                       |
+| `silenceTimeoutSeconds`      | Hang up after N seconds of silence                 | `30` typical                                                                                                                      |
+| `maxDurationSeconds`         | Maximum call duration                              | `600` (10 min) typical                                                                                                            |
+| `backgroundDenoisingEnabled` | Reduce background noise                            | `true` / `false`                                                                                                                  |
+| `backgroundSound`            | Ambient sound during pauses                        | `off`, `office`                                                                                                                   |
+| `voicemailMessage`           | Message to leave if voicemail detected             | Text string                                                                                                                       |
+| `hooks`                      | Event-driven actions (see Hooks section)           | Array of hook objects                                                                                                             |
+| `messagePlan`                | Idle message behavior                              | See below                                                                                                                         |
+| `startSpeakingPlan`          | Endpointing configuration                          | See below                                                                                                                         |
+| `stopSpeakingPlan`           | Interruption sensitivity                           | See below                                                                                                                         |
+| `server`                     | Webhook server for tool calls                      | `{ url, timeoutSeconds, credentialId }`                                                                                           |
+| `serverMessages`             | Which events to send to webhook                    | `["end-of-call-report", "status-update"]`                                                                                         |
+| `analysisPlan`               | Post-call analysis configuration                   | See below                                                                                                                         |
+| `artifactPlan`               | What to save after calls                           | See below                                                                                                                         |
+| `observabilityPlan`          | Logging/monitoring                                 | `{ provider: "langfuse", tags: [...] }`                                                                                           |
+| `compliancePlan`             | HIPAA/PCI compliance                               | `{ hipaaEnabled: false, pciEnabled: false }`                                                                                      |
 
 #### Voice Configuration
 
 ```yaml
 voice:
-  provider: 11labs          # 11labs, playht, cartesia, azure, deepgram, openai, rime, lmnt
-  voiceId: your-voice-id-here     # Provider-specific voice ID
-  model: eleven_turbo_v2    # Provider-specific model
-  stability: 0.7            # 0.0-1.0, higher = more consistent
-  similarityBoost: 0.75     # 0.0-1.0, higher = closer to original voice
-  speed: 1.1                # Speech rate multiplier
-  enableSsmlParsing: true   # Allow SSML tags in responses
-  inputPunctuationBoundaries:  # When to start TTS (chunk boundaries)
+  provider: 11labs # 11labs, playht, cartesia, azure, deepgram, openai, rime, lmnt
+  voiceId: your-voice-id-here # Provider-specific voice ID
+  model: eleven_turbo_v2 # Provider-specific model
+  stability: 0.7 # 0.0-1.0, higher = more consistent
+  similarityBoost: 0.75 # 0.0-1.0, higher = closer to original voice
+  speed: 1.1 # Speech rate multiplier
+  enableSsmlParsing: true # Allow SSML tags in responses
+  inputPunctuationBoundaries: # When to start TTS (chunk boundaries)
     - "."
     - "!"
     - "?"
@@ -161,10 +165,10 @@ voice:
 
 ```yaml
 model:
-  provider: openai           # openai, anthropic, google, azure-openai, groq, cerebras
-  model: gpt-4.1             # Provider-specific model name
-  temperature: 0             # 0.0-2.0, lower = more deterministic
-  toolIds:                   # Tools this assistant can use (reference by filename)
+  provider: openai # openai, anthropic, google, azure-openai, groq, cerebras
+  model: gpt-4.1 # Provider-specific model name
+  temperature: 0 # 0.0-2.0, lower = more deterministic
+  toolIds: # Tools this assistant can use (reference by filename)
     - my-tool-name
     - another-tool
 ```
@@ -173,11 +177,11 @@ model:
 
 ```yaml
 transcriber:
-  provider: deepgram         # deepgram, assemblyai, azure, google, openai, gladia
-  model: nova-3              # Provider-specific model
-  language: en               # Language code
-  numerals: true             # Convert spoken numbers to digits
-  confidenceThreshold: 0.5   # Minimum confidence to accept transcription
+  provider: deepgram # deepgram, assemblyai, azure, google, openai, gladia
+  model: nova-3 # Provider-specific model
+  language: en # Language code
+  numerals: true # Convert spoken numbers to digits
+  confidenceThreshold: 0.5 # Minimum confidence to accept transcription
 ```
 
 #### Hooks (Event-Driven Actions)
@@ -211,11 +215,11 @@ hooks:
 
 ```yaml
 messagePlan:
-  idleTimeoutSeconds: 15                        # Seconds before idle message
-  idleMessages:                                 # Messages to say when idle
+  idleTimeoutSeconds: 15 # Seconds before idle message
+  idleMessages: # Messages to say when idle
     - "I'm still here if you need assistance."
     - "Are you still there?"
-  idleMessageMaxSpokenCount: 3                  # Max idle messages before giving up
+  idleMessageMaxSpokenCount: 3 # Max idle messages before giving up
   idleMessageResetCountOnUserSpeechEnabled: true # Reset counter when user speaks
 ```
 
@@ -227,14 +231,14 @@ Controls when the assistant starts responding after the user stops speaking:
 startSpeakingPlan:
   smartEndpointingPlan:
     provider: livekit
-    waitFunction: "20 + 500 * sqrt(x) + 2500 * x^3"  # Custom wait curve
+    waitFunction: "20 + 500 * sqrt(x) + 2500 * x^3" # Custom wait curve
 ```
 
 #### Stop Speaking Plan (Interruption)
 
 ```yaml
 stopSpeakingPlan:
-  numWords: 1    # How many user words before assistant stops speaking (lower = more interruptible)
+  numWords: 1 # How many user words before assistant stops speaking (lower = more interruptible)
 ```
 
 #### Analysis Plan (Post-Call Summaries)
@@ -258,8 +262,8 @@ analysisPlan:
 
 ```yaml
 artifactPlan:
-  fullMessageHistoryEnabled: true       # Save full message history
-  structuredOutputIds:                  # Run these structured outputs after call
+  fullMessageHistoryEnabled: true # Save full message history
+  structuredOutputIds: # Run these structured outputs after call
     - customer-data
     - call-summary
 ```
@@ -303,8 +307,8 @@ messages:
 server:
   url: https://my-api.com/weather
   timeoutSeconds: 20
-  credentialId: optional-credential-uuid    # Optional: server auth credential
-  headers:                                  # Optional: custom request headers
+  credentialId: optional-credential-uuid # Optional: server auth credential
+  headers: # Optional: custom request headers
     Content-Type: application/json
 ```
 
@@ -356,12 +360,12 @@ function:
 
 #### Tool Message Types
 
-| Type | Purpose | Key Properties |
-|------|---------|----------------|
-| `request-start` | Said when tool is called | `content`, `blocking` (pause speech until tool returns) |
-| `request-response-delayed` | Said if tool takes too long | `content`, `timingMilliseconds` |
-| `request-complete` | Said when tool returns | `content` |
-| `request-failed` | Said when tool errors | `content` |
+| Type                       | Purpose                     | Key Properties                                          |
+| -------------------------- | --------------------------- | ------------------------------------------------------- |
+| `request-start`            | Said when tool is called    | `content`, `blocking` (pause speech until tool returns) |
+| `request-response-delayed` | Said if tool takes too long | `content`, `timingMilliseconds`                         |
+| `request-complete`         | Said when tool returns      | `content`                                               |
+| `request-failed`           | Said when tool errors       | `content`                                               |
 
 ---
 
@@ -439,6 +443,7 @@ schema:
 ```
 
 **Notes:**
+
 - `assistant_ids` uses **Vapi UUIDs** (not local filenames) — these are the IDs of assistants this output applies to
 - `target: messages` means the LLM analyzes the full message history
 - `type: ai` means an LLM generates the output (vs. `type: code` for programmatic)
@@ -455,13 +460,13 @@ Squads define multi-agent systems where assistants can hand off to each other.
 ```yaml
 name: My Squad
 members:
-  - assistantId: intake-agent-a1b2c3d4         # References resources/<env>/assistants/<id>.md
-    assistantOverrides:                       # Override assistant settings within this squad
+  - assistantId: intake-agent-a1b2c3d4 # References resources/<env>/assistants/<id>.md
+    assistantOverrides: # Override assistant settings within this squad
       metadata:
-        position:                             # Visual position in dashboard editor
+        position: # Visual position in dashboard editor
           x: 250
           y: 100
-      tools:append:                           # Add tools to this member (in addition to their own)
+      tools:append: # Add tools to this member (in addition to their own)
         - type: handoff
           async: false
           messages: []
@@ -478,7 +483,7 @@ members:
                 - reason
           destinations:
             - type: assistant
-              assistantName: Booking Assistant      # Must match the `name` field in target assistant
+              assistantName: Booking Assistant # Must match the `name` field in target assistant
               description: "Handles appointment booking"
 
   - assistantId: booking-agent-e5f67890
@@ -499,7 +504,7 @@ members:
               assistantName: Intake Assistant
               description: "Intake agent for call wrap-up"
 
-membersOverrides:                             # Settings applied to ALL members
+membersOverrides: # Settings applied to ALL members
   transcriber:
     provider: deepgram
     model: nova-3
@@ -521,6 +526,7 @@ membersOverrides:                             # Settings applied to ALL members
 ```
 
 **Key Concepts:**
+
 - `assistantId` references an assistant file by filename (without extension)
 - `tools:append` adds handoff tools without replacing the assistant's existing tools
 - Handoff `destinations` link to other squad members by `assistantName` (the `name` field in their YAML frontmatter)
@@ -576,8 +582,8 @@ Combine a personality with a scenario:
 
 ```yaml
 name: Happy Path Test 1
-personalityId: skeptical-sam-a0000001        # References personalities/<id>.yml
-scenarioId: happy-path-booking-a0000002      # References scenarios/<id>.yml
+personalityId: skeptical-sam-a0000001 # References personalities/<id>.yml
+scenarioId: happy-path-booking-a0000002 # References scenarios/<id>.yml
 ```
 
 #### Simulation Suites (`simulations/suites/<name>.yml`)
@@ -598,15 +604,15 @@ simulationIds:
 
 Resources reference each other by **filename without extension**:
 
-| From | Field | References | Example |
-|------|-------|------------|---------|
-| Assistant | `model.toolIds[]` | Tool files | `- end-call-tool` |
-| Assistant | `artifactPlan.structuredOutputIds[]` | Structured Output files | `- customer-data` |
-| Squad | `members[].assistantId` | Assistant files | `assistantId: intake-agent-a1b2c3d4` |
-| Squad handoff | `destinations[].assistantName` | Assistant `name` field | `assistantName: Booking Assistant` |
-| Simulation | `personalityId` | Personality files | `personalityId: skeptical-sam-a0000001` |
-| Simulation | `scenarioId` | Scenario files | `scenarioId: happy-path-booking-a0000002` |
-| Suite | `simulationIds[]` | Simulation test files | `- booking-test-1-a0000001` |
+| From          | Field                                | References              | Example                                   |
+| ------------- | ------------------------------------ | ----------------------- | ----------------------------------------- |
+| Assistant     | `model.toolIds[]`                    | Tool files              | `- end-call-tool`                         |
+| Assistant     | `artifactPlan.structuredOutputIds[]` | Structured Output files | `- customer-data`                         |
+| Squad         | `members[].assistantId`              | Assistant files         | `assistantId: intake-agent-a1b2c3d4`      |
+| Squad handoff | `destinations[].assistantName`       | Assistant `name` field  | `assistantName: Booking Assistant`        |
+| Simulation    | `personalityId`                      | Personality files       | `personalityId: skeptical-sam-a0000001`   |
+| Simulation    | `scenarioId`                         | Scenario files          | `scenarioId: happy-path-booking-a0000002` |
+| Suite         | `simulationIds[]`                    | Simulation test files   | `- booking-test-1-a0000001`               |
 
 The gitops engine resolves these local filenames to Vapi UUIDs automatically during push.
 
@@ -622,10 +628,13 @@ The markdown body of an assistant `.md` file is the system prompt — the core i
 
 ```markdown
 # Identity & Purpose
+
 Who the assistant is and what it does.
 
 # Guardrails
+
 Hard rules that override everything else:
+
 - Scope limits (what topics to handle)
 - Data protection (what NOT to collect)
 - Abuse handling
@@ -633,31 +642,43 @@ Hard rules that override everything else:
 - Fabrication prohibition
 
 # Primary Objectives
+
 Numbered list of what the assistant should accomplish.
 
 # Personality
+
 Tone, style, language constraints.
 
 # Response Guidelines
+
 How to speak, confirm information, format numbers/prices, etc.
 
 # Context
+
 ## Business Knowledge Base
+
 Static facts: hours, services, contact info, service areas.
 
 ## Customer Context
+
 Dynamic variables: {{ customer.number }}, current date/time.
 
 # Workflow
+
 ## STEP 1: ...
+
 ## STEP 2: ...
+
 ## STEP 3: ...
+
 Detailed step-by-step conversation flow.
 
 # Error Handling
+
 What to do when things go wrong (tool failures, repeated misunderstandings, etc.).
 
 # Example Flows
+
 Concrete example conversations showing expected behavior.
 ```
 
@@ -701,20 +722,22 @@ Replace `dev` with `prod` for production environment.
 
 For the **complete schema** of all available properties on each resource type, consult the Vapi API documentation:
 
-| Resource | API Docs |
-|----------|----------|
-| Assistants | https://docs.vapi.ai/api-reference/assistants/create |
-| Tools | https://docs.vapi.ai/api-reference/tools/create |
-| Squads | https://docs.vapi.ai/api-reference/squads/create |
+| Resource           | API Docs                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| Assistants         | https://docs.vapi.ai/api-reference/assistants/create                                      |
+| Tools              | https://docs.vapi.ai/api-reference/tools/create                                           |
+| Squads             | https://docs.vapi.ai/api-reference/squads/create                                          |
 | Structured Outputs | https://docs.vapi.ai/api-reference/structured-outputs/structured-output-controller-create |
-| Simulations | https://docs.vapi.ai/api-reference/simulations |
+| Simulations        | https://docs.vapi.ai/api-reference/simulations                                            |
 
 **For voice/model/transcriber provider options:**
+
 - Voice providers: https://docs.vapi.ai/providers/voice
 - Model providers: https://docs.vapi.ai/providers/model
 - Transcriber providers: https://docs.vapi.ai/providers/transcriber
 
 **For feature-specific documentation:**
+
 - Hooks: https://docs.vapi.ai/assistants/hooks
 - Tools: https://docs.vapi.ai/tools
 - Squads: https://docs.vapi.ai/squads
@@ -742,6 +765,7 @@ For the **complete schema** of all available properties on each resource type, c
 Two-step pattern (speak first, then call tool):
 
 In the system prompt:
+
 ```
 When transferring to human:
 1. First: Speak transfer message ending with <break time='0.5s'/><flush/>

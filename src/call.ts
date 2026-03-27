@@ -37,20 +37,20 @@ function printUsage(): void {
   console.error("");
   console.error("   Examples:");
   console.error("     bun run call:dev -a my-assistant");
-  console.error("     bun run call:dev -a company-1/inbound-support");
+  console.error("     bun run call:dev -a support-assistant");
   console.error("     bun run call:prod -s my-squad");
 }
 
 function parseArgs(): CallConfig {
   const args = process.argv.slice(2);
-  
+
   if (args.length < 3) {
     printUsage();
     process.exit(1);
   }
 
   const env = args[0] as Environment;
-  
+
   if (!VALID_ENVIRONMENTS.includes(env)) {
     console.error(`❌ Invalid environment: ${env}`);
     console.error(`   Must be one of: ${VALID_ENVIRONMENTS.join(", ")}`);
@@ -129,7 +129,8 @@ function loadEnvFile(env: string): { token: string; baseUrl: string } {
   }
 
   const token = process.env.VAPI_TOKEN || envVars.VAPI_TOKEN;
-  const baseUrl = process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
+  const baseUrl =
+    process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
 
   if (!token) {
     console.error("❌ VAPI_TOKEN environment variable is required");
@@ -150,12 +151,12 @@ async function checkMicrophonePermission(): Promise<boolean> {
   if (platform === "darwin") {
     // macOS - check and prompt for microphone permission
     console.log("🎤 Checking microphone permissions...");
-    
+
     try {
       // Try to get microphone permission status using AppleScript
       const result = execSync(
         `osascript -e 'tell application "System Events" to return (name of processes whose name contains "sox" or name contains "rec")'`,
-        { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+        { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
       );
       // If we get here without error, we have some level of access
     } catch {
@@ -166,32 +167,41 @@ async function checkMicrophonePermission(): Promise<boolean> {
     try {
       // Check if sox/rec is available
       execSync("which sox", { stdio: "pipe" });
-      
+
       // Try a quick recording to trigger permission prompt
-      console.log("   Testing microphone access (this may prompt for permission)...");
-      execSync("rec -q -t raw -r 16000 -b 16 -c 1 -e signed-integer /dev/null trim 0 0.1 2>/dev/null || true", {
-        timeout: 5000,
-        stdio: "pipe",
-      });
-      
+      console.log(
+        "   Testing microphone access (this may prompt for permission)...",
+      );
+      execSync(
+        "rec -q -t raw -r 16000 -b 16 -c 1 -e signed-integer /dev/null trim 0 0.1 2>/dev/null || true",
+        {
+          timeout: 5000,
+          stdio: "pipe",
+        },
+      );
+
       console.log("✅ Microphone permission granted\n");
       return true;
     } catch {
       // sox not installed or permission denied
       console.log("⚠️  Could not verify microphone access.");
-      console.log("   If prompted, please grant microphone permission in System Preferences.");
-      console.log("   System Preferences > Security & Privacy > Privacy > Microphone\n");
-      
+      console.log(
+        "   If prompted, please grant microphone permission in System Preferences.",
+      );
+      console.log(
+        "   System Preferences > Security & Privacy > Privacy > Microphone\n",
+      );
+
       // Ask user to continue anyway
       const shouldContinue = await askUserConfirmation(
-        "Continue without confirmed microphone access? (y/n): "
+        "Continue without confirmed microphone access? (y/n): ",
       );
       return shouldContinue;
     }
   } else if (platform === "linux") {
     // Linux - check if audio devices are accessible
     console.log("🎤 Checking audio devices...");
-    
+
     try {
       // Check for ALSA devices
       execSync("arecord -l 2>/dev/null | grep -q card", { stdio: "pipe" });
@@ -199,16 +209,20 @@ async function checkMicrophonePermission(): Promise<boolean> {
       return true;
     } catch {
       console.log("⚠️  No audio recording devices found.");
-      console.log("   Make sure your microphone is connected and ALSA is configured.\n");
-      
+      console.log(
+        "   Make sure your microphone is connected and ALSA is configured.\n",
+      );
+
       const shouldContinue = await askUserConfirmation(
-        "Continue without confirmed microphone access? (y/n): "
+        "Continue without confirmed microphone access? (y/n): ",
       );
       return shouldContinue;
     }
   } else if (platform === "win32") {
     // Windows - just inform the user
-    console.log("🎤 On Windows, you may be prompted to grant microphone access.\n");
+    console.log(
+      "🎤 On Windows, you may be prompted to grant microphone access.\n",
+    );
     return true;
   }
 
@@ -235,10 +249,12 @@ function askUserConfirmation(question: string): Promise<boolean> {
 
 function loadState(env: Environment): StateFile {
   const stateFilePath = join(BASE_DIR, `.vapi-state.${env}.json`);
-  
+
   if (!existsSync(stateFilePath)) {
     console.error(`❌ State file not found: .vapi-state.${env}.json`);
-    console.error("   Run 'npm run apply:" + env + "' first to create resources");
+    console.error(
+      "   Run 'npm run apply:" + env + "' first to create resources",
+    );
     process.exit(1);
   }
 
@@ -254,10 +270,11 @@ function loadState(env: Environment): StateFile {
 function resolveTarget(
   state: StateFile,
   target: string,
-  resourceType: ResourceType
+  resourceType: ResourceType,
 ): string {
   if (resourceType === "squad") {
-    const squads = (state as StateFile & { squads?: Record<string, string> }).squads || {};
+    const squads =
+      (state as StateFile & { squads?: Record<string, string> }).squads || {};
     const uuid = squads[target];
     if (!uuid) {
       console.error(`❌ Squad not found: ${target}`);
@@ -301,10 +318,10 @@ interface CreateCallResponse {
 
 async function createCall(
   config: CallConfig,
-  targetId: string
+  targetId: string,
 ): Promise<CreateCallResponse> {
   const url = `${config.baseUrl}/call`;
-  
+
   const body: Record<string, unknown> = {
     transport: {
       provider: "vapi.websocket",
@@ -365,17 +382,32 @@ interface CallEndedMessage {
   reason?: string;
 }
 
-type ControlMessage = TranscriptMessage | SpeechUpdateMessage | CallEndedMessage | { type: string };
+type ControlMessage =
+  | TranscriptMessage
+  | SpeechUpdateMessage
+  | CallEndedMessage
+  | { type: string };
 
-async function connectWebSocket(websocketUrl: string, config: CallConfig): Promise<void> {
+async function connectWebSocket(
+  websocketUrl: string,
+  config: CallConfig,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     console.log(`🔌 Connecting to WebSocket...`);
-    
+
     const ws = new WebSocket(websocketUrl, {
       headers: {
         Authorization: `Bearer ${config.token}`,
       },
-    } as WebSocket extends { new(url: string, protocols?: string | string[], options?: unknown): WebSocket } ? unknown : never);
+    } as WebSocket extends {
+      new (
+        url: string,
+        protocols?: string | string[],
+        options?: unknown,
+      ): WebSocket;
+    }
+      ? unknown
+      : never);
 
     let audioContext: ReturnType<typeof createAudioContext> | null = null;
     let micStream: ReturnType<typeof createMicrophoneStream> | null = null;
@@ -430,7 +462,9 @@ async function connectWebSocket(websocketUrl: string, config: CallConfig): Promi
         // Control message (JSON)
         try {
           const message = JSON.parse(event.data as string) as ControlMessage;
-          handleControlMessage(message, lastTranscript, (t) => { lastTranscript = t; });
+          handleControlMessage(message, lastTranscript, (t) => {
+            lastTranscript = t;
+          });
         } catch {
           // Ignore parse errors
         }
@@ -454,22 +488,26 @@ async function connectWebSocket(websocketUrl: string, config: CallConfig): Promi
 function handleControlMessage(
   message: ControlMessage,
   lastTranscript: string,
-  setLastTranscript: (t: string) => void
+  setLastTranscript: (t: string) => void,
 ): void {
   switch (message.type) {
     case "transcript": {
       const tm = message as TranscriptMessage;
       const prefix = tm.role === "user" ? "🎤 You" : "🤖 Assistant";
-      
+
       if (tm.transcriptType === "final") {
         // Clear partial and show final
-        process.stdout.write("\r" + " ".repeat(lastTranscript.length + 20) + "\r");
+        process.stdout.write(
+          "\r" + " ".repeat(lastTranscript.length + 20) + "\r",
+        );
         console.log(`${prefix}: ${tm.transcript}`);
         setLastTranscript("");
       } else {
         // Show partial (overwrite previous partial)
         const line = `${prefix}: ${tm.transcript}`;
-        process.stdout.write("\r" + " ".repeat(lastTranscript.length + 20) + "\r");
+        process.stdout.write(
+          "\r" + " ".repeat(lastTranscript.length + 20) + "\r",
+        );
         process.stdout.write(line);
         setLastTranscript(line);
       }
@@ -498,7 +536,10 @@ function handleControlMessage(
 // Audio Utilities (Stubs - require native modules)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createAudioContext(): { playAudio: (data: Buffer | ArrayBuffer) => void; close: () => void } {
+function createAudioContext(): {
+  playAudio: (data: Buffer | ArrayBuffer) => void;
+  close: () => void;
+} {
   // Lazy load speaker module
   let Speaker: typeof import("speaker") | null = null;
   let speakerInstance: InstanceType<typeof import("speaker")> | null = null;
@@ -512,7 +553,9 @@ function createAudioContext(): { playAudio: (data: Buffer | ArrayBuffer) => void
       sampleRate: 16000,
     });
   } catch {
-    console.warn("⚠️  'speaker' module not installed. Audio playback disabled.");
+    console.warn(
+      "⚠️  'speaker' module not installed. Audio playback disabled.",
+    );
     console.warn("   Install with: npm install speaker");
   }
 
@@ -531,9 +574,9 @@ function createAudioContext(): { playAudio: (data: Buffer | ArrayBuffer) => void
   };
 }
 
-function createMicrophoneStream(
-  onData: (data: Buffer) => void
-): { stop: () => void } {
+function createMicrophoneStream(onData: (data: Buffer) => void): {
+  stop: () => void;
+} {
   let mic: ReturnType<typeof import("mic")> | null = null;
   let micInstance: ReturnType<ReturnType<typeof import("mic")>> | null = null;
 
@@ -549,7 +592,7 @@ function createMicrophoneStream(
     });
 
     const micInputStream = micInstance!.getAudioStream();
-    
+
     micInputStream.on("data", (data: Buffer) => {
       onData(data);
     });
@@ -598,7 +641,7 @@ async function main() {
   console.log(`   UUID: ${targetId}\n`);
 
   const call = await createCall(config, targetId);
-  
+
   if (!call.transport?.websocketCallUrl) {
     console.error("❌ No WebSocket URL in response");
     console.error("   Response:", JSON.stringify(call, null, 2));
@@ -606,7 +649,7 @@ async function main() {
   }
 
   console.log(`📞 Call ID: ${call.id}`);
-  
+
   await connectWebSocket(call.transport.websocketCallUrl, config);
 }
 

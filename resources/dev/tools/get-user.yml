@@ -1,4 +1,0 @@
-type: apiRequest
-method: GET
-url: https://dummyjson.com/users/1
-name: get_user_tool

@@ -15,7 +15,7 @@ export interface StateFile {
 }
 
 export interface ResourceFile<T = Record<string, unknown>> {
-  resourceId: string; // Path relative to resource type dir (e.g., "healthcare/booking" or just "booking")
+  resourceId: string; // Path relative to resource type dir (e.g., "support/intake" or just "intake")
   filePath: string;
   data: T;
 }
@@ -25,9 +25,9 @@ export interface VapiResponse {
   [key: string]: unknown;
 }
 
-export type ResourceType = 
-  | "assistants" 
-  | "structuredOutputs" 
+export type ResourceType =
+  | "assistants"
+  | "structuredOutputs"
   | "tools"
   | "squads"
   | "personalities"
@@ -37,11 +37,15 @@ export type ResourceType =
 
 export type Environment = "dev" | "stg" | "prod";
 
-export const VALID_ENVIRONMENTS: readonly Environment[] = ["dev", "stg", "prod"];
+export const VALID_ENVIRONMENTS: readonly Environment[] = [
+  "dev",
+  "stg",
+  "prod",
+];
 
 export const VALID_RESOURCE_TYPES: readonly ResourceType[] = [
   "tools",
-  "structuredOutputs", 
+  "structuredOutputs",
   "assistants",
   "squads",
   "personalities",
@@ -65,4 +69,3 @@ export interface OrphanedResource {
   resourceId: string;
   uuid: string;
 }
-

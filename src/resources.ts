@@ -18,11 +18,15 @@ export const FOLDER_MAP: Record<ResourceType, string> = {
 };
 
 // Reverse map: folder path to resource type
-const FOLDER_TO_TYPE: Record<string, ResourceType> = Object.entries(FOLDER_MAP)
-  .reduce((acc, [type, folder]) => {
+const FOLDER_TO_TYPE: Record<string, ResourceType> = Object.entries(
+  FOLDER_MAP,
+).reduce(
+  (acc, [type, folder]) => {
     acc[folder] = type as ResourceType;
     return acc;
-  }, {} as Record<string, ResourceType>);
+  },
+  {} as Record<string, ResourceType>,
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resource Loading
@@ -38,17 +42,22 @@ const VALID_EXTENSIONS = [".yml", ".yaml", ".ts", ".md"];
  * ---
  * Markdown content (becomes system prompt)
  */
-function parseFrontmatter(content: string): { config: Record<string, unknown>; body: string } {
+function parseFrontmatter(content: string): {
+  config: Record<string, unknown>;
+  body: string;
+} {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
   const match = content.match(frontmatterRegex);
-  
+
   if (!match) {
-    throw new Error("Invalid frontmatter format - expected YAML between --- delimiters");
+    throw new Error(
+      "Invalid frontmatter format - expected YAML between --- delimiters",
+    );
   }
-  
+
   const [, yamlContent, body] = match;
   const config = parseYaml(yamlContent) as Record<string, unknown>;
-  
+
   return { config, body: body.trim() };
 }
 
@@ -80,7 +89,9 @@ async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
         files.push(fullPath);
       } else {
         // Warn about unsupported files
-        console.warn(`  ⚠️  Skipping unsupported file: ${relativePath} (expected ${VALID_EXTENSIONS.join(", ")})`);
+        console.warn(
+          `  ⚠️  Skipping unsupported file: ${relativePath} (expected ${VALID_EXTENSIONS.join(", ")})`,
+        );
       }
     }
   }
@@ -89,7 +100,7 @@ async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
 }
 
 export async function loadResources<T>(
-  type: ResourceType
+  type: ResourceType,
 ): Promise<ResourceFile<T>[]> {
   const folderPath = FOLDER_MAP[type];
   const resourceDir = join(RESOURCES_DIR, folderPath);
@@ -105,9 +116,9 @@ export async function loadResources<T>(
 
   for (const filePath of filePaths) {
     const ext = extname(filePath);
-    
+
     // Compute resourceId as path relative to the resource type directory, without extension
-    // e.g., /resources/assistants/healthcare/booking.yml → healthcare/booking
+    // e.g., /resources/assistants/support/intake.yml → support/intake
     // e.g., /resources/assistants/inbound-support.yml → inbound-support (backwards compatible)
     const relativePath = relative(resourceDir, filePath);
     const resourceId = relativePath.slice(0, -ext.length);
@@ -116,9 +127,9 @@ export async function loadResources<T>(
     if (seenIds.has(resourceId)) {
       throw new Error(
         `Duplicate resource ID "${resourceId}" found:\n` +
-        `  - ${seenIds.get(resourceId)}\n` +
-        `  - ${filePath}\n` +
-        `Each resource must have a unique path-based identifier.`
+          `  - ${seenIds.get(resourceId)}\n` +
+          `  - ${filePath}\n` +
+          `Each resource must have a unique path-based identifier.`,
       );
     }
     seenIds.set(resourceId, filePath);
@@ -133,28 +144,36 @@ export async function loadResources<T>(
           throw new Error(`No default export found in ${relativePath}`);
         }
       } catch (error) {
-        throw new Error(`Failed to import TypeScript resource "${relativePath}": ${error}`);
+        throw new Error(
+          `Failed to import TypeScript resource "${relativePath}": ${error}`,
+        );
       }
     } else if (ext === ".md") {
       // Parse Markdown files with YAML frontmatter (for assistants with system prompts)
       try {
         const content = await readFile(filePath, "utf-8");
         const { config, body } = parseFrontmatter(content);
-        
+
         // Inject markdown body as system message if present
         if (body) {
           const model = (config.model as Record<string, unknown>) || {};
-          const existingMessages = Array.isArray(model.messages) ? model.messages : [];
+          const existingMessages = Array.isArray(model.messages)
+            ? model.messages
+            : [];
           model.messages = [
             { role: "system", content: body },
-            ...existingMessages.filter((m: { role?: string }) => m.role !== "system"),
+            ...existingMessages.filter(
+              (m: { role?: string }) => m.role !== "system",
+            ),
           ];
           config.model = model;
         }
-        
+
         data = config as T;
       } catch (error) {
-        throw new Error(`Failed to parse Markdown resource "${relativePath}": ${error}`);
+        throw new Error(
+          `Failed to parse Markdown resource "${relativePath}": ${error}`,
+        );
       }
     } else {
       // Parse YAML files
@@ -165,10 +184,14 @@ export async function loadResources<T>(
           throw new Error(`Empty or invalid YAML`);
         }
         if (typeof data !== "object" || Array.isArray(data)) {
-          throw new Error(`YAML must be an object, got ${Array.isArray(data) ? "array" : typeof data}`);
+          throw new Error(
+            `YAML must be an object, got ${Array.isArray(data) ? "array" : typeof data}`,
+          );
         }
       } catch (error) {
-        throw new Error(`Failed to parse YAML resource "${relativePath}": ${error}`);
+        throw new Error(
+          `Failed to parse YAML resource "${relativePath}": ${error}`,
+        );
       }
     }
 
@@ -187,7 +210,7 @@ export function getResourceTypeFromPath(filePath: string): ResourceType | null {
   // Resolve to absolute path
   const absolutePath = resolve(filePath);
   const relativeToResources = relative(RESOURCES_DIR, absolutePath);
-  
+
   // Check if path is within resources directory
   if (relativeToResources.startsWith("..")) {
     return null;
@@ -195,11 +218,14 @@ export function getResourceTypeFromPath(filePath: string): ResourceType | null {
 
   // Find matching resource type folder
   for (const [type, folder] of Object.entries(FOLDER_MAP)) {
-    if (relativeToResources.startsWith(folder + "/") || relativeToResources.startsWith(folder)) {
+    if (
+      relativeToResources.startsWith(folder + "/") ||
+      relativeToResources.startsWith(folder)
+    ) {
       return type as ResourceType;
     }
   }
-  
+
   return null;
 }
 
@@ -208,11 +234,11 @@ export function getResourceTypeFromPath(filePath: string): ResourceType | null {
  * Returns the resource with its type, or null if the path is invalid
  */
 export async function loadSingleResource(
-  filePath: string
+  filePath: string,
 ): Promise<{ type: ResourceType; resource: ResourceFile } | null> {
   // Resolve path (could be relative to cwd or absolute)
   const absolutePath = resolve(filePath);
-  
+
   if (!existsSync(absolutePath)) {
     console.error(`  ❌ File not found: ${filePath}`);
     return null;
@@ -232,7 +258,7 @@ export async function loadSingleResource(
   const resourceId = relativePath.slice(0, -ext.length);
 
   let data: Record<string, unknown>;
-  
+
   if (ext === ".ts") {
     try {
       const module = await import(absolutePath);
@@ -241,26 +267,34 @@ export async function loadSingleResource(
         throw new Error(`No default export found`);
       }
     } catch (error) {
-      throw new Error(`Failed to import TypeScript resource "${filePath}": ${error}`);
+      throw new Error(
+        `Failed to import TypeScript resource "${filePath}": ${error}`,
+      );
     }
   } else if (ext === ".md") {
     try {
       const content = await readFile(absolutePath, "utf-8");
       const { config, body } = parseFrontmatter(content);
-      
+
       if (body) {
         const model = (config.model as Record<string, unknown>) || {};
-        const existingMessages = Array.isArray(model.messages) ? model.messages : [];
+        const existingMessages = Array.isArray(model.messages)
+          ? model.messages
+          : [];
         model.messages = [
           { role: "system", content: body },
-          ...existingMessages.filter((m: { role?: string }) => m.role !== "system"),
+          ...existingMessages.filter(
+            (m: { role?: string }) => m.role !== "system",
+          ),
         ];
         config.model = model;
       }
-      
+
       data = config;
     } catch (error) {
-      throw new Error(`Failed to parse Markdown resource "${filePath}": ${error}`);
+      throw new Error(
+        `Failed to parse Markdown resource "${filePath}": ${error}`,
+      );
     }
   } else {
     try {
@@ -278,7 +312,7 @@ export async function loadSingleResource(
   }
 
   console.log(`  📦 Loaded ${resourceId} (${resourceType})`);
-  
+
   return {
     type: resourceType,
     resource: { resourceId, filePath: absolutePath, data },

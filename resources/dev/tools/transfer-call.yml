@@ -1,9 +1,0 @@
-type: transferCall
-function:
-  name: transfer_call_tool
-messages:
-  - type: request-start
-    blocking: false
-destinations:
-  - type: number
-    number: "+18312398032"
