@@ -21,7 +21,7 @@ import type { StateFile, ResourceType } from "./types.ts";
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface VapiResource {
+export interface VapiResource {
   id: string;
   name?: string;
   [key: string]: unknown;
@@ -245,26 +245,75 @@ function generateResourceId(resource: VapiResource): string {
   return name ? `${slugify(name)}-${shortId}` : `resource-${shortId}`;
 }
 
+export function extractBaseSlug(resourceId: string): string {
+  const match = resourceId.match(/^(.*)-([a-f0-9]{8})$/i);
+  return match?.[1] ?? resourceId;
+}
+
+export function resourceIdMatchesName(
+  resourceId: string,
+  resource: VapiResource,
+): boolean {
+  const name = extractName(resource);
+  if (!name) return true;
+  return extractBaseSlug(resourceId) === slugify(name);
+}
+
+function listExistingResourceIds(resourceType: ResourceType): string[] {
+  const dir = join(RESOURCES_DIR, FOLDER_MAP[resourceType]);
+  if (!existsSync(dir)) return [];
+
+  const walk = (currentDir: string, ids: string[]): string[] => {
+    const entries = readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath, ids);
+        continue;
+      }
+
+      if (!/\.(yml|yaml|md)$/.test(entry.name)) {
+        continue;
+      }
+
+      const relativePath = relative(dir, fullPath);
+      ids.push(relativePath.replace(/\.(yml|yaml|md)$/, ""));
+    }
+
+    return ids;
+  };
+
+  return walk(dir, []);
+}
+
 // When pulling a new environment, a resource may already exist on disk under a
 // different UUID suffix (e.g., `end-call-tool-8102e715` from dev). Match by
 // name-slug so we reuse the existing file instead of creating a duplicate.
 function findExistingResourceId(
-  resourceType: ResourceType,
+  existingResourceIds: string[],
   resource: VapiResource,
 ): string | undefined {
   const name = extractName(resource);
   if (!name) return undefined;
 
   const nameSlug = slugify(name);
-  const dir = join(RESOURCES_DIR, FOLDER_MAP[resourceType]);
-  if (!existsSync(dir)) return undefined;
-
-  const matches = readdirSync(dir)
-    .filter((f) => /\.(yml|yaml|md)$/.test(f))
-    .map((f) => f.replace(/\.(yml|yaml|md)$/, ""))
-    .filter((id) => id === nameSlug || id.startsWith(nameSlug + "-"));
+  const matches = existingResourceIds.filter(
+    (id) => extractBaseSlug(id) === nameSlug,
+  );
 
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+function removeUuidMappings(
+  stateSection: Record<string, string>,
+  uuid: string,
+  keepResourceId?: string,
+): void {
+  for (const [resourceId, mappedUuid] of Object.entries(stateSection)) {
+    if (mappedUuid === uuid && resourceId !== keepResourceId) {
+      delete stateSection[resourceId];
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -583,6 +632,9 @@ export async function pullResourceType(
   const newStateSection: Record<string, string> = resourceIds?.length
     ? { ...state[resourceType] }
     : {};
+  const existingResourceIds = bootstrap
+    ? []
+    : listExistingResourceIds(resourceType);
 
   let created = 0;
   let updated = 0;
@@ -591,15 +643,23 @@ export async function pullResourceType(
   for (const resource of resources) {
     // Check if we already have this resource in state (by UUID)
     let resourceId = reverseMap.get(resource.id);
-    const isNew = !resourceId;
+    if (resourceId && !resourceIdMatchesName(resourceId, resource)) {
+      delete newStateSection[resourceId];
+      resourceId = undefined;
+    }
 
     if (!resourceId) {
       // Reuse an existing file's resourceId if the name matches (cross-env pull)
       resourceId = bootstrap
         ? generateResourceId(resource)
-        : (findExistingResourceId(resourceType, resource) ??
+        : (findExistingResourceId(existingResourceIds, resource) ??
           generateResourceId(resource));
     }
+    const isNew =
+      !reverseMap.get(resource.id) ||
+      !resourceIdMatchesName(resourceId, resource);
+
+    removeUuidMappings(newStateSection, resource.id, resourceId);
 
     // Skip files that have been locally modified (git detection)
     if (!bootstrap && changedFiles) {

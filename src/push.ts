@@ -8,7 +8,7 @@ import {
 } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
-import { fetchAllResources, runPull } from "./pull.ts";
+import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
 import {
   resolveReferences,
   resolveAssistantIds,
@@ -156,14 +156,22 @@ function getMissingCredentialNames(
   return [...names].filter((name) => !credentialMap.has(name));
 }
 
-async function getStaleStateMappings(
+async function getInvalidStateMappings(
   resources: LoadedResources,
   state: StateFile,
-): Promise<Array<{ type: ResourceType; resourceId: string; uuid: string }>> {
-  const staleMappings: Array<{
+): Promise<
+  Array<{
     type: ResourceType;
     resourceId: string;
     uuid: string;
+    reason: "missing_remote" | "name_mismatch";
+  }>
+> {
+  const invalidMappings: Array<{
+    type: ResourceType;
+    resourceId: string;
+    uuid: string;
+    reason: "missing_remote" | "name_mismatch";
   }> = [];
 
   for (const type of getTargetedResourceTypes(resources)) {
@@ -185,18 +193,33 @@ async function getStaleStateMappings(
       continue;
     }
 
-    const remoteIds = new Set(
-      (await fetchAllResources(type)).map((resource) => resource.id),
+    const remoteResources = await fetchAllResources(type);
+    const remoteResourcesById = new Map(
+      remoteResources.map((resource) => [resource.id, resource]),
     );
 
     for (const trackedResource of trackedResources) {
-      if (!remoteIds.has(trackedResource.uuid)) {
-        staleMappings.push({ type, ...trackedResource });
+      const remoteResource = remoteResourcesById.get(trackedResource.uuid);
+      if (!remoteResource) {
+        invalidMappings.push({
+          type,
+          ...trackedResource,
+          reason: "missing_remote",
+        });
+        continue;
+      }
+
+      if (!resourceIdMatchesName(trackedResource.resourceId, remoteResource)) {
+        invalidMappings.push({
+          type,
+          ...trackedResource,
+          reason: "name_mismatch",
+        });
       }
     }
   }
 
-  return staleMappings;
+  return invalidMappings;
 }
 
 async function maybeBootstrapState(
@@ -212,12 +235,12 @@ async function maybeBootstrapState(
   const stateUninitialized =
     Object.keys(state.credentials).length === 0 ||
     targetedTypes.every((type) => Object.keys(state[type]).length === 0);
-  const staleMappings = await getStaleStateMappings(resources, state);
+  const invalidMappings = await getInvalidStateMappings(resources, state);
 
   if (
     !stateUninitialized &&
     missingCredentialNames.length === 0 &&
-    staleMappings.length === 0
+    invalidMappings.length === 0
   ) {
     return state;
   }
@@ -233,9 +256,9 @@ async function maybeBootstrapState(
       `   - Missing credential mappings: ${missingCredentialNames.join(", ")}`,
     );
   }
-  for (const mapping of staleMappings) {
+  for (const mapping of invalidMappings) {
     console.log(
-      `   - Stale ${mapping.type} mapping: ${mapping.resourceId} -> ${mapping.uuid}`,
+      `   - Invalid ${mapping.type} mapping (${mapping.reason}): ${mapping.resourceId} -> ${mapping.uuid}`,
     );
   }
 
