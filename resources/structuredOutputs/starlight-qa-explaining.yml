@@ -1,0 +1,103 @@
+name: starlight_qa_explaining
+type: ai
+target: messages
+description: |
+  Evaluates the EXPLAINING quality of a Brent Council Housing Benefits call.
+  This is 1 of 4 equally-weighted QA categories for the Starlight project.
+
+  AUTO-FAIL RULES:
+  This category has no auto-fail questions. However, if any OTHER category (Engagement,
+  Right First Time, Signposting) triggers an auto-fail, the entire call evaluation still
+  fails. The consuming application must check auto_fail across all 4 categories.
+
+  MULTILINGUAL TRANSCRIPTS:
+  The call may be conducted in any language. Evaluate the transcript in whatever language
+  it occurs in. Do not penalise the agent for using a language other than English if the
+  caller initiated in that language.
+
+  EXPLAINING CONTEXT:
+  This category assesses whether the agent clearly communicated what has been done, what
+  will happen next, and any relevant terms, conditions, or timescales. For Housing Benefit
+  calls this includes explaining processing times, required documentation, appeal rights,
+  overpayment recovery terms, and any conditions attached to DHP, RSF, or CTS awards.
+
+  GLOSSARY OF BRENT COUNCIL TERMS:
+  RSF - Resident Support Fund | DHP - Discretionary Housing Payment |
+  CIC/s - Change in Circumstances | CTS - Council Tax Support |
+  HB - Housing Benefit | UC - Universal Credit | Recons - Reconsideration |
+  Portal/My Account/CAS - Citizen Access Service (customer self-service portal) |
+  Non Dep - Non dependants | OP - Overpayments | LHA - Local Housing Allowance |
+  HSF - Household Support Fund | SB - Switchboard |
+  Welfare Benefit - PIP, Disability Allowance, ESA, etc. |
+  T&Cs - Terms and Conditions
+model:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0
+assistant_ids: []
+workflow_ids: []
+schema:
+  type: object
+  description: "Explaining QA evaluation for Brent Council Housing Benefits calls."
+  properties:
+    question_4_1:
+      type: object
+      description: "4.1 Clarified details logged, actions taken and timescales for accuracy."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent clearly explained what details were logged, what actions were taken or will be taken, and provided accurate timescales; no if the agent failed to clarify these to the caller; not_applicable if no actions or timescales were relevant to this call."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given, referencing specific parts of the conversation."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript supporting the evaluation."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation where this occurred."
+    question_4_2:
+      type: object
+      description: "4.2 T&Cs explained/indicated."
+      properties:
+        result:
+          type: string
+          description: "yes if relevant terms and conditions were explained or indicated to the caller (e.g. overpayment recovery terms, DHP conditions, appeal rights, reporting obligations for change in circumstances); no if T&Cs should have been mentioned but were not; not_applicable if no T&Cs were relevant to this call."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    auto_fail:
+      type: boolean
+      description: "Always false for this category as it has no auto-fail questions. The consuming application must still check auto_fail across all 4 QA categories."
+    overall_pass:
+      type: boolean
+      description: "Set to true if the agent performed well on explaining. Since there are no auto-fail questions in this category, this is based purely on the question results."
+    category_score:
+      type: string
+      description: "Fraction of questions that received 'yes' out of total applicable questions, e.g. '2/2' or '1/1'. Exclude not_applicable questions from both numerator and denominator."
