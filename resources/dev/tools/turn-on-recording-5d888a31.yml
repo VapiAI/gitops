@@ -1,0 +1,12 @@
+destinations:
+  - assistantId: matthew-2ba56409
+    contextEngineeringPlan:
+      type: all
+    type: assistant
+function:
+  name: turn_on_recording
+messages:
+  - blocking: false
+    content: Thank you. This is Matthew, I'm here to help you set up your Ring device and troubleshoot any issues. To better assist you, I'll be using Generative AI with Ring support information. Please always double check information I provide first. So what can I help you with today?
+    type: request-start
+type: handoff

@@ -1,0 +1,18 @@
+destinations:
+  - assistantId: matthew-2ba56409
+    assistantOverrides:
+      artifactPlan:
+        loggingEnabled: false
+        recordingEnabled: false
+        transcriptPlan:
+          enabled: false
+    contextEngineeringPlan:
+      type: all
+    type: assistant
+function:
+  name: turn_off_recording
+messages:
+  - blocking: false
+    content: No problem. I will not record this call.
+    type: request-start
+type: handoff
