@@ -6,6 +6,12 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
+    "setup": "tsx src/setup.ts",
+    "apply": "tsx src/apply.ts",
+    "push": "tsx src/push.ts",
+    "pull": "tsx src/pull.ts",
+    "call": "tsx src/call.ts",
+    "cleanup": "tsx src/cleanup.ts",
     "apply:dev": "tsx src/apply.ts dev",
     "apply:stg": "tsx src/apply.ts stg",
     "apply:prod": "tsx src/apply.ts prod",
@@ -42,6 +48,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.4.1",
     "yaml": "^2.7.0"
   },
   "optionalDependencies": {

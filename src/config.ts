@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { join, basename, dirname, resolve, relative } from "path";
 import { fileURLToPath } from "url";
 import type { Environment, ResourceType } from "./types.ts";
-import { VALID_ENVIRONMENTS, VALID_RESOURCE_TYPES } from "./types.ts";
+import { VALID_RESOURCE_TYPES } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
@@ -32,23 +32,27 @@ const RESOURCE_PATH_MAP: Record<string, ResourceType> = {
   "simulations/suites": "simulationSuites",
 };
 
+const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
 function parseEnvironment(): Environment {
-  const envArg = process.argv[2] as Environment | undefined;
+  const envArg = process.argv[2];
 
   if (!envArg) {
-    console.error("❌ Environment argument is required");
-    console.error("   Usage: npm run apply:dev | apply:stg | apply:prod");
+    console.error("❌ Environment / org name argument is required");
+    console.error("   Usage: npm run push <org>  |  npm run push:dev");
     console.error("   Flags: --force (enable deletions)");
     console.error(
-      "          --type <type> (apply only specific resource type)",
+      "          --type <type> (apply only specific resource type, repeatable)",
     );
     console.error("          -- <file...> (apply only specific files)");
     process.exit(1);
   }
 
-  if (!VALID_ENVIRONMENTS.includes(envArg)) {
-    console.error(`❌ Invalid environment: ${envArg}`);
-    console.error(`   Must be one of: ${VALID_ENVIRONMENTS.join(", ")}`);
+  if (!SLUG_RE.test(envArg)) {
+    console.error(`❌ Invalid environment / org name: ${envArg}`);
+    console.error(
+      "   Must be lowercase alphanumeric with optional hyphens (e.g., dev, my-org)",
+    );
     process.exit(1);
   }
 
@@ -94,46 +98,50 @@ function parseFlags(): {
     applyFilter: {},
   };
 
-  // Parse --type or -t flag
-  const typeIndex = args.findIndex((a) => a === "--type" || a === "-t");
-  if (typeIndex !== -1 && args[typeIndex + 1]) {
-    const typeArg = args[typeIndex + 1]!;
-    const resolved = resolveResourceTypes(typeArg);
-    if (!resolved) {
-      console.error(`❌ Invalid resource type: ${typeArg}`);
-      console.error(`   Must be one of: ${VALID_TYPE_ARGS.join(", ")}`);
-      process.exit(1);
-    }
-    result.applyFilter.resourceTypes = resolved;
-  }
-
   const resourceIds: string[] = [];
-
-  // Parse file paths and positional resource types
   const filePaths: string[] = [];
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (!arg) continue;
-    // Skip flags and their values
-    if (
-      arg === "--force" ||
-      arg === "--bootstrap" ||
-      arg === "--id" ||
-      arg === "--type" ||
-      arg === "-t"
-    ) {
-      if (arg === "--type" || arg === "-t" || arg === "--id") i++; // skip the value too
+
+    if (arg === "--force" || arg === "--bootstrap") continue;
+
+    // --type / -t (repeatable): accumulate resource types
+    if ((arg === "--type" || arg === "-t") && args[i + 1]) {
+      const typeArg = args[i + 1]!;
+      const resolved = resolveResourceTypes(typeArg);
+      if (!resolved) {
+        console.error(`❌ Invalid resource type: ${typeArg}`);
+        console.error(`   Must be one of: ${VALID_TYPE_ARGS.join(", ")}`);
+        process.exit(1);
+      }
+      if (!result.applyFilter.resourceTypes) {
+        result.applyFilter.resourceTypes = [];
+      }
+      result.applyFilter.resourceTypes.push(...resolved);
+      i++;
       continue;
     }
-    // Check if it's a resource type or group (positional)
-    if (!result.applyFilter.resourceTypes) {
-      const resolved = resolveResourceTypes(arg);
-      if (resolved) {
-        result.applyFilter.resourceTypes = resolved;
-        continue;
-      }
+
+    // --id (repeatable)
+    if (arg === "--id" && args[i + 1]) {
+      resourceIds.push(args[i + 1]!);
+      i++;
+      continue;
     }
-    // If it looks like a file path (contains / or ends with .yml/.yaml/.md/.ts)
+
+    // Positional resource type / group
+    const resolved = resolveResourceTypes(arg);
+    if (resolved) {
+      if (!result.applyFilter.resourceTypes) {
+        result.applyFilter.resourceTypes = [];
+      }
+      result.applyFilter.resourceTypes.push(...resolved);
+      continue;
+    }
+
+    // File path
     if (arg.includes("/") || /\.(yml|yaml|md|ts)$/.test(arg)) {
       filePaths.push(arg);
     }
@@ -142,15 +150,6 @@ function parseFlags(): {
   if (filePaths.length > 0) {
     result.applyFilter.filePaths = filePaths;
   }
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--id" && args[i + 1]) {
-      resourceIds.push(args[i + 1]!);
-      i++;
-    }
-  }
-
   if (resourceIds.length > 0) {
     result.applyFilter.resourceIds = resourceIds;
   }

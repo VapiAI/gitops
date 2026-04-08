@@ -35,13 +35,11 @@ export type ResourceType =
   | "simulations"
   | "simulationSuites";
 
-export type Environment = "dev" | "stg" | "prod";
+// Any slug-like string: "dev", "prod", "roofr-production", etc.
+export type Environment = string;
 
-export const VALID_ENVIRONMENTS: readonly Environment[] = [
-  "dev",
-  "stg",
-  "prod",
-];
+// Well-known names kept for backward-compatible npm scripts
+export const VALID_ENVIRONMENTS: readonly string[] = ["dev", "stg", "prod"];
 
 export const VALID_RESOURCE_TYPES: readonly ResourceType[] = [
   "tools",
