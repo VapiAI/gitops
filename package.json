@@ -8,8 +8,8 @@
   "scripts": {
     "setup": "tsx src/setup.ts",
     "apply": "tsx src/apply.ts",
-    "push": "tsx src/push.ts",
-    "pull": "tsx src/pull.ts",
+    "push": "tsx src/push-cmd.ts",
+    "pull": "tsx src/pull-cmd.ts",
     "call": "tsx src/call.ts",
     "cleanup": "tsx src/cleanup.ts",
     "apply:dev": "tsx src/apply.ts dev",

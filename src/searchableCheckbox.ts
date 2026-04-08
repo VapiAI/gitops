@@ -23,7 +23,10 @@ interface Config {
   message: string;
   choices: Choice[];
   pageSize?: number;
+  allowBack?: boolean;
 }
+
+export const BACK_SENTINEL = "__BACK__";
 
 interface HeaderEntry {
   type: "header";
@@ -144,6 +147,9 @@ export default createPrompt<string[], Config>((config, done) => {
       if (filter) {
         setFilter("");
         setCursor(0);
+      } else if (config.allowBack !== false) {
+        setStatus("done");
+        done([BACK_SENTINEL]);
       }
       return;
     }
@@ -204,7 +210,7 @@ export default createPrompt<string[], Config>((config, done) => {
   if (filter) {
     lines.push(`  ${esc.dim("Search:")} ${filter}▏ ${esc.dim("(esc to clear)")}`);
   } else {
-    lines.push(`  ${esc.dim("Type to search…")}`);
+    lines.push(`  ${esc.dim("Type to search…  (esc to go back)")}`);
   }
   lines.push("");
 
@@ -233,8 +239,9 @@ export default createPrompt<string[], Config>((config, done) => {
   }
 
   lines.push("");
+  const backHint = config.allowBack !== false ? "  ·  esc: back" : "";
   lines.push(
-    `  ${esc.dim(`${selected.size}/${choices.length} selected  ·  space: toggle  ·  ctrl+a: all/none  ·  enter: confirm`)}`,
+    `  ${esc.dim(`${selected.size}/${choices.length} selected  ·  space: toggle  ·  ctrl+a: all/none  ·  enter: confirm${backHint}`)}`,
   );
 
   return `${lines.join("\n")}${esc.cursorHide}`;

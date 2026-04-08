@@ -1,3 +1,5 @@
+import { resolve } from "path";
+import { fileURLToPath } from "url";
 import { vapiRequest, VapiApiError } from "./api.ts";
 import {
   VAPI_ENV,
@@ -587,11 +589,12 @@ function isPartialApply(): boolean {
 }
 
 function shouldApplyResourceType(type: ResourceType): boolean {
-  // If filtering by specific files, check if any file matches this type
   if (APPLY_FILTER.filePaths?.length) {
-    return true; // We'll filter by resourceId later
+    const folder = FOLDER_MAP[type];
+    return APPLY_FILTER.filePaths.some(
+      (fp) => fp.includes(`/${folder}/`) || fp.includes(`\\${folder}\\`),
+    );
   }
-  // If filtering by types, only include matching types
   if (APPLY_FILTER.resourceTypes?.length) {
     return APPLY_FILTER.resourceTypes.includes(type);
   }
@@ -1194,15 +1197,24 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the apply engine
-main().catch((error) => {
-  if (error instanceof VapiApiError) {
-    console.error(`\n❌ Apply failed: ${error.apiMessage}`);
-  } else {
-    console.error(
-      "\n❌ Apply failed:",
-      error instanceof Error ? error.message : error,
-    );
-  }
-  process.exit(1);
-});
+export async function runPush(): Promise<void> {
+  return main();
+}
+
+const isMainModule =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
+  main().catch((error) => {
+    if (error instanceof VapiApiError) {
+      console.error(`\n❌ Apply failed: ${error.apiMessage}`);
+    } else {
+      console.error(
+        "\n❌ Apply failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    process.exit(1);
+  });
+}

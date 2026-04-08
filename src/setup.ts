@@ -1,10 +1,10 @@
 import { existsSync, readdirSync } from "fs";
-import { mkdir, writeFile, readFile, rm, unlink } from "fs/promises";
+import { mkdir, writeFile, rm } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { input, password, confirm, select } from "@inquirer/prompts";
-import searchableCheckbox from "./searchableCheckbox.js";
+import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -286,88 +286,37 @@ async function deleteExistingOrg(slug: string): Promise<void> {
 // Pull integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-function invokePull(slug: string, types: string[]): void {
-  const typeArgs = types.flatMap((t) => ["--type", t]);
-  const cmd = ["tsx", "src/pull.ts", slug, "--force", ...typeArgs].join(" ");
-  const binDir = join(BASE_DIR, "node_modules", ".bin");
-  const sep = process.platform === "win32" ? ";" : ":";
-
-  execSync(cmd, {
-    cwd: BASE_DIR,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      PATH: `${binDir}${sep}${process.env.PATH ?? ""}`,
-    },
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Post-pull cleanup — remove resources that were pulled but not selected
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function pruneUnselected(
-  slug: string,
-  selectedIds: Set<string>,
-): Promise<number> {
-  const stateFilePath = join(BASE_DIR, `.vapi-state.${slug}.json`);
-  if (!existsSync(stateFilePath)) return 0;
-
-  const raw = await readFile(stateFilePath, "utf-8");
-  const state = JSON.parse(raw) as Record<string, Record<string, string>>;
-
-  // Build set of selected UUIDs per type
-  const selectedByType = new Map<string, Set<string>>();
+function invokePull(slug: string, selectedIds: Set<string>): void {
+  // Group selected resources by type so we can pass --id per invocation
+  const byType = new Map<string, string[]>();
   for (const id of selectedIds) {
     const sep = id.indexOf("::");
     const typeKey = id.substring(0, sep);
     const uuid = id.substring(sep + 2);
-    if (!selectedByType.has(typeKey)) selectedByType.set(typeKey, new Set());
-    selectedByType.get(typeKey)!.add(uuid);
+    if (!byType.has(typeKey)) byType.set(typeKey, []);
+    byType.get(typeKey)!.push(uuid);
   }
 
-  let pruned = 0;
-  const resourceDir = join(BASE_DIR, "resources", slug);
+  const binDir = join(BASE_DIR, "node_modules", ".bin");
+  const pathSep = process.platform === "win32" ? ";" : ":";
+  const env = {
+    ...process.env,
+    PATH: `${binDir}${pathSep}${process.env.PATH ?? ""}`,
+  };
 
-  for (const [typeKey, entries] of Object.entries(state)) {
-    if (typeof entries !== "object" || entries === null) continue;
-
-    const wantedUUIDs = selectedByType.get(typeKey);
-    if (!wantedUUIDs) {
-      // Type wasn't selected at all but was pulled (e.g. credentials) — leave it
-      continue;
-    }
-
-    const typeDir = join(resourceDir, typeKey);
-    const slugsToRemove: string[] = [];
-
-    for (const [fileSlug, uuid] of Object.entries(entries)) {
-      if (wantedUUIDs.has(uuid)) continue;
-
-      // Delete the resource file (could be .md or .yml)
-      if (existsSync(typeDir)) {
-        const files = readdirSync(typeDir);
-        for (const f of files) {
-          const nameWithoutExt = f.replace(/\.[^.]+$/, "");
-          if (nameWithoutExt === fileSlug) {
-            await unlink(join(typeDir, f));
-            pruned++;
-            break;
-          }
-        }
-      }
-
-      slugsToRemove.push(fileSlug);
-    }
-
-    for (const s of slugsToRemove) {
-      delete entries[s];
-    }
+  for (const [typeKey, uuids] of byType) {
+    const idArgs = uuids.flatMap((id) => ["--id", id]);
+    const cmd = [
+      "tsx",
+      "src/pull.ts",
+      slug,
+      "--force",
+      "--type",
+      typeKey,
+      ...idArgs,
+    ].join(" ");
+    execSync(cmd, { cwd: BASE_DIR, stdio: "inherit", env });
   }
-
-  // Write cleaned state file
-  await writeFile(stateFilePath, JSON.stringify(state, null, 2) + "\n");
-  return pruned;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -545,44 +494,49 @@ async function main(): Promise<void> {
 
   const totalCount = nonEmpty.reduce((n, s) => n + s.count, 0);
 
-  const scope = await select({
-    message: "Which resources to download?",
-    choices: [
-      {
-        name: `All (${totalCount} resources across ${nonEmpty.length} types)`,
-        value: "all" as const,
-      },
-      { name: "Let me pick…", value: "pick" as const },
-    ],
-  });
-
   // selectedIds: "typeKey::resourceUUID"
   let selectedIds: Set<string>;
 
-  if (scope === "pick") {
-    const allChoices = nonEmpty.flatMap((snap) =>
-      snap.resources.map((r) => ({
-        value: `${snap.key}::${r.id as string}`,
-        name: resourceDisplayName(r),
-        group: snap.label,
-        checked: false,
-      })),
-    );
-
-    const picked = await searchableCheckbox({
-      message: "Select resources",
-      choices: allChoices,
-      pageSize: 20,
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const scope = await select({
+      message: "Which resources to download?",
+      choices: [
+        {
+          name: `All (${totalCount} resources across ${nonEmpty.length} types)`,
+          value: "all" as const,
+        },
+        { name: "Let me pick…", value: "pick" as const },
+      ],
     });
 
-    selectedIds = new Set(picked);
-  } else {
-    // All resources
-    selectedIds = new Set(
-      nonEmpty.flatMap((snap) =>
-        snap.resources.map((r) => `${snap.key}::${r.id as string}`),
-      ),
-    );
+    if (scope === "pick") {
+      const allChoices = nonEmpty.flatMap((snap) =>
+        snap.resources.map((r) => ({
+          value: `${snap.key}::${r.id as string}`,
+          name: resourceDisplayName(r),
+          group: snap.label,
+          checked: false,
+        })),
+      );
+
+      const picked = await searchableCheckbox({
+        message: "Select resources",
+        choices: allChoices,
+        pageSize: 20,
+      });
+
+      if (picked.length === 1 && picked[0] === BACK_SENTINEL) continue;
+
+      selectedIds = new Set(picked);
+    } else {
+      selectedIds = new Set(
+        nonEmpty.flatMap((snap) =>
+          snap.resources.map((r) => `${snap.key}::${r.id as string}`),
+        ),
+      );
+    }
+    break;
   }
 
   // ── Step 3b: Dependency detection (iterative) ─────────────────────────
@@ -618,11 +572,6 @@ async function main(): Promise<void> {
     iterations++;
   }
 
-  // Derive types to pull
-  const typesToPull = [
-    ...new Set([...selectedIds].map((v) => v.split("::")[0]!)),
-  ];
-
   // Show final download list
   console.log("\n  Download list:");
   for (const snap of snapshots) {
@@ -644,15 +593,7 @@ async function main(): Promise<void> {
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(slug, typesToPull);
-
-  // Remove resources that were pulled but not selected
-  if (scope === "pick") {
-    const pruned = await pruneUnselected(slug, selectedIds);
-    if (pruned > 0) {
-      console.log(c.dim(`\n  Cleaned up ${pruned} unselected resource(s).`));
-    }
-  }
+  invokePull(slug, selectedIds);
 
   // ── Done ──────────────────────────────────────────────────────────────
 
