@@ -26,6 +26,9 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Azure OpenAI BYOK with regional failover | `docs/learnings/azure-openai-fallback.md` |
 | Multilingual agents (English/Spanish) | `docs/learnings/multilingual.md` |
 | WebSocket audio streaming | `docs/learnings/websocket.md` |
+| Building outbound calling agents | `docs/learnings/outbound-agents.md` |
+| Voicemail detection / VM vs human classification | `docs/learnings/voicemail-detection.md` |
+| Enforcing call time limits / graceful call ending | `docs/learnings/call-duration.md` |
 
 ---
 
@@ -70,7 +73,9 @@ docs/
     ├── fallbacks.md                           # Fallback and error handling recipes
     ├── azure-openai-fallback.md               # Azure OpenAI BYOK multi-region setup
     ├── multilingual.md                        # Multilingual agent architecture guide
-    └── websocket.md                           # WebSocket transport rules
+    ├── websocket.md                           # WebSocket transport rules
+    ├── outbound-agents.md                     # Outbound agent design & IVR navigation
+    └── voicemail-detection.md                 # Voicemail vs human classification
 
 resources/
 ├── dev/                     # Dev environment resources (push:dev reads here)

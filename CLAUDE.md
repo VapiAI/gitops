@@ -24,3 +24,4 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
    - Azure OpenAI BYOK → `docs/learnings/azure-openai-fallback.md`
    - Multilingual agents → `docs/learnings/multilingual.md`
    - WebSocket transport → `docs/learnings/websocket.md`
+   - Call time limits / graceful ending → `docs/learnings/call-duration.md`
