@@ -201,6 +201,57 @@ After one delayed message plays, another won't play for at least 2.5 seconds —
 
 ---
 
+## voicemail Tools
+
+### Use voicemail type, not endCall, for voicemail termination
+
+The `voicemail` tool type sets `endedReason` to `voicemail` (not `assistant-ended-call`), which enables voicemail-specific analytics filtering and retry logic.
+
+```yaml
+type: voicemail
+function:
+  name: end_call_on_voicemail
+  description: End the call immediately when voicemail is detected.
+messages:
+  - type: request-start
+    content: ""
+beepDetectionEnabled: false
+```
+
+### `beepDetectionEnabled` is carrier-level, not LLM-level
+
+Setting `beepDetectionEnabled: true` enables **Twilio AMD** (Answering Machine Detection) at the telephony layer. This detects voicemail in 2–5 seconds using audio analysis, before the LLM even processes the transcript.
+
+**Only works with Twilio.** Other telephony providers ignore this setting. For non-Twilio setups, rely on LLM-based detection via the system prompt.
+
+### `function.description` reinforces detection as a secondary signal
+
+The LLM sees the tool's `function.description` alongside the system prompt. Including voicemail trigger phrases in the description gives the LLM a second signal for detection, but the system prompt is the primary detection engine.
+
+### Silent tool messages for detection agents
+
+For voicemail detection assistants that should never speak, set `messages[0].content: ""` (empty string). The tool still fires, but no audio is produced.
+
+---
+
+## dtmf Tools
+
+### DTMF requires no configuration
+
+The `dtmf` tool type is built-in and requires no function definition, parameters, or server URL:
+
+```yaml
+type: dtmf
+```
+
+The agent can press phone keypad buttons by calling this tool with the digit(s) to send. Used primarily for IVR navigation in outbound calling scenarios.
+
+### DTMF is telephony-only
+
+DTMF tones are a telephony concept. This tool has no effect on WebSocket or web-based calls.
+
+---
+
 ## Tool strict Mode Summary
 
 | Tool type | `strict` behavior |

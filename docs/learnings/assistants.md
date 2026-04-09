@@ -82,6 +82,25 @@ If you configure `startSpeakingPlan.smartEndpointingPlan`, the transcriber's own
 
 **Gotcha:** `assistant-speaks-first-with-model-generated-message` is not supported by all realtime providers (e.g., Google Gemini Realtime will error).
 
+### Outbound agents: use `assistant-waits-for-user` with empty `firstMessage`
+
+For outbound voicemail detection agents that should never speak first:
+
+```yaml
+firstMessage: ""
+firstMessageMode: assistant-waits-for-user
+```
+
+This makes the assistant listen silently when the call connects, allowing it to classify what picked up (voicemail, IVR, or human) before taking action.
+
+**Gotcha:** Even in `assistant-waits-for-user` mode, TTS for `firstMessage` is still pre-loaded. Setting it to `""` avoids wasting TTS resources on unused audio.
+
+### `voicemailMessage` is a separate safety net
+
+`voicemailMessage` is spoken when Vapi's **built-in** voicemail detection triggers (separate from LLM-driven detection via the voicemail tool). It's a fallback mechanism — if your LLM-based detection misses a voicemail, this catches it.
+
+**Recommendation:** Always set `voicemailMessage` on outbound agents as a last-resort safety net, even if your primary detection is LLM-based.
+
 ---
 
 ## Hooks

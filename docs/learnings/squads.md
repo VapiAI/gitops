@@ -53,6 +53,38 @@ Both mechanisms can coexist on the same member. If you use both `assistantDestin
 
 After a handoff, the new assistant does NOT get a raw copy of all prior messages. Vapi may summarize, filter, or restructure the conversation history during the transfer. If `handoffMessages` are provided on the destination, they **replace** the active message context entirely.
 
+### `contextEngineeringPlan` controls what the destination sees
+
+| Type | Behavior | Best for |
+|------|----------|----------|
+| `all` (default) | Full conversation preserved, system message replaced | Continuing same conversation (e.g., VM detection → fronter) |
+| `none` | Clean slate — no prior context | Starting fresh (e.g., language switch) |
+| `lastNMessages` | Last N messages kept | Partial context preservation |
+| `userAndAssistantMessages` | User/bot turns only (tool calls stripped) | Clean handoff without tool noise |
+
+### The VM detection relay pattern
+
+A common squad pattern for outbound calling: a silent detection assistant classifies the call recipient, then hands off to a conversational "fronter" assistant.
+
+The handoff tool's `request-start` message carries the **spoken opening line** with `blocking: true`. The human hears this as a seamless greeting from what they perceive as the caller, while the fronter assistant takes over behind the scenes.
+
+```yaml
+# On the detection assistant's handoff tool
+messages:
+  - type: request-start
+    content: "Hello, this is [Name] from [Company]. Am I speaking with {{customer.name}}?"
+    blocking: true
+destinations:
+  - type: assistant
+    assistantName: "Fronter Assistant"
+    contextEngineeringPlan:
+      type: all
+```
+
+**Critical:** `blocking: true` ensures the greeting finishes before the fronter takes control. Without it, the fronter could interrupt mid-greeting.
+
+See [voicemail-detection.md](voicemail-detection.md) for the full two-agent relay architecture.
+
 ---
 
 ## Override Merge Order

@@ -1,0 +1,62 @@
+---
+description: How to add, update, or refactor content in docs/learnings/
+globs:
+  - docs/learnings/**
+---
+
+# Updating the Learnings Knowledge Base
+
+The `docs/learnings/` folder is a **persistent, structured knowledge base** — not a loose document dump. It is designed so that AI agents can search it efficiently (like a RAG system) and find the right answer to a customer's problem quickly.
+
+## Design Principles
+
+1. **Problem-first organization.** Every section should be framed as a problem a customer might encounter, followed by what causes it and how to fix it. Use the pattern: symptom → root cause → solution.
+2. **One topic per file.** Each `.md` file covers a single domain (tools, assistants, voicemail detection, etc.). Don't mix unrelated topics in one file.
+3. **Searchable headings.** Use descriptive headings that match how someone would describe the problem: "`beepDetectionEnabled` is carrier-level, not LLM-level" is better than "Beep Detection".
+4. **Cross-link related files.** Use relative markdown links like `[voicemail-detection.md](voicemail-detection.md)` to connect related topics.
+5. **No redundancy.** If information belongs in an existing file, add it there. Only create a new file when the topic is genuinely distinct and would make the existing file too broad.
+
+## When Adding New Content
+
+### Adding to an existing file
+
+1. Read the target file first to understand its structure and style.
+2. Find the most logical section for the new content.
+3. Match the existing format — most files use the "What you might expect / What actually happens / Recommendation" pattern or a "Problem / Cause / Fix" pattern.
+4. If the content cross-references another topic, add a link.
+
+### Creating a new file
+
+1. Choose a descriptive, kebab-case filename: `voicemail-detection.md`, `outbound-agents.md`.
+2. Start with a one-line description of what the file covers.
+3. Use `---` horizontal rules between major sections.
+4. Structure content as searchable problem/solution pairs, not as a narrative.
+5. **Update all three index locations:**
+   - `docs/learnings/README.md` — add to the Quick Routing table AND the Full Index (in the correct category: Configuration Reference, Troubleshooting Runbooks, or Recipes & Guides)
+   - `AGENTS.md` — add to the "Learnings & recipes" routing table near the top of the file AND to the project structure tree
+   - `CLAUDE.md` — if it exists and has a learnings routing section, add the entry there too
+
+### Refactoring existing content
+
+When source material spans multiple existing files (e.g., a runbook that touches tools, assistants, and squads):
+
+1. **Create a dedicated file** for the primary topic (e.g., `voicemail-detection.md`).
+2. **Upsert relevant facts** into existing files (e.g., add voicemail tool docs to `tools.md`, outbound assistant modes to `assistants.md`).
+3. **Cross-link** from the existing files to the new dedicated file for deeper reading.
+
+## Content Style
+
+- Use tables for comparisons, settings, and decision matrices.
+- Use code blocks with `yaml` for configuration examples.
+- Use **bold** for key terms and `code` for field names, values, and tool names.
+- Avoid narrative prose — prefer structured, scannable content.
+- Include "Common Failures" or "Testing Matrix" tables when the topic involves debugging.
+
+## Source Material
+
+When integrating raw source documents (Notion exports, runbooks, PDFs):
+
+1. **Never copy-paste verbatim.** Synthesize into the learnings format.
+2. **Extract the non-obvious parts.** Skip things that are already in the API docs or AGENTS.md.
+3. **Validate against existing content.** Check for contradictions with what's already in the learnings folder.
+4. **Attribute if needed.** If the source contains experimental or unverified information, note it.
