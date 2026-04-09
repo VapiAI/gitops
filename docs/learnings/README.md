@@ -1,6 +1,6 @@
 # Gotchas & Best Practices
 
-Non-obvious behaviors, silent defaults, and foot-guns in the Vapi backend that affect how your YAML/JSON resources behave at runtime. This is a companion to the API reference — it covers what the docs _don't_ tell you.
+Non-obvious behaviors, silent defaults, and foot-guns in the Vapi platform that affect how your YAML/JSON resources behave at runtime. This is a companion to the API reference — it covers what the docs _don't_ tell you.
 
 Each file in this directory covers a specific resource type so you can load only the context you need:
 

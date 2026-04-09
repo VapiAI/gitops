@@ -10,7 +10,7 @@ Non-obvious behaviors and silent defaults for Vapi tool types.
 
 **What you might expect:** `function.parameters` and `body` are two independent schemas — one for the LLM, one for the HTTP request.
 
-**What actually happens:** The backend **overwrites** `function.parameters` with a copy of `body` during normalization. Whatever you define in `body.properties` becomes the tool schema the LLM sees. Any `function.parameters` you set on an apiRequest tool is **silently ignored**.
+**What actually happens:** Vapi **overwrites** `function.parameters` with a copy of `body` when the tool is processed. Whatever you define in `body.properties` becomes the tool schema the LLM sees. Any `function.parameters` you set on an apiRequest tool is **silently ignored**.
 
 **Recommendation:** Only define your schema in `body`. Do not set `function.parameters` on apiRequest tools.
 
@@ -28,19 +28,19 @@ If you omit `method`, it defaults to `POST` — not `GET`.
 
 ### API response must be JSON
 
-On a successful HTTP response (2xx), the backend calls `response.json()`. If your API returns non-JSON (plain text, HTML, XML), the tool call will error.
+On a successful HTTP response (2xx), Vapi expects a JSON body. If your API returns non-JSON (plain text, HTML, XML), the tool call will error.
 
 ### `function.strict` is always cleared
 
-The backend sets `strict: undefined` on apiRequest tools during normalization. If you need strict schema enforcement from the LLM provider, use a `function` type tool instead.
+Vapi removes `strict` from apiRequest tools when they are processed. If you need strict schema enforcement from the LLM provider, use a `function` type tool instead.
 
 ### `async` has no effect
 
-The backend forces `async: undefined` on apiRequest tools. They always execute synchronously (HTTP call → wait for response → return to LLM).
+Vapi ignores `async` on apiRequest tools. They always execute synchronously (HTTP call → wait for response → return to LLM).
 
 ### Credential fallback behavior
 
-If `credentialId` is set on the tool, that specific credential is used. If omitted, the backend uses the **first** `webhook` or `custom-credential` it finds on the call's credential list. If you have multiple webhook credentials, always set `credentialId` explicitly.
+If `credentialId` is set on the tool, that specific credential is used. If omitted, Vapi picks one from the call's available credentials automatically. If you have multiple webhook credentials, always set `credentialId` explicitly to avoid ambiguity.
 
 ---
 
@@ -50,7 +50,7 @@ If `credentialId` is set on the tool, that specific credential is used. If omitt
 
 **What you might expect:** A function tool without `server.url` fails at runtime.
 
-**What actually happens:** The backend falls back through a hierarchy: tool `server.url` → assistant `server.url` → phone number `server.url` → org `server.url`. Omitting `server` on the tool is valid if the assistant or org has a server URL configured.
+**What actually happens:** Vapi falls back through a hierarchy: tool `server.url` → assistant `server.url` → phone number `server.url` → org `server.url`. Omitting `server` on the tool is valid if the assistant or org has a server URL configured.
 
 **Recommendation:** Set `server.url` on the tool for clarity, or document which level provides the webhook URL.
 
@@ -66,9 +66,9 @@ If `credentialId` is set on the tool, that specific credential is used. If omitt
 When `strict: true` is set on a function tool:
 - Every `object` node must have `additionalProperties: false`
 - Every property must be listed in `required`
-- The org must have the `ENABLE_TOOL_STRICT_MODE` feature flag enabled
+- Strict mode must be enabled for your organization
 
-If the schema doesn't meet these requirements, `strict` is silently stripped and a warning is logged.
+If the schema doesn't meet these requirements, `strict` may be silently disabled for that tool.
 
 ---
 
@@ -131,7 +131,7 @@ If you don't set `function.name`:
 
 ### Destination resolution is fuzzy
 
-The backend tries multiple matching strategies for the model's destination argument:
+Vapi tries multiple matching strategies for the model's destination argument:
 1. Match by UUID (`assistantId`, `squadId`)
 2. Match by name (`assistantName`, squad `name`)
 3. Fall back to first destination if argument is `"dynamic"` or missing
@@ -145,15 +145,15 @@ The backend tries multiple matching strategies for the model's destination argum
 
 ### Execution timeout is capped at 30 seconds
 
-Even if you set `timeoutSeconds: 60`, the backend caps it at `Math.min(timeoutSeconds ?? 30, 30)`.
+Even if you set `timeoutSeconds: 60`, the effective timeout is capped at **30 seconds**.
 
 ### Code must be valid top-level async JavaScript
 
-Code runs in an E2B sandbox as `node /tmp/code.js`. The code receives `args` (tool arguments) and `env` (environment variables) as globals. Return values are captured from the resolved promise.
+Code runs in a managed sandbox as Node.js. The code receives `args` (tool arguments) and `env` (environment variables) as globals. Return values are captured from the resolved promise.
 
 ### Static validation checks `args.*` and `env.*` references
 
-When saving a code tool, the backend parses your code and validates that every `args.foo` reference has a matching property in `function.parameters.properties`, and every `env.BAR` reference has a matching key in `environmentVariables`. Mismatches are rejected.
+When saving a code tool, Vapi parses your code and validates that every `args.foo` reference has a matching property in `function.parameters.properties`, and every `env.BAR` reference has a matching key in `environmentVariables`. Mismatches are rejected.
 
 ### `function.strict` is cleared (like apiRequest)
 
@@ -195,11 +195,11 @@ After one delayed message plays, another won't play for at least 2.5 seconds —
 
 | Tool type | `strict` behavior |
 |-----------|-------------------|
-| `function` | **Preserved** — passed to LLM provider if org has `ENABLE_TOOL_STRICT_MODE` |
-| `apiRequest` | **Cleared** to `undefined` during normalization |
-| `code` | **Cleared** to `undefined` during normalization |
-| `transferCall` | **Cleared** to `undefined` during normalization |
-| `endCall` | **Cleared** to `undefined` during normalization |
-| `handoff` | **Cleared** to `undefined` during normalization |
+| `function` | **Preserved** — passed to LLM provider if strict mode is enabled for your org |
+| `apiRequest` | **Removed** when the tool is processed |
+| `code` | **Removed** when the tool is processed |
+| `transferCall` | **Removed** when the tool is processed |
+| `endCall` | **Removed** when the tool is processed |
+| `handoff` | **Removed** when the tool is processed |
 
 Only `function` tools support `strict` mode.

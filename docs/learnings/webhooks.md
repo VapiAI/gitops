@@ -24,8 +24,8 @@ These are **two independent settings**:
 
 | Setting | Controls | Default |
 |---------|----------|---------|
-| `server.timeoutSeconds` | Webhook delivery timeout (status-update, end-of-call-report, etc.) | `DEFAULT_TIMEOUT_SECOND` |
-| `tool.timeoutSeconds` (apiRequest) | Individual tool HTTP call timeout | `DEFAULT_TIMEOUT_SECOND` |
+| `server.timeoutSeconds` | Webhook delivery timeout (status-update, end-of-call-report, etc.) | Platform default (see API reference) |
+| `tool.timeoutSeconds` (apiRequest) | Individual tool HTTP call timeout | Platform default (see API reference) |
 
 They don't inherit from each other.
 
@@ -33,24 +33,17 @@ They don't inherit from each other.
 
 ## Unreachable Server Behavior
 
-- **Missing `server.url`:** Returns empty object, no network call. No error.
-- **Server returns error:** Error is logged and returned. For `tool-calls` message type, the backend **still attempts to parse** the error response body for tool results.
-- **High failure rate:** A circuit breaker kicks in — "noisy" message types (frequent events like `speech-update`) are aborted when the error rate exceeds a threshold. Critical messages like `end-of-call-report` continue attempting.
+- **Missing `server.url`:** No network call is made. No error is raised.
+- **Server returns error:** The error is logged and returned to the platform. For `tool-calls` events, Vapi still attempts to parse the error response body for tool results.
+- **High failure rate:** Under sustained delivery failures, Vapi may reduce delivery of high-frequency events (like `speech-update`) while still attempting critical events (like `end-of-call-report`).
 
 ---
 
 ## Credential Resolution
 
-For server webhooks:
-1. If `server.credentialId` is set → use that specific credential
-2. Else → use the first `custom-credential` on the call
-3. Else → use the first `webhook` credential on the call
+If `credentialId` is set on the server or tool, that specific credential is used. If omitted, Vapi picks one from the call's available credentials automatically.
 
-For apiRequest tools:
-1. If `tool.credentialId` is set → use that specific credential
-2. Else → use the first `webhook` or `custom-credential` on the call
-
-**Recommendation:** Always set `credentialId` explicitly when multiple credentials exist to avoid ambiguous fallback.
+**Recommendation:** Always set `credentialId` explicitly when multiple credentials exist to avoid ambiguous selection.
 
 ---
 

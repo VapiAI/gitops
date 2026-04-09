@@ -39,7 +39,7 @@ Simulation evaluations support these comparators:
 
 Evaluations that require audio (`target: messages-with-audio`) are **skipped** in chat-mode simulations with `passed: false` and `isSkipped: true`.
 
-**Critical:** If **all** required evaluations are audio-dependent and the simulation runs in chat mode, they're all skipped — and `evaluationPlanPassedCheck` returns **`true`** (0 required results = pass). This means your test suite can silently pass with no actual evaluation.
+**Critical:** If **all** required evaluations are audio-dependent and the simulation runs in chat mode, they're all skipped — and the run is treated as **passed** (0 required results = pass). This means your test suite can silently pass with no actual evaluation.
 
 **Recommendation:** Include at least one text-based (`target: messages`) evaluation in every simulation that runs in chat mode.
 
@@ -47,6 +47,6 @@ Evaluations that require audio (`target: messages-with-audio`) are **skipped** i
 
 ## Missing References
 
-- **At run creation (API):** Missing scenario or personality IDs throw `BadRequestException` immediately.
-- **At execution (Temporal worker):** Missing references throw `ApplicationFailure` — behavior depends on Temporal retry config.
-- **Inline runs:** Require snapshots in metadata or fail with "no inline config" error.
+- **At run creation (API):** Missing scenario or personality IDs fail the API request immediately with a validation error.
+- **At execution:** Missing references fail the run. Retries depend on platform configuration.
+- **Inline runs:** Require snapshots in metadata or fail with a "no inline config" error.

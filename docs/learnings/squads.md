@@ -40,7 +40,7 @@ assistantOverrides:
 
 ## assistantDestinations vs Inline Tools
 
-`member.assistantDestinations` is **sugar** that the backend converts into real tools:
+`member.assistantDestinations` is **shorthand** that Vapi converts into real tools:
 
 - Destinations with `assistantId`, `contextEngineeringPlan`, or `variableExtractionPlan` → **handoff tools**
 - All other destinations → merged into a **transferCall tool** (creating one if needed)
@@ -51,20 +51,18 @@ Both mechanisms can coexist on the same member. If you use both `assistantDestin
 
 ## Context During Handoffs
 
-After a handoff, the new assistant does NOT get a raw copy of all prior messages. The backend applies `squadTransferMessagesApply` which may summarize, filter, or restructure the conversation history. If `handoffMessages` are provided on the destination, they **replace** the active message context entirely.
+After a handoff, the new assistant does NOT get a raw copy of all prior messages. Vapi may summarize, filter, or restructure the conversation history during the transfer. If `handoffMessages` are provided on the destination, they **replace** the active message context entirely.
 
 ---
 
 ## Override Merge Order
 
-```
-Final = deepMerge(
-  assistant,
-  member.assistantOverrides,
-  squad.membersOverrides,
-  call.squadOverrides
-)
-```
+The final assistant configuration is built by merging these layers in order:
+
+1. Base assistant
+2. `member.assistantOverrides`
+3. `squad.membersOverrides`
+4. `call.squadOverrides`
 
 Later layers win on conflicts. `variableValues` from all layers are merged separately.
 

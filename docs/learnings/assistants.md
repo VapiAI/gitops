@@ -8,7 +8,7 @@ Non-obvious behaviors and silent defaults for Vapi assistant settings.
 
 ### `temperature` defaults to 0, `maxTokens` defaults to 250
 
-If omitted, the backend fills `temperature: 0` and `maxTokens: 250`. This can cause unexpectedly short responses.
+If omitted, Vapi defaults to `temperature: 0` and `maxTokens: 250`. This can cause unexpectedly short responses.
 
 **Recommendation:** Set `maxTokens` explicitly (e.g., 1000–4000) for assistants that need longer responses.
 
@@ -22,7 +22,7 @@ If omitted, the backend fills `temperature: 0` and `maxTokens: 250`. This can ca
 
 ### `emotionRecognitionEnabled` has no runtime effect
 
-Despite being a configurable field, the endpointing buffer has an explicit no-op branch for this flag. Don't rely on it for behavior changes.
+Despite being a configurable field, this setting currently has **no effect** on call behavior. Don't rely on it.
 
 ---
 
@@ -50,7 +50,7 @@ If omitted, transcripts with confidence below 0.4 may be **ignored** entirely (n
 
 ### `smartEndpointingPlan` **owns** turn detection when set
 
-If you configure `startSpeakingPlan.smartEndpointingPlan`, the transcriber's own `endpointing` settings (VAD timeouts, etc.) are **not used** for turn detection. Smart endpointing takes full control.
+If you configure `startSpeakingPlan.smartEndpointingPlan`, the transcriber's own `endpointing` settings (voice activity detection timeouts, etc.) are **not used** for turn detection. Smart endpointing takes full control.
 
 **Recommendation:** Don't set both and expect them to combine. Choose one approach.
 
@@ -76,7 +76,7 @@ Hooks that fail validation are dropped without error. Your call will proceed wit
 
 ### Missing hook `toolId` is a warning, not an error
 
-If a hook references a `toolId` that doesn't exist, the backend logs a warning and continues. This is different from `model.toolIds` where a missing ID **errors the call**.
+If a hook references a `toolId` that doesn't exist, Vapi logs a warning and continues. This is different from `model.toolIds` where a missing ID **errors the call**.
 
 ### Hook events are independent from timeout settings
 
@@ -123,8 +123,8 @@ If not set, there's a 0.4-second pause after the user stops speaking before the 
 
 ### `waitSeconds` and `smartEndpointingPlan` control different things
 
-- `waitSeconds` drives the **TurnTakingBuffer**: it corks assistant audio output for that duration after VAD detects speech.
-- `smartEndpointingPlan` drives the **EndpointingBuffer**: it determines when the user has finished their turn using an AI model or heuristic.
+- `waitSeconds` controls a short pause on assistant audio after voice activity is detected — it delays the assistant's response by that duration.
+- `smartEndpointingPlan` controls how end-of-turn is detected — it determines when the user has finished speaking using an AI model or heuristic.
 
 These are complementary, not alternatives.
 
@@ -152,7 +152,7 @@ Unless you explicitly set `analysisPlan.summaryPlan.enabled: false`, post-call s
 
 ### Recording is enabled by default
 
-Unless you set `artifactPlan.recordingEnabled: false`, calls are recorded. The backend falls back to `assistant.recordingEnabled` (deprecated), then defaults to `true`.
+Unless you set `artifactPlan.recordingEnabled: false`, calls are recorded. Vapi also checks `assistant.recordingEnabled` (deprecated) before defaulting to `true`.
 
 ### Default transcript labels are "AI" and "User"
 
@@ -198,7 +198,7 @@ Omitting `serverMessages` does **not** mean "no webhooks." It means "all default
 
 ## HIPAA / Compliance
 
-When HIPAA is enabled (on org or assistant) **and** the `ENABLE_ASSISTANT_PROVIDER_HIPAA_VALIDATION` feature flag is active, the model, voice, and transcriber providers must be on an approved allowlist. Non-compliant providers will **fail validation** on create/update.
+When HIPAA is enabled (on org or assistant) and HIPAA provider validation is enforced for your org, the model, voice, and transcriber providers must be on Vapi's approved allowlist. Non-compliant providers will **fail validation** on create/update.
 
 ---
 
@@ -209,7 +209,7 @@ When HIPAA is enabled (on org or assistant) **and** the `ENABLE_ASSISTANT_PROVID
 1. Inline `model.tools` are processed first
 2. Each `toolId` is resolved from the org's saved tools — **a missing ID errors the call**
 3. Results are merged: `[...inline tools, ...resolved toolIds]`
-4. MCP tools are expanded from parent tool metadata
+4. MCP tools are expanded from configured integrations
 
 ### `toolIds` and inline `tools` can coexist
 

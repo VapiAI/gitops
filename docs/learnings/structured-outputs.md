@@ -8,11 +8,11 @@ Non-obvious behaviors and silent defaults for Vapi structured output extraction.
 
 ### Use single `type` values, not arrays
 
-**Bad:** `type: [string, "null"]` — this can cause `TypeError: .toLowerCase is not a function` in the dashboard, and the backend uses only the **first** element of the array for extraction.
+**Bad:** `type: [string, "null"]` — using an array for `type` is not supported and may cause errors in the dashboard and extraction pipeline. Vapi uses only the **first** element of the array.
 
 **Good:** `type: string` — express nullability in the `description` instead (e.g., "Return null if not applicable").
 
-### `wrapIfPrimitive` behavior
+### Primitive schemas are auto-wrapped
 
 Primitive schemas (`string`, `boolean`, `number`) are automatically wrapped in an object for OpenAI structured output mode:
 ```json
@@ -33,7 +33,7 @@ Structured outputs require `assistant_ids` as **Vapi UUIDs** (v4 format). Assist
 
 ## Default Extraction Model
 
-If you omit `model` on a structured output, the default is:
+If you omit `model` on a structured output, the default (as of this writing) is:
 ```yaml
 model:
   provider: openai
@@ -42,9 +42,9 @@ model:
   maxTokens: 4000
 ```
 
-Fallback sequence: your configured model → `gpt-4.1` → `gemini-2.5-flash`.
+Fallback sequence: your configured model → `gpt-4.1` → `gemini-2.5-flash`. These defaults may change over time — check the API reference for the current default.
 
-For multimodal extraction (`messages-with-audio`), the default is **Gemini 2.5 Pro**.
+For multimodal extraction (`messages-with-audio`), the default is **Gemini 2.5 Pro** (as of this writing).
 
 ---
 
