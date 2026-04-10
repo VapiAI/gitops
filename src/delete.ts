@@ -103,6 +103,7 @@ const DELETE_ENDPOINT_MAP: Record<ResourceType, string> = {
   scenarios: "/eval/simulation/scenario",
   simulations: "/eval/simulation",
   simulationSuites: "/eval/simulation/suite",
+  evals: "/eval",
 };
 
 // Map display type back to ReferenceableType for reference checking
@@ -115,6 +116,7 @@ const REFERENCEABLE_TYPE_MAP: Record<string, ReferenceableType | null> = {
   "simulation": "simulations",
   "simulation suite": null, // not referenceable by others
   "squad": null,            // not referenceable by others
+  "eval": null,             // not referenceable by others
 };
 
 export async function deleteOrphanedResources(
@@ -150,9 +152,13 @@ export async function deleteOrphanedResources(
   const orphanedSimulationSuites = shouldCheck("simulationSuites")
     ? findOrphanedResources(loadedResources.simulationSuites.map((s) => s.resourceId), state.simulationSuites)
     : [];
+  const orphanedEvals = shouldCheck("evals")
+    ? findOrphanedResources(loadedResources.evals.map((e) => e.resourceId), state.evals)
+    : [];
 
   // Collect all orphaned resources (in reverse dependency order for deletion)
   const allOrphaned = [
+    ...orphanedEvals.map((r) => ({ ...r, type: "eval" as const, stateKey: "evals" as ResourceType })),
     ...orphanedSimulationSuites.map((r) => ({ ...r, type: "simulation suite" as const, stateKey: "simulationSuites" as ResourceType })),
     ...orphanedSimulations.map((r) => ({ ...r, type: "simulation" as const, stateKey: "simulations" as ResourceType })),
     ...orphanedScenarios.map((r) => ({ ...r, type: "scenario" as const, stateKey: "scenarios" as ResourceType })),
