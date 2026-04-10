@@ -2,8 +2,9 @@ import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join, dirname, relative, extname } from "path";
 import { fileURLToPath } from "url";
-import { select } from "@inquirer/prompts";
+import { select, confirm } from "@inquirer/prompts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
+import type { StateFile } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -171,7 +172,7 @@ function loadOrgEnv(slug: string): { token: string; baseUrl: string } {
 // Org Selection Prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function selectOrg(action: "pull" | "push"): Promise<string> {
+async function selectOrg(action: string): Promise<string> {
   const orgs = detectOrgs();
 
   if (orgs.length === 0) {
@@ -840,5 +841,167 @@ export async function runInteractivePush(): Promise<void> {
   const relPaths = picked.map((p) => relative(BASE_DIR, p));
   console.log(c.dim("\n  Pushing...\n"));
   spawnScript(["src/push.ts", slug, ...relPaths]);
+  console.log(c.green("\n  Done!\n"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive Apply (Pull → Push)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function runInteractiveApply(): Promise<void> {
+  console.log("");
+  console.log(
+    c.bold(
+      "═══════════════════════════════════════════════════════════════",
+    ),
+  );
+  console.log(c.bold("  Vapi GitOps — Interactive Apply (Pull → Push)"));
+  console.log(
+    c.bold(
+      "═══════════════════════════════════════════════════════════════",
+    ),
+  );
+  console.log("");
+
+  const slug = await selectOrg("apply");
+
+  const useForce = await confirm({
+    message:
+      "Enable force mode? (deletions: resources removed locally will also be deleted remotely)",
+    default: false,
+  });
+
+  const args = ["src/apply.ts", slug];
+  if (useForce) args.push("--force");
+
+  console.log(c.dim("\n  Running pull → push...\n"));
+  spawnScript(args);
+  console.log(c.green("\n  Done!\n"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive Call
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function runInteractiveCall(): Promise<void> {
+  console.log("");
+  console.log(
+    c.bold(
+      "═══════════════════════════════════════════════════════════════",
+    ),
+  );
+  console.log(c.bold("  Vapi GitOps — Interactive Call"));
+  console.log(
+    c.bold(
+      "═══════════════════════════════════════════════════════════════",
+    ),
+  );
+  console.log("");
+
+  const slug = await selectOrg("call");
+
+  const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
+  if (!existsSync(stateFile)) {
+    console.log(
+      c.yellow(`\n  No state file found (.vapi-state.${slug}.json).`),
+    );
+    console.log(c.yellow("  Run pull first to populate resource mappings.\n"));
+    return;
+  }
+
+  let state: StateFile;
+  try {
+    state = JSON.parse(readFileSync(stateFile, "utf-8")) as StateFile;
+  } catch {
+    console.log(c.red(`\n  Failed to parse state file.\n`));
+    return;
+  }
+
+  const assistantNames = Object.keys(state.assistants ?? {});
+  const squadNames = Object.keys(
+    (state as StateFile & { squads?: Record<string, string> }).squads ?? {},
+  );
+
+  if (assistantNames.length === 0 && squadNames.length === 0) {
+    console.log(
+      c.yellow(
+        "\n  No assistants or squads found in state. Run pull first.\n",
+      ),
+    );
+    return;
+  }
+
+  const choices: { name: string; value: string }[] = [];
+  for (const name of assistantNames) {
+    choices.push({
+      name: `${name} ${c.dim("(assistant)")}`,
+      value: `-a ${name}`,
+    });
+  }
+  for (const name of squadNames) {
+    choices.push({
+      name: `${name} ${c.dim("(squad)")}`,
+      value: `-s ${name}`,
+    });
+  }
+
+  const target = await select({
+    message: "Which resource to call?",
+    choices,
+  });
+
+  console.log(c.dim("\n  Starting call...\n"));
+  spawnScript(["src/call.ts", slug, ...target.split(" ")]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Interactive Cleanup
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function runInteractiveCleanup(): Promise<void> {
+  console.log("");
+  console.log(
+    c.bold(
+      "═══════════════════════════════════════════════════════════════",
+    ),
+  );
+  console.log(c.bold("  Vapi GitOps — Interactive Cleanup"));
+  console.log(
+    c.bold(
+      "═══════════════════════════════════════════════════════════════",
+    ),
+  );
+  console.log("");
+
+  const slug = await selectOrg("cleanup");
+
+  console.log(
+    c.yellow(
+      "  ⚠ Cleanup deletes remote resources that are NOT in your local state file.\n",
+    ),
+  );
+
+  const dryFirst = await confirm({
+    message: "Run dry-run first to preview what would be deleted?",
+    default: true,
+  });
+
+  if (dryFirst) {
+    console.log(c.dim("\n  Running dry-run...\n"));
+    spawnScript(["src/cleanup.ts", slug]);
+
+    const proceed = await confirm({
+      message: "Proceed with actual deletion?",
+      default: false,
+    });
+
+    if (!proceed) {
+      console.log(c.dim("\n  Cancelled.\n"));
+      return;
+    }
+  }
+
+  console.log(c.dim("\n  Running cleanup with --force...\n"));
+  spawnScript(["src/cleanup.ts", slug, "--force"]);
   console.log(c.green("\n  Done!\n"));
 }

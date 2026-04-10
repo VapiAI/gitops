@@ -245,6 +245,7 @@ export const UPDATE_EXCLUDED_KEYS: Record<ResourceType, string[]> = {
   scenarios: [],
   simulations: [],
   simulationSuites: [],
+  evals: ["type"],
 };
 
 export function removeExcludedKeys(

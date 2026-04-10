@@ -1,10 +1,9 @@
 import { existsSync, readFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import * as readline from "readline";
 import type { Environment, StateFile } from "./types.ts";
-import { VALID_ENVIRONMENTS } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -27,18 +26,19 @@ interface CallConfig {
 // Argument Parsing
 // ─────────────────────────────────────────────────────────────────────────────
 
+const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
 function printUsage(): void {
-  console.error("❌ Usage: bun run call:<env> -a <assistant-name>");
-  console.error("         bun run call:<env> -s <squad-name>");
+  console.error("❌ Usage: npm run call <org> -a <assistant-name>");
+  console.error("         npm run call <org> -s <squad-name>");
   console.error("");
   console.error("   Options:");
   console.error("     -a <name>    Call an assistant by name");
   console.error("     -s <name>    Call a squad by name");
   console.error("");
   console.error("   Examples:");
-  console.error("     bun run call:dev -a my-assistant");
-  console.error("     bun run call:dev -a support-assistant");
-  console.error("     bun run call:prod -s my-squad");
+  console.error("     npm run call my-org -a my-assistant");
+  console.error("     npm run call my-org -s my-squad");
 }
 
 function parseArgs(): CallConfig {
@@ -51,9 +51,11 @@ function parseArgs(): CallConfig {
 
   const env = args[0] as Environment;
 
-  if (!VALID_ENVIRONMENTS.includes(env)) {
-    console.error(`❌ Invalid environment: ${env}`);
-    console.error(`   Must be one of: ${VALID_ENVIRONMENTS.join(", ")}`);
+  if (!SLUG_RE.test(env)) {
+    console.error(`❌ Invalid org name: ${env}`);
+    console.error(
+      "   Must be lowercase alphanumeric with optional hyphens (e.g., dev, my-org)",
+    );
     process.exit(1);
   }
 
@@ -663,14 +665,13 @@ function createMicrophoneStream(onData: (data: Buffer) => void): {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function main() {
+export async function runCall(): Promise<void> {
   const config = parseArgs();
 
   console.log(`\n🚀 Starting WebSocket call`);
   console.log(`   Environment: ${config.env}`);
   console.log(`   ${config.resourceType}: ${config.target}\n`);
 
-  // Check microphone permissions first
   const hasPermission = await checkMicrophonePermission();
   if (!hasPermission) {
     console.log("❌ Call cancelled due to microphone permission issues.");
@@ -695,7 +696,11 @@ async function main() {
   await connectWebSocket(call.transport.websocketCallUrl, config);
 }
 
-main().catch((error) => {
-  console.error("❌ Fatal error:", error);
-  process.exit(1);
-});
+const isMainModule =
+  resolve(process.argv[1] ?? "") === resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  runCall().catch((error) => {
+    console.error("❌ Fatal error:", error);
+    process.exit(1);
+  });
+}

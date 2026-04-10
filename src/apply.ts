@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -13,7 +13,7 @@ import { fileURLToPath } from "url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
 
-const VALID_ENVIRONMENTS = ["dev", "stg", "prod"] as const;
+const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 function runPassthrough(cmd: string): number {
   try {
@@ -24,17 +24,16 @@ function runPassthrough(cmd: string): number {
   }
 }
 
-async function main(): Promise<void> {
+export async function runApply(): Promise<void> {
   const env = process.argv[2];
   const allArgs = process.argv.slice(3);
   const hasForce = allArgs.includes("--force");
 
-  // Pull never gets --force (apply's pull should always preserve local changes/deletions)
   const pullArgs = allArgs.filter(a => a !== "--force").join(" ");
   const pushArgs = allArgs.join(" ");
 
-  if (!env || !VALID_ENVIRONMENTS.includes(env as typeof VALID_ENVIRONMENTS[number])) {
-    console.error("Usage: npm run apply:dev [--force]");
+  if (!env || !SLUG_RE.test(env)) {
+    console.error("Usage: npm run apply <org> [--force]");
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");
@@ -54,7 +53,6 @@ async function main(): Promise<void> {
   }
   console.log("═══════════════════════════════════════════════════════════════\n");
 
-  // Step 1: Pull (never forced — always preserves local deletions/changes)
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
   const pullExit = runPassthrough(pullCmd);
   if (pullExit !== 0) {
@@ -62,7 +60,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Step 2: Push merged state (--force forwarded here for deletions)
   console.log("\n🚀 Pushing merged state to platform...\n");
   const pushCmd = `npx tsx src/push.ts ${env} ${pushArgs}`.trim();
   const pushExit = runPassthrough(pushCmd);
@@ -76,7 +73,12 @@ async function main(): Promise<void> {
   console.log("═══════════════════════════════════════════════════════════════\n");
 }
 
-main().catch((error) => {
-  console.error("\n❌ Apply failed:", error);
-  process.exit(1);
-});
+// Run when executed directly
+const isMainModule =
+  resolve(process.argv[1] ?? "") === resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  runApply().catch((error) => {
+    console.error("\n❌ Apply failed:", error);
+    process.exit(1);
+  });
+}

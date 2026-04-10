@@ -50,6 +50,7 @@ const ENDPOINT_MAP: Record<ResourceType, string> = {
   scenarios: "/eval/simulation/scenario",
   simulations: "/eval/simulation",
   simulationSuites: "/eval/simulation/suite",
+  evals: "/eval",
 };
 
 // Map resource types to their folder paths (relative to resources/)
@@ -62,6 +63,7 @@ const FOLDER_MAP: Record<ResourceType, string> = {
   scenarios: "simulations/scenarios",
   simulations: "simulations/tests",
   simulationSuites: "simulations/suites",
+  evals: "evals",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -831,6 +833,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     scenarios: { ...zero },
     simulations: { ...zero },
     simulationSuites: { ...zero },
+    evals: { ...zero },
   };
 
   // Pull in reverse-resolution order: pull resources that are referenced by others first,
@@ -889,6 +892,13 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     });
   if (shouldPull("simulationSuites"))
     stats.simulationSuites = await pullResourceType("simulationSuites", state, {
+      changedFiles,
+      force,
+      bootstrap,
+      resourceIds,
+    });
+  if (shouldPull("evals"))
+    stats.evals = await pullResourceType("evals", state, {
       changedFiles,
       force,
       bootstrap,
