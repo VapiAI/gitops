@@ -122,7 +122,10 @@ See [assistants.md](assistants.md) for `stopSpeakingPlan` defaults.
 
 | Priority | Provider type | Examples |
 |----------|--------------|---------|
-| Lowest latency | Low-latency conversational voices | Vapi built-in, Cartesia Sonic, Deepgram Aura |
+| Lowest latency | Low-latency conversational voices | Cartesia Sonic-3, Vapi built-in, Deepgram Aura |
 | Best quality | High-fidelity voices | ElevenLabs Multilingual v2, PlayHT |
+| Best multilingual + pronunciation control | IPA dictionaries across all languages | Cartesia Sonic-3 with `pronunciationDictId` |
 
 For conversation, **responsiveness almost always wins over voice quality**. A slight quality reduction that saves 100ms of Time to First Audio Byte is worth it in most use cases.
+
+**Cartesia Sonic-3** is Vapi's default voice provider — sub-200ms latency across 42 languages with pronunciation dictionary support. For multilingual use cases needing pronunciation control, it's the strongest choice.
