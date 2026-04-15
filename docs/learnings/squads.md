@@ -99,3 +99,33 @@ The final assistant configuration is built by merging these layers in order:
 Later layers win on conflicts. `variableValues` from all layers are merged separately.
 
 **Gotcha:** Liquid template substitution replaces undefined variables with **empty strings**, not errors. If a variable isn't in the merged `variableValues`, any `{{ myVar }}` reference silently becomes `""`.
+
+---
+
+## toolIds in assistantOverrides require UUIDs
+
+`assistantOverrides.model.toolIds` in squad members must use **Vapi platform UUIDs**, not local filenames. The gitops engine resolves filenames to UUIDs for base assistant `model.toolIds`, but it does **not** resolve them inside squad `assistantOverrides`. If you use a local filename, the push will fail with `each value in toolIds must be a UUID`.
+
+**Workaround:** Look up the tool's UUID from `.vapi-state.<env>.json` and use it directly.
+
+```yaml
+# WRONG — filename, will fail in assistantOverrides
+assistantOverrides:
+  model:
+    toolIds:
+      - my-tool-name
+
+# CORRECT — platform UUID
+assistantOverrides:
+  model:
+    toolIds:
+      - a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+---
+
+## FAQ agent consolidation pattern
+
+When a squad has multiple specialist agents that each carry one knowledge base tool, the LLM must correctly classify and route the question before it even reaches a KB. If the routing is wrong, the KB returns "I don't have enough information" — not because the knowledge doesn't exist, but because the wrong KB was queried.
+
+**Fix:** Consolidate specialist agents into a single FAQ agent with access to all KB tools. The FAQ agent's LLM picks the right tool based on improved tool descriptions with explicit routing boundaries and "Do NOT use for..." cross-references. This eliminates the routing classification step from the handoff layer and moves it to the tool selection layer, where descriptions give the LLM more direct guidance.

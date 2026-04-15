@@ -62,7 +62,47 @@ If omitted, transcripts with confidence below 0.4 may be **ignored** entirely (n
 
 [Smart Denoising (Krisp)](https://docs.vapi.ai/documentation/assistants/conversation-behavior/background-speech-denoising#smart-denoising-krisp) is recommended over [Fourier Denoising](https://docs.vapi.ai/documentation/assistants/conversation-behavior/background-speech-denoising#fourier-denoising-experimental) (experimental). Enable it via `backgroundDenoisingEnabled: true` or `smartDenoisingPlan.enabled: true`.
 
+### Custom keyword/keyterm boosting
+
 Boost domain-specific vocabulary with [Custom Keywords](https://docs.vapi.ai/customization/custom-keywords) to improve recognition of brand names, product names, and industry terms.
+
+**Nova-3 uses `keyterm` (not `keywords`).** The legacy `keywords` field only works on Nova-2 and older models. For Nova-3, use `keyterm` — an array of words or multi-word phrases (no intensifiers). Supports up to 100 terms (~500 tokens).
+
+**`keyterm` works in multilingual mode.** As of November 2025, `model: nova-3` with `language: multi` supports keyterm prompting. Previously this combination returned a 400 error.
+
+```yaml
+transcriber:
+  provider: deepgram
+  model: nova-3
+  language: multi
+  keyterm:
+    - your-brand-name
+    - industry-specific-term
+    - product-name
+    - technical-acronym
+```
+
+### Pronunciation dictionaries (TTS-level)
+
+Pronunciation dictionaries control how TTS voices say specific words. They are **provider-specific**:
+
+| Provider | Support | Config field | Model requirement |
+|----------|---------|-------------|-------------------|
+| **Cartesia** | Full IPA + sounds-like across all languages | `pronunciationDictId` on voice config | `sonic-3` only |
+| **ElevenLabs** | Phoneme rules (IPA/CMU, English only) + alias rules (all languages) | `pronunciationDictionaryLocators` on voice config | Phoneme: `eleven_turbo_v2`, `eleven_flash_v2`. Alias: all models |
+| **Vapi built-in** | None | N/A | N/A |
+
+**Cartesia pronunciation dictionaries** are created via the Vapi API (`POST /provider/cartesia/pronunciation-dictionary`), then referenced by ID in the voice config. This is the same pattern as `credentialId` — the provider resource lives outside gitops, the reference is gitops-managed.
+
+```yaml
+voice:
+  provider: cartesia
+  model: sonic-3
+  voiceId: your-voice-id
+  pronunciationDictId: pdict_xxxxxxxxxxxxx
+```
+
+**Recommendation:** For multilingual use cases, Cartesia sonic-3 with a pronunciation dictionary is the strongest option — IPA works across all languages. Combine with prompt-level pronunciation rules (belt-and-suspenders) and transcriber `keyterm` for a three-layer approach: TTS output, LLM text generation, and STT input.
 
 ### `smartEndpointingPlan` **owns** turn detection when set
 

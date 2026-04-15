@@ -211,16 +211,22 @@ transcriber:
   provider: deepgram
   model: nova-3
   language: multi
+  keyterm:    # Nova-3 multilingual supports keyterm since Nov 2025
+    - your-brand-name
+    - domain-specific-term
 
 voice:
-  provider: eleven-labs
-  model: eleven_multilingual_v2
+  provider: cartesia
+  model: sonic-3
   voiceId: your-voice-id
+  pronunciationDictId: pdict_xxx  # IPA works across all languages
 
 model:
   provider: openai
   model: gpt-4.1
 ```
+
+**Alternative voice:** ElevenLabs `eleven_multilingual_v2` if you need ElevenLabs-specific features (alias rules work across all languages, but IPA phoneme rules are English-only).
 
 ### Best Two-Agent Stack
 
@@ -240,7 +246,7 @@ voice: { provider: eleven-labs, voiceId: your-spanish-voice }
 
 | Pitfall | Root Cause | Solution |
 |---------|-----------|----------|
-| Agent understands Spanish but speaks English | TTS voice is English-only | Use multilingual TTS (ElevenLabs multilingual_v2, OpenAI) |
+| Agent understands Spanish but speaks English | TTS voice is English-only | Use multilingual TTS (Cartesia sonic-3, ElevenLabs multilingual_v2, OpenAI) |
 | Tool messages always in English | Active language defaults to `"en"` with `"multi"` STT | Use `contents[]` with explicit language variants |
 | Spanish STT accuracy worse than dedicated | Multi-language models trade accuracy for flexibility | Use dedicated per-language assistants (Approach 2) |
 | Self-handoff infinite loop | LLM re-triggers handoff after seeing same conversation | Clear prompt: "Do not trigger language switch if already in correct language" |

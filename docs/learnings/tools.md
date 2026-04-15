@@ -199,6 +199,27 @@ An unrecognized message type is coerced to `request-failed` with default error c
 
 After one delayed message plays, another won't play for at least 2.5 seconds — even if multiple timing thresholds are crossed. Missing `timingMilliseconds` defaults to the 0ms bucket.
 
+### Dead air during KB/API tool calls
+
+If a tool has no `request-start` content (or empty content), the caller hears silence while the tool executes. For knowledge base tools and API requests that take 2–5 seconds, this feels like dead air.
+
+**Fix with two layers:**
+
+1. **`request-start`** with `blocking: false` — speaks a filler line ("Good question — let me look that up") in parallel with the tool call starting.
+2. **`request-response-delayed`** at 4000ms — safety net if the tool takes longer than expected.
+
+```yaml
+messages:
+  - type: request-start
+    content: "Good question — let me look that up."
+    blocking: false
+  - type: request-response-delayed
+    content: "Still looking that up for you."
+    timingMilliseconds: 4000
+```
+
+Optionally add prompt-level instructions ("say a brief acknowledgment before calling the tool") as a belt-and-suspenders approach — the prompt handles cases where the LLM speaks before calling the tool, while the tool message handles cases where the LLM calls the tool silently.
+
 ---
 
 ## voicemail Tools
