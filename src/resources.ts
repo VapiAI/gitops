@@ -67,7 +67,12 @@ function parseFrontmatter(content: string): {
  * Warns about unsupported files found in resource directories
  */
 async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
-  const entries = await readdir(dir);
+  // Sort entries so iteration order is identical across filesystems/CI runners.
+  // readdir() returns entries in OS-dependent order (APFS sorts, ext4 doesn't),
+  // and downstream push order affects which resource is created first when
+  // multiple files declare the same resourceId — non-determinism makes that
+  // bug class hard to reproduce.
+  const entries = (await readdir(dir)).slice().sort();
   const files: string[] = [];
 
   for (const entry of entries) {

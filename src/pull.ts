@@ -14,7 +14,7 @@ import {
   BOOTSTRAP_SYNC,
 } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
-import { credentialReverseMap, deepReplaceValues } from "./credentials.ts";
+import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
 import type { StateFile, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,20 +94,28 @@ function gitHasCommits(): boolean {
   }
 }
 
-// Returns relative paths of all locally modified, deleted, or untracked files
+// Returns relative paths of all locally modified, deleted, or untracked files.
+// Uses `-z` (null-terminated) format so filenames containing spaces, newlines,
+// or quotes parse correctly without the ad-hoc quote/arrow stripping that the
+// plain porcelain format requires. With `-z`, renames emit two separate
+// null-terminated records: `XY new\0old\0` — we want `new`, so we consume
+// the record after any `R`/`C` status.
 function getLocallyChangedFiles(): Set<string> {
-  const status = gitCmd("status --porcelain");
+  const status = gitCmd("status --porcelain -z");
   const files = new Set<string>();
-  for (const line of status.split("\n")) {
-    if (!line.trim()) continue;
-    // format: XY filename  (or XY "filename" for special chars)
-    let filePath = line.slice(3);
-    // Handle renames: "old -> new"
-    const arrowIdx = filePath.indexOf(" -> ");
-    if (arrowIdx !== -1) filePath = filePath.slice(arrowIdx + 4);
-    // Strip quotes if present
-    filePath = filePath.replace(/^"|"$/g, "").trim();
-    files.add(filePath);
+  const records = status.split("\0");
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    if (!record) continue;
+    // Each record is `XY <path>`. For R/C statuses, the NEXT record is the
+    // original path, which we skip.
+    const x = record[0];
+    const filePath = record.slice(3);
+    if (filePath) files.add(filePath);
+    if (x === "R" || x === "C") {
+      // Skip the following "from" path record
+      i++;
+    }
   }
   return files;
 }
@@ -323,12 +331,12 @@ function removeUuidMappings(
 function cleanResource(resource: VapiResource): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
 
+  // Preserve `null` values: the API uses `null` to represent an intentionally
+  // cleared field (e.g. `voicemailMessage: null`), which is semantically
+  // different from an absent field. Stripping it on pull would cause the next
+  // push to drop the clear and re-apply any prior value still on the server.
   for (const [key, value] of Object.entries(resource)) {
-    if (
-      !EXCLUDED_FIELDS.includes(key) &&
-      value !== null &&
-      value !== undefined
-    ) {
+    if (!EXCLUDED_FIELDS.includes(key) && value !== undefined) {
       cleaned[key] = value;
     }
   }
@@ -708,7 +716,7 @@ export async function pullResourceType(
     // Clean, resolve resource references, and replace credential UUIDs with names
     const cleaned = cleanResource(resource);
     const resolved = resolveReferencesToResourceIds(cleaned, state);
-    const withCredNames = deepReplaceValues(resolved, credReverse);
+    const withCredNames = replaceCredentialRefs(resolved, credReverse);
 
     // Mark platform defaults so apply skips them
     if (isPlatformDefault) {
