@@ -39,7 +39,7 @@ function parseEnvironment(): Environment {
 
   if (!envArg) {
     console.error("❌ Environment / org name argument is required");
-    console.error("   Usage: npm run push <org>  |  npm run push:dev");
+    console.error("   Usage: npm run push -- <org>");
     console.error("   Flags: --force (enable deletions)");
     console.error(
       "          --type <type> (apply only specific resource type, repeatable)",

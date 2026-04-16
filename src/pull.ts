@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, statSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { join, dirname, relative, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -686,8 +686,30 @@ export async function pullResourceType(
       }
     }
 
+    // Skip locally edited files even without git (mtime-based detection)
+    // If the resource file is newer than the state file, it was locally modified
+    if (!bootstrap && !force && !isNew && !changedFiles) {
+      const folderPath = FOLDER_MAP[resourceType];
+      const dir = join(RESOURCES_DIR, folderPath);
+      const localFile =
+        [join(dir, `${resourceId}.md`), join(dir, `${resourceId}.yml`), join(dir, `${resourceId}.yaml`)]
+          .find((p) => existsSync(p));
+      if (localFile) {
+        const stateFilePath = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
+        if (existsSync(stateFilePath)) {
+          const localMtime = statSync(localFile).mtimeMs;
+          const stateMtime = statSync(stateFilePath).mtimeMs;
+          if (localMtime > stateMtime) {
+            console.log(`   ⏭️  ${resourceId} (locally modified, skipping)`);
+            newStateSection[resourceId] = resource.id;
+            skipped++;
+            continue;
+          }
+        }
+      }
+    }
+
     // Skip resources whose local file was deleted (works without git)
-    // A resource that was previously tracked (in state) but has no local file = intentional deletion
     if (!bootstrap && !force && !isNew) {
       const folderPath = FOLDER_MAP[resourceType];
       const dir = join(RESOURCES_DIR, folderPath);
@@ -762,7 +784,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   if (resourceIds?.length) {
     if (!typeFilter?.length || typeFilter.length !== 1) {
       throw new Error(
-        "Single-resource pull requires exactly one resource type. Example: npm run pull:dev -- squads --id <uuid>",
+        "Single-resource pull requires exactly one resource type. Example: npm run pull -- <org> --type squads --id <uuid>",
       );
     }
   }
@@ -929,7 +951,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
 
   if (totalSkipped > 0) {
     console.log(`\n   ℹ️  ${totalSkipped} file(s) preserved (locally changed)`);
-    console.log("   Run with --force to overwrite: npm run pull:dev:force");
+    console.log("   Run with --force to overwrite: npm run pull -- <org> --force");
   }
 
   return { state, stats, force, bootstrap };

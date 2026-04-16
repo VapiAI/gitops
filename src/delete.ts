@@ -220,7 +220,7 @@ export async function deleteOrphanedResources(
     }
     console.log("  ℹ️  These resources exist in Vapi but not in your local files.");
     console.log("  ℹ️  To delete them, run with --force flag:");
-    console.log("     npm run apply:dev:force\n");
+    console.log("     npm run push -- <org> --force\n");
     return;
   }
 

@@ -6,6 +6,7 @@ import {
   VAPI_BASE_URL,
   FORCE_DELETE,
   APPLY_FILTER,
+  BASE_DIR,
   removeExcludedKeys,
 } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
@@ -628,13 +629,14 @@ function filterResourcesByPaths<T>(
 ): ResourceFile<T>[] {
   if (!APPLY_FILTER.filePaths?.length) return resources;
 
-  // Get all resourceIds that match the file paths for this type
   const matchingIds = new Set<string>();
 
   for (const filePath of APPLY_FILTER.filePaths) {
-    // Try to match the file path to a resourceId
+    const resolvedInput = resolve(BASE_DIR, filePath);
+
     for (const resource of resources) {
       if (
+        resource.filePath === resolvedInput ||
         resource.filePath.endsWith(filePath) ||
         filePath.endsWith(resource.resourceId + ".yml") ||
         filePath.endsWith(resource.resourceId + ".yaml") ||

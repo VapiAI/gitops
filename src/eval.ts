@@ -38,7 +38,7 @@ function printUsage(): void {
   console.error("       tsx src/eval.ts <env> -a <assistant-name> [options]");
   console.error("");
   console.error("Runs Vapi Evals (mock conversation tests) against a transient or stored assistant/squad.");
-  console.error("Evals must be pushed first (npm run push:dev evals). Assistants/squads can be transient.");
+  console.error("Evals must be pushed first (npm run push -- <org> evals). Assistants/squads can be transient.");
   console.error("");
   console.error("Options:");
   console.error("  -s <name>         Target squad (by resource filename, loaded as transient)");
@@ -135,7 +135,7 @@ function loadState(env: Environment): StateFile {
   const stateFile = join(BASE_DIR, `.vapi-state.${env}.json`);
   if (!existsSync(stateFile)) {
     console.error(`❌ State file not found: .vapi-state.${env}.json`);
-    console.error("   Run 'npm run push:dev evals' first to create eval resources");
+    console.error("   Run 'npm run push -- <org> evals' first to create eval resources");
     process.exit(1);
   }
   const content = readFileSync(stateFile, "utf-8");
@@ -494,7 +494,7 @@ async function main(): Promise<void> {
   const evals = loadEvals(state, config.evalFilter);
   if (evals.length === 0) {
     console.error("❌ No evals found in state" + (config.evalFilter ? ` matching "${config.evalFilter}"` : ""));
-    console.error("   Push evals first: npm run push:dev evals");
+    console.error("   Push evals first: npm run push -- <org> evals");
     console.error("   Eval files go in: resources/evals/");
     process.exit(1);
   }

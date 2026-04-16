@@ -52,6 +52,11 @@ const RESOURCE_TYPES: ResourceTypeDef[] = [
     label: "Simulation Suites",
     endpoint: "/eval/simulation/suite",
   },
+  {
+    key: "evals",
+    label: "Evals",
+    endpoint: "/eval",
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -433,7 +438,7 @@ async function main(): Promise<void> {
   // ── Step 2: Folder slug ───────────────────────────────────────────────
 
   const rawSlug = await input({
-    message: "Folder name for this org (e.g. acme-corp, acme-prod)",
+    message: "Folder name for this org (e.g. my-org, my-org-prod)",
     validate: (value) => {
       const slug = slugify(value);
       if (!slug || !SLUG_RE.test(slug)) {

@@ -3,7 +3,10 @@ import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import * as readline from "readline";
+import { createRequire } from "module";
 import type { Environment, StateFile } from "./types.ts";
+
+const require = createRequire(import.meta.url);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -205,7 +208,7 @@ async function checkMicrophonePermission(): Promise<boolean> {
         "   If prompted, please grant microphone permission in System Preferences.",
       );
       console.log(
-        "   System Preferences > Security & Privacy > Privacy > Microphone\n",
+        "   System Settings > Privacy & Security > Microphone\n",
       );
 
       // Ask user to continue anyway
@@ -269,7 +272,7 @@ function loadState(env: Environment): StateFile {
   if (!existsSync(stateFilePath)) {
     console.error(`❌ State file not found: .vapi-state.${env}.json`);
     console.error(
-      "   Run 'npm run apply:" + env + "' first to create resources",
+      "   Run 'npm run apply -- " + env + "' first to create resources",
     );
     process.exit(1);
   }
@@ -468,11 +471,21 @@ async function connectWebSocket(
       }
     };
 
-    ws.onmessage = (event) => {
-      if (event.data instanceof Buffer || event.data instanceof ArrayBuffer) {
-        // Binary audio data from assistant
+    ws.onmessage = async (event) => {
+      const data = event.data;
+      // Binary audio data from assistant
+      if (data instanceof Buffer || data instanceof ArrayBuffer) {
         if (audioContext) {
-          audioContext.playAudio(event.data);
+          audioContext.playAudio(data);
+        }
+      } else if (typeof Blob !== "undefined" && data instanceof Blob) {
+        if (audioContext) {
+          const arrayBuffer = await data.arrayBuffer();
+          audioContext.playAudio(arrayBuffer);
+        }
+      } else if (ArrayBuffer.isView(data)) {
+        if (audioContext) {
+          audioContext.playAudio(data.buffer as ArrayBuffer);
         }
       } else {
         // Control message (JSON)
@@ -539,7 +552,20 @@ function handleControlMessage(
     }
     case "call-ended": {
       const cm = message as CallEndedMessage;
-      console.log(`\n📞 Call ended: ${cm.reason || "unknown reason"}`);
+      const reasonLabels: Record<string, string> = {
+        "silence-timed-out": "Silence timeout (no speech detected)",
+        "assistant-ended-call": "Assistant ended the call",
+        "customer-ended-call": "Customer ended the call",
+        "max-duration-reached": "Maximum call duration reached",
+        "assistant-error": "Assistant error",
+        "pipeline-error": "Pipeline error",
+        "voicemail-reached": "Voicemail detected",
+        "customer-did-not-answer": "No answer",
+        "assistant-request-returned-error": "Assistant request error",
+        "assistant-not-found": "Assistant not found",
+      };
+      const label = cm.reason ? (reasonLabels[cm.reason] ?? cm.reason) : "unknown reason";
+      console.log(`\n📞 Call ended: ${label}`);
       break;
     }
     default:
@@ -584,23 +610,27 @@ function createAudioContext(): {
   playAudio: (data: Buffer | ArrayBuffer) => void;
   close: () => void;
 } {
-  // Lazy load speaker module
   let Speaker: SpeakerConstructor | null = null;
   let speakerInstance: SpeakerInstance | null = null;
 
   try {
-    // Dynamic import for optional dependency
     Speaker = require("speaker") as SpeakerConstructor;
     speakerInstance = new Speaker!({
       channels: 1,
       bitDepth: 16,
       sampleRate: 16000,
     });
-  } catch {
-    console.warn(
-      "⚠️  'speaker' module not installed. Audio playback disabled.",
-    );
-    console.warn("   Install with: npm install speaker");
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("Cannot find module")) {
+      console.warn("⚠️  'speaker' module not installed. Audio playback disabled.");
+      console.warn("   Install with: npm install speaker");
+    } else if (msg.includes("Could not locate the bindings file") || msg.includes("NODE_MODULE_VERSION")) {
+      console.warn("⚠️  'speaker' native bindings not built for this Node version.");
+      console.warn("   Rebuild with: npm rebuild speaker");
+    } else {
+      console.warn(`⚠️  Could not initialize speaker: ${msg}`);
+    }
   }
 
   return {
@@ -647,9 +677,16 @@ function createMicrophoneStream(onData: (data: Buffer) => void): {
 
     micInstance!.start();
   } catch (error) {
-    console.warn("⚠️  'mic' module not installed or microphone unavailable.");
-    console.warn("   Install with: npm install mic");
-    console.warn("   Error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("Cannot find module")) {
+      console.warn("⚠️  'mic' module not installed. Microphone input disabled.");
+      console.warn("   Install with: npm install mic");
+    } else if (msg.includes("sox") || msg.includes("rec")) {
+      console.warn("⚠️  sox/rec not found. Required for microphone input.");
+      console.warn("   Install with: brew install sox (macOS) or apt install sox (Linux)");
+    } else {
+      console.warn(`⚠️  Could not initialize microphone: ${msg}`);
+    }
   }
 
   return {

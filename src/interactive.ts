@@ -61,6 +61,12 @@ const RESOURCE_TYPES: ResourceTypeDef[] = [
     endpoint: "/eval/simulation/suite",
     folder: "simulations/suites",
   },
+  {
+    key: "evals",
+    label: "Evals",
+    endpoint: "/eval",
+    folder: "evals",
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -485,6 +491,7 @@ export async function runInteractivePull(): Promise<void> {
 
         console.log(c.dim("  Fetching remote resources...\n"));
 
+        let fetchFailed = false;
         snapshots = await Promise.all(
           RESOURCE_TYPES.map(
             async (type): Promise<ResourceSnapshot> => {
@@ -495,12 +502,23 @@ export async function runInteractivePull(): Promise<void> {
                   label: type.label,
                   resources: normaliseList(data),
                 };
-              } catch {
+              } catch (error) {
+                const msg = error instanceof Error ? error.message : String(error);
+                if (msg.includes("401") || msg.includes("403") || msg.includes("authentication") || msg.includes("unauthorized")) {
+                  fetchFailed = true;
+                }
+                console.log(c.red(`  ✗ Failed to fetch ${type.label}: ${msg}`));
                 return { key: type.key, label: type.label, resources: [] };
               }
             },
           ),
         );
+
+        if (fetchFailed) {
+          console.log(c.red("\n  ⚠ API authentication failed. Check your VAPI_TOKEN in .env." + slug));
+          console.log(c.red("  Run \"npm run setup\" to reconfigure.\n"));
+          return;
+        }
 
         nonEmpty = snapshots.filter((s) => s.resources.length > 0);
         totalCount = nonEmpty.reduce(
@@ -981,24 +999,17 @@ export async function runInteractiveCleanup(): Promise<void> {
     ),
   );
 
-  const dryFirst = await confirm({
-    message: "Run dry-run first to preview what would be deleted?",
-    default: true,
+  console.log(c.dim("\n  Running dry-run preview...\n"));
+  spawnScript(["src/cleanup.ts", slug]);
+
+  const proceed = await confirm({
+    message: "Proceed with actual deletion?",
+    default: false,
   });
 
-  if (dryFirst) {
-    console.log(c.dim("\n  Running dry-run...\n"));
-    spawnScript(["src/cleanup.ts", slug]);
-
-    const proceed = await confirm({
-      message: "Proceed with actual deletion?",
-      default: false,
-    });
-
-    if (!proceed) {
-      console.log(c.dim("\n  Cancelled.\n"));
-      return;
-    }
+  if (!proceed) {
+    console.log(c.dim("\n  Cancelled.\n"));
+    return;
   }
 
   console.log(c.dim("\n  Running cleanup with --force...\n"));

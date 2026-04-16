@@ -203,7 +203,7 @@ async function main(): Promise<void> {
     );
     console.log("🔒 DRY-RUN MODE - No resources were deleted");
     console.log("   To actually delete, run:");
-    console.log(`   npm run cleanup:${VAPI_ENV} -- --force`);
+    console.log(`   npm run cleanup -- ${VAPI_ENV} --force`);
     console.log(
       "═══════════════════════════════════════════════════════════════\n",
     );
