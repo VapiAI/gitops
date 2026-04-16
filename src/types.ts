@@ -12,6 +12,7 @@ export interface StateFile {
   scenarios: Record<string, string>;
   simulations: Record<string, string>;
   simulationSuites: Record<string, string>;
+  evals: Record<string, string>;
 }
 
 export interface ResourceFile<T = Record<string, unknown>> {
@@ -33,15 +34,14 @@ export type ResourceType =
   | "personalities"
   | "scenarios"
   | "simulations"
-  | "simulationSuites";
+  | "simulationSuites"
+  | "evals";
 
-export type Environment = "dev" | "stg" | "prod";
+// Any slug-like string: "dev", "prod", "roofr-production", etc.
+export type Environment = string;
 
-export const VALID_ENVIRONMENTS: readonly Environment[] = [
-  "dev",
-  "stg",
-  "prod",
-];
+// Well-known names kept for backward-compatible npm scripts
+export const VALID_ENVIRONMENTS: readonly string[] = ["dev", "stg", "prod"];
 
 export const VALID_RESOURCE_TYPES: readonly ResourceType[] = [
   "tools",
@@ -52,6 +52,7 @@ export const VALID_RESOURCE_TYPES: readonly ResourceType[] = [
   "scenarios",
   "simulations",
   "simulationSuites",
+  "evals",
 ];
 
 export interface LoadedResources {
@@ -63,6 +64,7 @@ export interface LoadedResources {
   scenarios: ResourceFile<Record<string, unknown>>[];
   simulations: ResourceFile<Record<string, unknown>>[];
   simulationSuites: ResourceFile<Record<string, unknown>>[];
+  evals: ResourceFile<Record<string, unknown>>[];
 }
 
 export interface OrphanedResource {
