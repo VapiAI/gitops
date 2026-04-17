@@ -12,6 +12,8 @@ import {
   BASE_DIR,
   APPLY_FILTER,
   BOOTSTRAP_SYNC,
+  loadIgnorePatterns,
+  matchesIgnore,
 } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
 import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
@@ -669,9 +671,25 @@ export async function pullResourceType(
 
     removeUuidMappings(newStateSection, resource.id, resourceId);
 
+    const folderPath = FOLDER_MAP[resourceType];
+
+    // Skip resources matched by .vapi-ignore.
+    // These are explicit opt-outs — the resource exists on the dashboard but
+    // this repo does not manage it. Do NOT track in state (so a future
+    // un-ignore pulls cleanly and so state doesn't accumulate stale entries).
+    if (!bootstrap && !force) {
+      const matched = matchesIgnore(folderPath, resourceId);
+      if (matched) {
+        console.log(
+          `   🚫 ${resourceId} (matched .vapi-ignore: ${matched})`,
+        );
+        skipped++;
+        continue;
+      }
+    }
+
     // Skip files that have been locally modified (git detection)
     if (!bootstrap && changedFiles) {
-      const folderPath = FOLDER_MAP[resourceType];
       const mdPath = join(
         "resources",
         VAPI_ENV,
@@ -685,24 +703,27 @@ export async function pullResourceType(
         `${resourceId}.yml`,
       );
       if (changedFiles.has(mdPath) || changedFiles.has(ymlPath)) {
-        console.log(`   ⏭️  ${resourceId} (locally changed, skipping)`);
+        console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
         newStateSection[resourceId] = resource.id;
         skipped++;
         continue;
       }
     }
 
-    // Skip resources whose local file was deleted (works without git)
-    // A resource that was previously tracked (in state) but has no local file = intentional deletion
+    // Skip resources whose local file was deleted (works without git).
+    // A resource that was previously tracked in state but now has no local
+    // file is treated as an intentional deletion. To stop tracking it
+    // entirely (so it never re-appears on pull), add it to .vapi-ignore.
     if (!bootstrap && !force && !isNew) {
-      const folderPath = FOLDER_MAP[resourceType];
       const dir = join(RESOURCES_DIR, folderPath);
       const fileExists =
         existsSync(join(dir, `${resourceId}.md`)) ||
         existsSync(join(dir, `${resourceId}.yml`)) ||
         existsSync(join(dir, `${resourceId}.yaml`));
       if (!fileExists) {
-        console.log(`   ⏭️  ${resourceId} (locally deleted, skipping)`);
+        console.log(
+          `   🗑️  ${resourceId} (deleted locally, intent in state — add to .vapi-ignore to stop tracking)`,
+        );
         newStateSection[resourceId] = resource.id;
         skipped++;
         continue;
@@ -808,13 +829,22 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     }
     if (changedFiles.size > 0) {
       console.log(
-        `\n📦 ${changedFiles.size} locally changed file(s) will be preserved`,
+        `\n📦 ${changedFiles.size} locally modified file(s) will be preserved`,
       );
       console.log(
         "   Use --force to overwrite all local files with platform state",
       );
     }
-  } else if (force) {
+  }
+
+  const ignorePatterns = !bootstrap && !force ? loadIgnorePatterns() : [];
+  if (ignorePatterns.length > 0) {
+    console.log(
+      `\n🚫 ${ignorePatterns.length} pattern(s) loaded from .vapi-ignore — matching resources will be skipped`,
+    );
+  }
+
+  if (force) {
     console.log(
       "\n⚡ Force mode: overwriting all local files with platform state",
     );
@@ -926,7 +956,12 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   }
 
   if (totalSkipped > 0) {
-    console.log(`\n   ℹ️  ${totalSkipped} file(s) preserved (locally changed)`);
+    console.log(
+      `\n   ℹ️  ${totalSkipped} resource(s) skipped — see lines above for reasons:`,
+    );
+    console.log("       🚫 = matched .vapi-ignore (not tracked)");
+    console.log("       ✏️  = locally modified (preserved)");
+    console.log("       🗑️  = locally deleted (intent in state)");
     console.log("   Run with --force to overwrite: npm run pull:dev:force");
   }
 
