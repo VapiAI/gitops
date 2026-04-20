@@ -555,8 +555,16 @@ export async function runInteractivePull(): Promise<void> {
         }
 
         if (scope === "all") {
+          // Local-first by default: preserve locally edited / deleted files
+          // unless the user explicitly opts into overwriting.
+          const overwriteLocal = await confirm({
+            message: "Overwrite locally modified files?",
+            default: false,
+          });
           console.log(c.dim("\n  Pulling all resources...\n"));
-          spawnScript(["src/pull.ts", slug, "--force"]);
+          const args = ["src/pull.ts", slug];
+          if (overwriteLocal) args.push("--force");
+          spawnScript(args);
           console.log(c.green("\n  Done!\n"));
           return;
         }
@@ -667,18 +675,21 @@ export async function runInteractivePull(): Promise<void> {
     byType.get(typeKey)!.push(uuid);
   }
 
+  // Local-first by default: preserve locally edited / deleted files
+  // unless the user explicitly opts into overwriting.
+  const overwriteLocal = await confirm({
+    message: "Overwrite locally modified files?",
+    default: false,
+  });
+
   console.log(c.dim("\n  Pulling...\n"));
 
   for (const [typeKey, uuids] of byType) {
     const idArgs = uuids.flatMap((id) => ["--id", id]);
-    spawnScript([
-      "src/pull.ts",
-      slug,
-      "--force",
-      "--type",
-      typeKey,
-      ...idArgs,
-    ]);
+    const args = ["src/pull.ts", slug];
+    if (overwriteLocal) args.push("--force");
+    args.push("--type", typeKey, ...idArgs);
+    spawnScript(args);
   }
 
   console.log(c.green("\n  Done!\n"));
@@ -1013,6 +1024,9 @@ export async function runInteractiveCleanup(): Promise<void> {
   }
 
   console.log(c.dim("\n  Running cleanup with --force...\n"));
-  spawnScript(["src/cleanup.ts", slug, "--force"]);
+  // The confirm() prompt above is the user's explicit consent; pass --confirm
+  // <slug> so the destructive subprocess satisfies the same double-gate that
+  // the CLI direct path enforces.
+  spawnScript(["src/cleanup.ts", slug, "--force", "--confirm", slug]);
   console.log(c.green("\n  Done!\n"));
 }

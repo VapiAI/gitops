@@ -14,7 +14,6 @@ import type { StateFile } from "./types.ts";
 // enum values with UUIDs and break POST validation.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Build UUID → name reverse map from state.credentials
 export function credentialReverseMap(state: StateFile): Map<string, string> {
   const map = new Map<string, string>();
   for (const [name, uuid] of Object.entries(state.credentials)) {
@@ -23,7 +22,6 @@ export function credentialReverseMap(state: StateFile): Map<string, string> {
   return map;
 }
 
-// Build name → UUID forward map from state.credentials
 export function credentialForwardMap(state: StateFile): Map<string, string> {
   const map = new Map<string, string>();
   for (const [name, uuid] of Object.entries(state.credentials)) {
@@ -34,7 +32,7 @@ export function credentialForwardMap(state: StateFile): Map<string, string> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scoped walker: replace values only at `credentialId` / `credentialIds` keys.
-// Works at any depth in any object/array structure.
+// Works at any depth in any object/array structure. Cycle-safe via WeakSet.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function replaceCredentialRefs<T>(
