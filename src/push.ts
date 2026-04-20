@@ -96,6 +96,10 @@ async function upsertResourceWithStateRecovery(options: {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Must stay in sync with `VALID_RESOURCE_TYPES` in `src/types.ts`. Used by
+// `hasAnyLoadedResources`, `getTargetedResourceTypes`, and the credential /
+// state-sanity checks — dropping a type here silently disables those
+// pre-flight checks for that type.
 const ALL_RESOURCE_TYPES: ResourceType[] = [
   "tools",
   "structuredOutputs",
@@ -105,6 +109,7 @@ const ALL_RESOURCE_TYPES: ResourceType[] = [
   "scenarios",
   "simulations",
   "simulationSuites",
+  "evals",
 ];
 
 function warnUnresolvedCredentials(

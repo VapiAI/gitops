@@ -189,8 +189,8 @@ function parseFlags(): {
 
 function loadEnvFile(env: string, baseDir: string): void {
   const envFiles = [
-    join(baseDir, `.env.${env}`), // .env.dev, .env.stg, .env.prod
-    join(baseDir, `.env.${env}.local`), // .env.dev.local (for local overrides)
+    join(baseDir, `.env.${env}`), // e.g. .env.my-org
+    join(baseDir, `.env.${env}.local`), // e.g. .env.my-org.local (local overrides)
     join(baseDir, ".env.local"), // .env.local (always loaded last)
   ];
 

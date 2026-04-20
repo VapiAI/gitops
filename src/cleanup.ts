@@ -180,6 +180,7 @@ async function main(): Promise<void> {
       endpoint: "/eval/simulation/suite",
       deleteEndpoint: "/eval/simulation/suite",
     },
+    { name: "evals", endpoint: "/eval", deleteEndpoint: "/eval" },
   ];
 
   for (const { name, endpoint, deleteEndpoint } of resourceTypes) {

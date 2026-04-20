@@ -48,10 +48,12 @@ function printUsage(): void {
   console.error("  --stored          Use stored assistantId/squadId from state instead of transient");
   console.error("");
   console.error("Examples:");
-  console.error("  tsx src/eval.ts dev -s everblue-voice-squad-20374c37");
-  console.error("  tsx src/eval.ts dev -a everblue-main-agent-633ab678 --filter name-collection");
-  console.error("  tsx src/eval.ts dev -a resources/assistants/qa-address-resolution-tester-e9ed5d49.md");
-  console.error("  tsx src/eval.ts dev -s everblue-voice-squad-20374c37 --stored");
+  console.error("  npm run eval -- <org> -s everblue-voice-squad-20374c37");
+  console.error("  npm run eval -- <org> -a everblue-main-agent-633ab678 --filter name-collection");
+  console.error(
+    "  npm run eval -- <org> -a resources/<org>/assistants/qa-address-resolution-tester-e9ed5d49.md",
+  );
+  console.error("  npm run eval -- <org> -s everblue-voice-squad-20374c37 --stored");
 }
 
 function parseArgs(): EvalConfig & { useStored: boolean } {
@@ -494,8 +496,8 @@ async function main(): Promise<void> {
   const evals = loadEvals(state, config.evalFilter);
   if (evals.length === 0) {
     console.error("❌ No evals found in state" + (config.evalFilter ? ` matching "${config.evalFilter}"` : ""));
-    console.error("   Push evals first: npm run push -- <org> evals");
-    console.error("   Eval files go in: resources/evals/");
+    console.error(`   Push evals first: npm run push -- ${config.env} evals`);
+    console.error(`   Eval files go in: resources/${config.env}/evals/`);
     process.exit(1);
   }
 
