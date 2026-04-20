@@ -70,8 +70,19 @@ interface VapiResource {
   name?: string;
 }
 
+function readConfirmToken(argv: string[]): string | undefined {
+  // Accept either `--confirm <env>` or `--confirm=<env>`.
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--confirm") return argv[i + 1];
+    if (arg?.startsWith("--confirm=")) return arg.slice("--confirm=".length);
+  }
+  return undefined;
+}
+
 async function main(): Promise<void> {
   const dryRun = !process.argv.includes("--force");
+  const confirmToken = readConfirmToken(process.argv);
 
   console.log(
     "═══════════════════════════════════════════════════════════════",
@@ -85,6 +96,20 @@ async function main(): Promise<void> {
     "═══════════════════════════════════════════════════════════════\n",
   );
 
+  // Destructive cleanup must be double-gated. `--force` alone is not enough
+  // because it is easy to set habitually or copy from another command where
+  // it has a different meaning. Require `--confirm <env>` so the caller has
+  // to name the environment they intend to wipe.
+  if (!dryRun && confirmToken !== VAPI_ENV) {
+    console.error(
+      `❌ Refusing to run destructive cleanup without explicit confirmation.`,
+    );
+    console.error(
+      `   Re-run with: npm run cleanup -- ${VAPI_ENV} --force --confirm ${VAPI_ENV}`,
+    );
+    process.exit(1);
+  }
+
   const state = loadState();
   const stateIds = new Set([
     ...Object.values(state.assistants),
@@ -97,6 +122,20 @@ async function main(): Promise<void> {
     ...Object.values(state.simulationSuites),
     ...Object.values(state.evals),
   ]);
+
+  // A state file with zero tracked resources is almost always a fresh clone,
+  // a corrupted state, or a bootstrap that has not written yet. Deleting from
+  // that baseline would wipe the org. Block it explicitly.
+  if (!dryRun && stateIds.size === 0) {
+    console.error(
+      `❌ Refusing to run destructive cleanup: state file has 0 tracked resources.`,
+    );
+    console.error(
+      `   This usually means the state was never bootstrapped. Run ` +
+        `\`npm run pull -- ${VAPI_ENV} --bootstrap\` first, then retry.`,
+    );
+    process.exit(1);
+  }
 
   console.log(`📄 State file has ${stateIds.size} resource IDs to keep\n`);
 

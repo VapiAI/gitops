@@ -17,7 +17,7 @@ import {
   resolveAssistantIds,
   extractReferencedIds,
 } from "./resolver.ts";
-import { credentialForwardMap, deepReplaceValues } from "./credentials.ts";
+import { credentialForwardMap, replaceCredentialRefs } from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
 import type {
   ResourceFile,
@@ -843,6 +843,11 @@ async function main(): Promise<void> {
     evals: 0,
   };
 
+  // From here on, any path out of the function (success OR thrown error) must
+  // flush the state file. If an early 5xx kills the apply after a few resources
+  // have been created on the remote, we still need their UUIDs recorded locally
+  // — otherwise the next run creates duplicates.
+  try {
   // Load all resources (we need them for reference resolution and filtering)
   console.log("\n📂 Loading resources...\n");
   const allToolsRaw = await loadResources<Record<string, unknown>>("tools");
@@ -890,7 +895,7 @@ async function main(): Promise<void> {
     resources: ResourceFile<T>[],
   ): ResourceFile<T>[] =>
     resources.map((r) => {
-      const resolved = deepReplaceValues(r.data, credMap);
+      const resolved = replaceCredentialRefs(r.data, credMap);
       warnUnresolvedCredentials(
         r.resourceId,
         resolved as Record<string, unknown>,
@@ -1198,9 +1203,6 @@ async function main(): Promise<void> {
     await updateStructuredOutputAssistantRefs(allAppliedOutputs, state);
   }
 
-  // Save updated state
-  await saveState(state);
-
   console.log(
     "\n═══════════════════════════════════════════════════════════════",
   );
@@ -1244,6 +1246,19 @@ async function main(): Promise<void> {
       `   Simulation Suites: ${Object.keys(state.simulationSuites).length}`,
     );
     console.log(`   Evals: ${Object.keys(state.evals).length}`);
+  }
+  } finally {
+    // Always flush state, even on partial failure — resources that already
+    // received UUIDs from the API must be recorded so the next run does not
+    // re-create them.
+    try {
+      await saveState(state);
+    } catch (saveError) {
+      console.error(
+        "\n⚠️  Failed to persist state file after apply:",
+        saveError instanceof Error ? saveError.message : saveError,
+      );
+    }
   }
 }
 

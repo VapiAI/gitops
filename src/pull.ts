@@ -12,9 +12,11 @@ import {
   BASE_DIR,
   APPLY_FILTER,
   BOOTSTRAP_SYNC,
+  loadIgnorePatterns,
+  matchesIgnore,
 } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
-import { credentialReverseMap, deepReplaceValues } from "./credentials.ts";
+import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
 import type { StateFile, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,20 +98,28 @@ function gitHasCommits(): boolean {
   }
 }
 
-// Returns relative paths of all locally modified, deleted, or untracked files
+// Returns relative paths of all locally modified, deleted, or untracked files.
+// Uses `-z` (null-terminated) format so filenames containing spaces, newlines,
+// or quotes parse correctly without the ad-hoc quote/arrow stripping that the
+// plain porcelain format requires. With `-z`, renames emit two separate
+// null-terminated records: `XY new\0old\0` — we want `new`, so we consume
+// the record after any `R`/`C` status.
 function getLocallyChangedFiles(): Set<string> {
-  const status = gitCmd("status --porcelain");
+  const status = gitCmd("status --porcelain -z");
   const files = new Set<string>();
-  for (const line of status.split("\n")) {
-    if (!line.trim()) continue;
-    // format: XY filename  (or XY "filename" for special chars)
-    let filePath = line.slice(3);
-    // Handle renames: "old -> new"
-    const arrowIdx = filePath.indexOf(" -> ");
-    if (arrowIdx !== -1) filePath = filePath.slice(arrowIdx + 4);
-    // Strip quotes if present
-    filePath = filePath.replace(/^"|"$/g, "").trim();
-    files.add(filePath);
+  const records = status.split("\0");
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    if (!record) continue;
+    // Each record is `XY <path>`. For R/C statuses, the NEXT record is the
+    // original path, which we skip.
+    const x = record[0];
+    const filePath = record.slice(3);
+    if (filePath) files.add(filePath);
+    if (x === "R" || x === "C") {
+      // Skip the following "from" path record
+      i++;
+    }
   }
   return files;
 }
@@ -325,12 +335,12 @@ function removeUuidMappings(
 function cleanResource(resource: VapiResource): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
 
+  // Preserve `null` values: the API uses `null` to represent an intentionally
+  // cleared field (e.g. `voicemailMessage: null`), which is semantically
+  // different from an absent field. Stripping it on pull would cause the next
+  // push to drop the clear and re-apply any prior value still on the server.
   for (const [key, value] of Object.entries(resource)) {
-    if (
-      !EXCLUDED_FIELDS.includes(key) &&
-      value !== null &&
-      value !== undefined
-    ) {
+    if (!EXCLUDED_FIELDS.includes(key) && value !== undefined) {
       cleaned[key] = value;
     }
   }
@@ -663,9 +673,25 @@ export async function pullResourceType(
 
     removeUuidMappings(newStateSection, resource.id, resourceId);
 
+    const folderPath = FOLDER_MAP[resourceType];
+
+    // Skip resources matched by .vapi-ignore.
+    // These are explicit opt-outs — the resource exists on the dashboard but
+    // this repo does not manage it. Do NOT track in state (so a future
+    // un-ignore pulls cleanly and so state doesn't accumulate stale entries).
+    if (!bootstrap && !force) {
+      const matched = matchesIgnore(folderPath, resourceId);
+      if (matched) {
+        console.log(
+          `   🚫 ${resourceId} (matched .vapi-ignore: ${matched})`,
+        );
+        skipped++;
+        continue;
+      }
+    }
+
     // Skip files that have been locally modified (git detection)
     if (!bootstrap && changedFiles) {
-      const folderPath = FOLDER_MAP[resourceType];
       const mdPath = join(
         "resources",
         VAPI_ENV,
@@ -679,7 +705,7 @@ export async function pullResourceType(
         `${resourceId}.yml`,
       );
       if (changedFiles.has(mdPath) || changedFiles.has(ymlPath)) {
-        console.log(`   ⏭️  ${resourceId} (locally changed, skipping)`);
+        console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
         newStateSection[resourceId] = resource.id;
         skipped++;
         continue;
@@ -689,7 +715,6 @@ export async function pullResourceType(
     // Skip locally edited files even without git (mtime-based detection)
     // If the resource file is newer than the state file, it was locally modified
     if (!bootstrap && !force && !isNew && !changedFiles) {
-      const folderPath = FOLDER_MAP[resourceType];
       const dir = join(RESOURCES_DIR, folderPath);
       const localFile =
         [join(dir, `${resourceId}.md`), join(dir, `${resourceId}.yml`), join(dir, `${resourceId}.yaml`)]
@@ -709,16 +734,20 @@ export async function pullResourceType(
       }
     }
 
-    // Skip resources whose local file was deleted (works without git)
+    // Skip resources whose local file was deleted (works without git).
+    // A resource that was previously tracked in state but now has no local
+    // file is treated as an intentional deletion. To stop tracking it
+    // entirely (so it never re-appears on pull), add it to .vapi-ignore.
     if (!bootstrap && !force && !isNew) {
-      const folderPath = FOLDER_MAP[resourceType];
       const dir = join(RESOURCES_DIR, folderPath);
       const fileExists =
         existsSync(join(dir, `${resourceId}.md`)) ||
         existsSync(join(dir, `${resourceId}.yml`)) ||
         existsSync(join(dir, `${resourceId}.yaml`));
       if (!fileExists) {
-        console.log(`   ⏭️  ${resourceId} (locally deleted, skipping)`);
+        console.log(
+          `   🗑️  ${resourceId} (deleted locally, intent in state — add to .vapi-ignore to stop tracking)`,
+        );
         newStateSection[resourceId] = resource.id;
         skipped++;
         continue;
@@ -732,7 +761,7 @@ export async function pullResourceType(
     // Clean, resolve resource references, and replace credential UUIDs with names
     const cleaned = cleanResource(resource);
     const resolved = resolveReferencesToResourceIds(cleaned, state);
-    const withCredNames = deepReplaceValues(resolved, credReverse);
+    const withCredNames = replaceCredentialRefs(resolved, credReverse);
 
     // Mark platform defaults so apply skips them
     if (isPlatformDefault) {
@@ -824,13 +853,22 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     }
     if (changedFiles.size > 0) {
       console.log(
-        `\n📦 ${changedFiles.size} locally changed file(s) will be preserved`,
+        `\n📦 ${changedFiles.size} locally modified file(s) will be preserved`,
       );
       console.log(
         "   Use --force to overwrite all local files with platform state",
       );
     }
-  } else if (force) {
+  }
+
+  const ignorePatterns = !bootstrap && !force ? loadIgnorePatterns() : [];
+  if (ignorePatterns.length > 0) {
+    console.log(
+      `\n🚫 ${ignorePatterns.length} pattern(s) loaded from .vapi-ignore — matching resources will be skipped`,
+    );
+  }
+
+  if (force) {
     console.log(
       "\n⚡ Force mode: overwriting all local files with platform state",
     );
@@ -950,8 +988,15 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   }
 
   if (totalSkipped > 0) {
-    console.log(`\n   ℹ️  ${totalSkipped} file(s) preserved (locally changed)`);
-    console.log("   Run with --force to overwrite: npm run pull -- <org> --force");
+    console.log(
+      `\n   ℹ️  ${totalSkipped} resource(s) skipped — see lines above for reasons:`,
+    );
+    console.log("       🚫 = matched .vapi-ignore (not tracked)");
+    console.log("       ✏️  = locally modified (preserved)");
+    console.log("       🗑️  = locally deleted (intent in state)");
+    console.log(
+      `   Run with --force to overwrite: npm run pull -- ${VAPI_ENV} --force`,
+    );
   }
 
   return { state, stats, force, bootstrap };

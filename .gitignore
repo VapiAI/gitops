@@ -19,3 +19,6 @@ Thumbs.db
 *.log
 
 tmp/
+
+# Local agent state
+.claude/

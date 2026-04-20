@@ -46,6 +46,13 @@ async function throttle(): Promise<void> {
   lastRequestTime = Date.now();
 }
 
+// 429 = rate limit. 5xx = transient server error (gateway timeout, upstream
+// hiccup, deploy in progress). Both are worth retrying with backoff; surfacing
+// a 502 as a hard failure forces the operator to re-run the entire push.
+function shouldRetry(status: number): boolean {
+  return status === 429 || (status >= 500 && status < 600);
+}
+
 export async function vapiRequest<T = VapiResponse>(
   method: "POST" | "PATCH",
   endpoint: string,
@@ -68,10 +75,10 @@ export async function vapiRequest<T = VapiResponse>(
       return response.json() as Promise<T>;
     }
 
-    // Handle rate limit with retry
-    if (response.status === 429 && attempt < MAX_RETRIES) {
+    if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
-      console.log(`  ⏳ Rate limited, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      const reason = response.status === 429 ? "Rate limited" : `Server error ${response.status}`;
+      console.log(`  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
       await sleep(delay);
       continue;
     }
@@ -99,10 +106,10 @@ export async function vapiDelete(endpoint: string): Promise<void> {
       return;
     }
 
-    // Handle rate limit with retry
-    if (response.status === 429 && attempt < MAX_RETRIES) {
+    if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
-      console.log(`  ⏳ Rate limited, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      const reason = response.status === 429 ? "Rate limited" : `Server error ${response.status}`;
+      console.log(`  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
       await sleep(delay);
       continue;
     }

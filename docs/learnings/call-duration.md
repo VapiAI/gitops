@@ -8,11 +8,13 @@ How to enforce call time limits while ending calls gracefully instead of abruptl
 
 Vapi provides three layers for managing call duration:
 
-| Mechanism | What it does | Type |
-|-----------|-------------|------|
-| `maxDurationSeconds` | Hard wall-clock cutoff — call ends immediately when reached | Assistant setting |
-| `call.timeElapsed` hook | Fires once at a specific second mark from call start | Hook (deterministic) |
-| `endCall` tool | LLM decides to end the call | Tool (probabilistic) |
+
+| Mechanism               | What it does                                                | Type                 |
+| ----------------------- | ----------------------------------------------------------- | -------------------- |
+| `maxDurationSeconds`    | Hard wall-clock cutoff — call ends immediately when reached | Assistant setting    |
+| `call.timeElapsed` hook | Fires once at a specific second mark from call start        | Hook (deterministic) |
+| `endCall` tool          | LLM decides to end the call                                 | Tool (probabilistic) |
+
 
 **Key distinction:** Hooks are deterministic (guaranteed to fire). Tools are probabilistic (the LLM chooses when to invoke them). For call discipline, use hooks as the enforcement layer and tools as the courtesy layer.
 
@@ -138,14 +140,16 @@ hooks:
 
 ## Hooks vs Tools vs System Prompt — When to Use Which
 
-| Approach | Reliability | Use when |
-|----------|-------------|----------|
-| `call.timeElapsed` hook with `say` | Guaranteed | You need a deterministic spoken warning at a fixed time |
-| `call.timeElapsed` hook with `message.add` | Guaranteed delivery, LLM interprets | You want the LLM to organically wrap up the conversation |
-| `call.timeElapsed` hook with `endCall` tool | Guaranteed | You need a hard graceful end (with goodbye) at a fixed time |
-| `maxDurationSeconds` | Guaranteed | Last-resort hard cutoff — no goodbye, call just drops |
-| `endCall` tool (LLM-invoked) | Probabilistic | You want the LLM to decide when to end based on conversation context |
-| System prompt instruction ("end after 10 min") | Unreliable | Don't rely on this alone — the LLM may not track time accurately |
+
+| Approach                                       | Reliability                         | Use when                                                             |
+| ---------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------- |
+| `call.timeElapsed` hook with `say`             | Guaranteed                          | You need a deterministic spoken warning at a fixed time              |
+| `call.timeElapsed` hook with `message.add`     | Guaranteed delivery, LLM interprets | You want the LLM to organically wrap up the conversation             |
+| `call.timeElapsed` hook with `endCall` tool    | Guaranteed                          | You need a hard graceful end (with goodbye) at a fixed time          |
+| `maxDurationSeconds`                           | Guaranteed                          | Last-resort hard cutoff — no goodbye, call just drops                |
+| `endCall` tool (LLM-invoked)                   | Probabilistic                       | You want the LLM to decide when to end based on conversation context |
+| System prompt instruction ("end after 10 min") | Unreliable                          | Don't rely on this alone — the LLM may not track time accurately     |
+
 
 **Best practice:** Layer them. Use hooks for deterministic enforcement and the endCall tool + system prompt for conversational flexibility.
 
@@ -155,12 +159,14 @@ hooks:
 
 These are **not** the same as call duration limits, but they interact:
 
-| Mechanism | What it does | Default |
-|-----------|-------------|---------|
-| `silenceTimeoutSeconds` | Ends call after sustained silence | 30s |
-| `customer.speech.timeout` hook | Fires action when customer is silent for N seconds | 7.5s, up to 3 times |
-| `messagePlan.idleTimeoutSeconds` | Speaks an idle message when conversation stalls | 10s |
-| `customerJoinTimeoutSeconds` | Ends call if customer never sends audio | 15s |
+
+| Mechanism                        | What it does                                       | Default             |
+| -------------------------------- | -------------------------------------------------- | ------------------- |
+| `silenceTimeoutSeconds`          | Ends call after sustained silence                  | 30s                 |
+| `customer.speech.timeout` hook   | Fires action when customer is silent for N seconds | 7.5s, up to 3 times |
+| `messagePlan.idleTimeoutSeconds` | Speaks an idle message when conversation stalls    | 10s                 |
+| `customerJoinTimeoutSeconds`     | Ends call if customer never sends audio            | 15s                 |
+
 
 **`silenceTimeoutSeconds` vs `customer.speech.timeout`:** The timeout **ends the call**. The hook **performs an action** (say, tool, message.add). They are independent — configure them separately. See [assistants.md](assistants.md) for the hook events list.
 

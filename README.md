@@ -497,7 +497,6 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 vapi-gitops/
 ├── docs/
 │   ├── Vapi Prompt Optimization Guide.md
-│   ├── environment-scoped-resources.md
 │   └── changelog.md
 ├── src/
 │   ├── setup.ts               # Interactive setup wizard

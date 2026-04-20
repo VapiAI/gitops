@@ -10,6 +10,8 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **Template-safe first run:** In a fresh clone, prefer `npm run pull -- <org> --bootstrap` to refresh `.vapi-state.<org>.json` and credential mappings without materializing the target org's resources into `resources/<org>/`. `npm run push -- <org>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
 
+**Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being pulled at all (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<env>/.vapi-ignore` with gitignore-style patterns. See `resources/<env>/.vapi-ignore.example` for syntax and examples. Ignored resources are silently skipped on every pull and never tracked in state — distinct from "locally deleted" which keeps an entry in state.
+
 **Learnings & recipes:** Before configuring resources or debugging issues, read the relevant file in **`docs/learnings/`**. Load only what you need:
 
 | Working on | Read |
@@ -58,7 +60,6 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 ```
 docs/
 ├── Vapi Prompt Optimization Guide.md          # In-depth prompt authoring
-├── environment-scoped-resources.md            # Environment isolation & promotion workflow
 ├── changelog.md                               # Template for tracking per-customer config changes
 └── learnings/                                 # Gotchas, recipes, and troubleshooting
     ├── README.md                              # Task-routed index — start here
