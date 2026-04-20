@@ -22,3 +22,6 @@ tmp/
 
 # Local agent state
 .claude/
+
+# Local-only audit notes (not part of the upstream repo)
+requested improvements.md
