@@ -77,7 +77,6 @@ Every command works in two modes:
 | `npm run call` | ✅ | `npm run call -- <org> -a <name>` | Start a WebSocket call |
 | `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Delete orphaned remote resources (destructive run requires `--confirm <org>`) |
 | `npm run eval` | — | `npm run eval -- <org> -s <squad>` | Run evals against an assistant/squad |
-| `npm run mock:webhook` | — | — | Local webhook receiver for testing |
 | `npm run build` | — | — | Type-check the codebase |
 | `npm test` | — | — | Run regression tests (`node:test`) |
 
@@ -305,18 +304,6 @@ npm run eval -- my-org -s my-squad -v eval-variables.json
 ```
 
 Evals must be pushed first (`npm run push -- my-org evals`). Eval definitions live in `resources/<org>/evals/*.yml`.
-
-### Webhook Local Testing
-
-```bash
-# 1) Run local receiver
-npm run mock:webhook
-
-# 2) Expose localhost
-ngrok http 8787
-```
-
-Set your assistant's `server.url` to the ngrok HTTPS URL.
 
 ---
 
@@ -582,8 +569,6 @@ vapi-gitops/
 │   ├── path-matching.test.ts   # Short-form path matching (P0-7 regression suite)
 │   ├── cleanup-safety.test.ts  # --confirm + empty-state gates (P0-4 regression suite)
 │   └── cli-arg-parsing.test.ts # Bare-id refusal, --confirm pass-through (P0-7)
-├── scripts/
-│   └── mock-vapi-webhook-server.ts
 ├── .env.<org>                  # API token per org (gitignored)
 └── .vapi-state.<org>.json      # State file per org
 ```
