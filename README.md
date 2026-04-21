@@ -14,14 +14,6 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 | **Reproducibility**   | "It worked on my assistant!"                                    | Declarative, version-controlled            |
 | **Disaster Recovery** | Hope you have backups                                           | Re-apply from git                          |
 
-### Key Benefits
-
-- **Audit Trail** — Every change is a commit with author, timestamp, and reason
-- **Code Review** — Catch misconfigurations before they hit production
-- **Environment Parity** — Dev, staging, and prod stay in sync
-- **No Drift** — Pull merges platform changes; push makes git the truth
-- **Automation Ready** — Plug into CI/CD pipelines
-
 ### Supported Resources
 
 | Resource               | Status | Format                               |
@@ -34,23 +26,7 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 | **Scenarios**          | ✅     | `.yml`                               |
 | **Simulations**        | ✅     | `.yml`                               |
 | **Simulation Suites**  | ✅     | `.yml`                               |
-
----
-
-## How to Use This Repo
-
-1. **Bootstrap state first** using `pull:*:bootstrap` when you need fresh platform mappings without downloading the org's resources into your working tree.
-2. **Edit declarative resources** in `resources/<env>/` (`.md` assistants, `.yml` tools/squads/etc.).
-3. **Push selectively while iterating** (resource type or file path), then run a full push before release.
-4. **Promote by environment** (`dev` -> `stg` -> `prod`) by copying files between `resources/dev/`, `resources/stg/`, and `resources/prod/`.
-
-Use:
-
-- `pull` when Vapi might have changed
-- `push` for explicit deploys
-- `apply` (`pull -> merge -> push`) when you want one command for sync + deploy
-
-For template-based repos, `push` now auto-runs a bootstrap state sync when local state is missing credential mappings or contains stale IDs for the resources you're applying.
+| **Evals**              | ✅     | `.yml`                               |
 
 ---
 
@@ -67,283 +43,247 @@ For template-based repos, `push` now auto-runs a bootstrap state sync when local
 npm install
 ```
 
-### Setup Environment
+### Interactive Setup
+
+The easiest way to get started is the interactive setup wizard:
 
 ```bash
-# Copy example values, then set real keys
-cp .env.example .env.dev
-cp .env.example .env.stg
-cp .env.example .env.prod
-
-# Add the correct VAPI_TOKEN for each org/environment
-# Note: this repo uses .env.stg (not .env.staging)
+npm run setup
 ```
+
+This will:
+
+1. Prompt for your Vapi API key (with region auto-detection)
+2. Ask for an org/folder name (e.g. `my-org`, `production`)
+3. Let you choose which resources to download (all or pick individually)
+4. Detect dependencies and offer to download them too
+5. Create `.env.<org>` and `resources/<org>/` for you
+
+You can run setup multiple times to add more orgs.
 
 ### Commands
 
-| Command                         | Description                                                                |
-| ------------------------------- | -------------------------------------------------------------------------- |
-| `npm run build`                 | Type-check the codebase                                                    |
-| `npm run pull:dev`              | Pull platform state, preserve local changes                                |
-| `npm run pull:stg`              | Pull staging state, preserve local changes                                 |
-| `npm run pull:dev:force`        | Pull platform state, overwrite everything                                  |
-| `npm run pull:stg:force`        | Pull staging state, overwrite everything                                   |
-| `npm run pull:prod`             | Pull from prod, preserve local changes                                     |
-| `npm run pull:prod:force`       | Pull from prod, overwrite everything                                       |
-| `npm run pull:dev:bootstrap`    | Refresh dev state/credentials without writing remote resources locally     |
-| `npm run pull:stg:bootstrap`    | Refresh staging state/credentials without writing remote resources locally |
-| `npm run pull:prod:bootstrap`   | Refresh prod state/credentials without writing remote resources locally    |
-| `npm run push:dev`              | Push local files to Vapi (dev)                                             |
-| `npm run push:stg`              | Push local files to Vapi (staging)                                         |
-| `npm run push:prod`             | Push local files to Vapi (prod)                                            |
-| `npm run apply:dev`             | Pull → Merge → Push in one shot (dev)                                      |
-| `npm run apply:stg`             | Pull → Merge → Push in one shot (staging)                                  |
-| `npm run apply:prod`            | Pull → Merge → Push in one shot (prod)                                     |
-| `npm run push:dev assistants`   | Push only assistants (dev)                                                 |
-| `npm run push:dev tools`        | Push only tools (dev)                                                      |
-| `npm run call:dev -- -a <name>` | Start a WebSocket call to an assistant (dev)                               |
-| `npm run call:dev -- -s <name>` | Start a WebSocket call to a squad (dev)                                    |
-| `npm run mock:webhook`          | Run local webhook receiver for Vapi server messages                        |
+Every command works in two modes:
 
-### Basic Workflow
+- **Interactive** — run without arguments, get prompted for org and resources
+- **Direct** — pass an org slug and flags for scripting / CI
+
+| Command | Interactive | Direct | Description |
+| --- | --- | --- | --- |
+| `npm run setup` | ✅ | — | First-time org setup wizard |
+| `npm run pull` | ✅ | `npm run pull -- <org> [flags]` | Pull remote resources locally |
+| `npm run push` | ✅ | `npm run push -- <org> [flags]` | Push local resources to Vapi |
+| `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | Pull → Merge → Push in one shot |
+| `npm run call` | ✅ | `npm run call -- <org> -a <name>` | Start a WebSocket call |
+| `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force]` | Delete orphaned remote resources |
+| `npm run eval` | — | `npm run eval -- <org> -s <squad>` | Run evals against an assistant/squad |
+| `npm run mock:webhook` | — | — | Local webhook receiver for testing |
+| `npm run build` | — | — | Type-check the codebase |
+
+### Interactive Mode
+
+When you run a command without arguments, you get a fully interactive experience:
 
 ```bash
-# First time in a template clone: refresh only state and credentials
-npm run pull:dev:bootstrap
+npm run push
+# → Select org (if multiple configured)
+# → All resources / Let me pick…
+# → Searchable multi-select with git status indicators
+# → Confirm and execute
 
-# Add or edit only the resources you actually want under resources/dev/
-
-# Push your changes (full sync)
-npm run push:dev
+npm run pull
+# → Select org
+# → All resources / Let me pick…
+# → Shows which resources are already local (✔)
+# → Confirm and execute
 ```
 
-#### Bootstrap State Sync (Template-Safe First Run)
+Navigation:
+- **Type** to search/filter resources
+- **Space** to toggle selection
+- **Ctrl+A** to select/deselect all visible
+- **Enter** to confirm
+- **Esc** to go back to the previous step
 
-Use bootstrap pull when you need the latest platform IDs and credential mappings but do not want the repo filled with assistants, tools, and other resources from the target Vapi org:
+### Direct Mode
+
+Pass an org slug as the first argument to skip interactive prompts:
 
 ```bash
-npm run pull:dev:bootstrap
+# Pull everything for an org
+npm run pull -- my-org
+
+# Force pull (overwrite local changes)
+npm run pull -- my-org --force
+
+# Push only assistants
+npm run push -- my-org assistants
+
+# Push a single file
+npm run push -- my-org resources/my-org/assistants/my-agent.md
+
+# Pull with bootstrap (state only, no files written)
+npm run pull -- my-org --bootstrap
+
+# Pull a single resource by UUID
+npm run pull -- my-org --type assistants --id <uuid>
+
+# Call an assistant
+npm run call -- my-org -a my-assistant
+
+# Call a squad
+npm run call -- my-org -s my-squad
+
+# Run evals
+npm run eval -- my-org -s my-squad
+npm run eval -- my-org -a my-assistant --filter booking
 ```
 
-This mode:
+---
 
-- Pulls credentials into `.vapi-state.<env>.json`
-- Refreshes remote resource ID mappings in the state file
-- Leaves `resources/<env>/` untouched so your working tree stays focused on the resources you actually intend to manage
+## Organization-Based Structure
 
-If you skip this step, `push` will automatically run the same bootstrap sync when it detects empty or stale state for the resources being applied.
+Resources are scoped by organization (not fixed `dev`/`stg`/`prod` names). Each org gets:
 
-#### Pulling A Single Resource By UUID
+- `.env.<org>` — API token and base URL
+- `.vapi-state.<org>.json` — resource ID ↔ UUID mappings
+- `resources/<org>/` — all resource files
 
-If you know the remote Vapi UUID for a specific resource, you can pull just that resource by combining exactly one resource type with `--id`:
+```
+vapi-gitops/
+├── .env.my-org                    # API token for my-org
+├── .env.production                # API token for production
+├── .vapi-state.my-org.json        # State file for my-org
+├── .vapi-state.production.json    # State file for production
+├── resources/
+│   ├── my-org/                    # Dev/test org resources
+│   │   ├── assistants/
+│   │   ├── tools/
+│   │   ├── squads/
+│   │   ├── structuredOutputs/
+│   │   ├── evals/
+│   │   └── simulations/
+│   └── production/                # Production org resources
+│       └── (same structure)
+```
+
+### Promoting Resources Across Orgs
 
 ```bash
-# Materialize one squad locally
-npm run pull:dev -- squads --id <squad-uuid>
+# Copy a squad from dev to production
+cp resources/my-org/squads/voice-squad.yml resources/production/squads/
+cp resources/my-org/assistants/intake-agent.md resources/production/assistants/
 
-# Refresh state only for one assistant
-npm run pull:dev:bootstrap -- assistants --id <assistant-uuid>
+# Push to production (missing dependencies auto-resolve)
+npm run push -- production
 ```
 
-Notes:
+---
 
-- `--id` currently supports remote Vapi UUIDs only
-- `--id` must be paired with exactly one resource type such as `assistants`, `squads`, or `tools`
-- Single-resource pull updates only the targeted resource mappings and preserves the rest of the state file
+## How to Use This Repo
 
-This will error if you do not provide exactly one resource type:
+1. **Run `npm run setup`** to configure your first org
+2. **Edit resources** in `resources/<org>/` (`.md` assistants, `.yml` tools/squads/etc.)
+3. **Push changes** with `npm run push` (interactive) or `npm run push -- <org>`
+4. **Pull updates** with `npm run pull` when the platform may have changed
+
+Use:
+
+- `pull` when Vapi might have changed
+- `push` for explicit deploys
+- `apply` (`pull -> merge -> push`) for sync + deploy in one command
+
+### Bootstrap State Sync
+
+Use bootstrap pull when you need the latest platform IDs and credential mappings without downloading all remote resources:
 
 ```bash
-# Invalid: no resource type
-npm run pull:dev -- --id <uuid>
-
-# Invalid: more than one resource type
-npm run pull:dev -- assistants squads --id <uuid>
+npm run pull -- my-org --bootstrap
 ```
 
-Promotion example:
+This refreshes `.vapi-state.<org>.json` and credential mappings while leaving `resources/<org>/` untouched. If you skip this step, `push` will automatically run it when it detects empty or stale state.
+
+### Pulling a Single Resource By UUID
 
 ```bash
-# After validating in dev, copy to staging and push
-cp resources/dev/squads/your-squad.yml resources/stg/squads/
-npm run push:stg
-
-# Promote to prod when ready
-cp resources/stg/squads/your-squad.yml resources/prod/squads/
-npm run push:prod
+npm run pull -- my-org --type squads --id <squad-uuid>
 ```
 
-#### Pulling Without Losing Local Work
+`--id` must be paired with exactly one resource type.
+
+### Pulling Without Losing Local Work
 
 By default, `pull` preserves any files you've locally modified or deleted:
 
 ```bash
-# Edit an assistant locally...
-
-npm run pull:dev
+npm run pull -- my-org
 # ⏭️  my-assistant (locally changed, skipping)
-# ✨  new-tool -> resources/dev/tools/new-tool.yml
-# Your edits are preserved, new platform resources are downloaded
+# ✨  new-tool -> resources/my-org/tools/new-tool.yml
 ```
 
-#### Force Pull (Platform as Source of Truth)
+Use `--force` to overwrite everything with the platform version.
 
-When you want the platform version of everything, overwriting all local files:
+### Selective Push
+
+Push only specific resources instead of everything:
 
 ```bash
-npm run pull:dev:force
-# ⚡ Force mode: overwriting all local files with platform state
+# By resource type
+npm run push -- my-org assistants
+npm run push -- my-org tools
+
+# By specific file
+npm run push -- my-org resources/my-org/assistants/my-assistant.md
+
+# Multiple files
+npm run push -- my-org resources/my-org/assistants/a.md resources/my-org/tools/b.yml
 ```
 
-#### Reviewing Platform Changes
+### Auto-Dependency Resolution
 
-```bash
-# Pull platform state (your local changes are preserved)
-npm run pull:dev
-
-# See what changed on the platform vs your last commit
-git diff
-
-# Accept platform changes for a specific file
-git checkout -- resources/dev/tools/some-tool.yml
-```
-
-### Selective Push (Partial Sync)
-
-Push only specific resources instead of syncing everything:
-
-#### By Resource Type
-
-```bash
-npm run push:dev assistants
-npm run push:dev tools
-npm run push:dev squads
-npm run push:dev structuredOutputs
-npm run push:dev personalities
-npm run push:dev scenarios
-npm run push:dev simulations
-npm run push:dev simulationSuites
-```
-
-#### By Specific File(s)
-
-```bash
-# Push a single file
-npm run push:dev resources/dev/assistants/my-assistant.md
-
-# Push multiple files
-npm run push:dev resources/dev/assistants/booking.md resources/dev/tools/my-tool.yml
-```
-
-#### Combined
-
-```bash
-# Push specific file within a type
-npm run push:dev assistants resources/dev/assistants/booking.md
-```
-
-**Note:** Partial pushes skip deletion checks. Run full `npm run push:dev` to sync deletions.
-
-#### Auto-Dependency Resolution
-
-Partial push is ideal for promoting specific squads or assistants to staging/prod without pushing everything. The engine automatically detects and creates missing dependencies:
-
-```bash
-# Push a single squad to staging — tools, structured outputs, and
-# assistants are created automatically if they don't exist yet
-npm run push:stg resources/stg/squads/everblue-voice-squad-20374c37.yml
-
-# Push assistants to prod — missing tools and structured outputs
-# are auto-applied first so references resolve correctly
-npm run push:prod assistants
-```
-
-The dependency chain resolves recursively:
+When pushing a single squad or assistant, missing dependencies (tools, structured outputs, etc.) are automatically created first:
 
 ```
 Squad push
   └─ missing assistants? → auto-create them first
        └─ missing tools / structured outputs? → auto-create those first
-            └─ then create the assistant
   └─ all references resolved → create the squad ✓
-
-Assistant push
-  └─ missing tools / structured outputs? → auto-create them first
-  └─ all references resolved → create the assistant ✓
 ```
 
-If a dependency already exists on the platform (UUID in the state file) but its nested dependencies don't, those are still auto-created and the parent resource is updated to reference them.
+### Running Evals
 
-This means you can work on everything in dev, then selectively push a single squad or assistant to staging or prod — no need for a full `push` that touches every resource.
+Evals run mock conversations against an assistant or squad and check assertions.
+
+```bash
+# Run all evals against a squad (transient — loaded from local files)
+npm run eval -- my-org -s my-squad
+
+# Run a specific eval by name filter
+npm run eval -- my-org -a my-assistant --filter booking
+
+# Use stored assistant/squad IDs from state (already pushed)
+npm run eval -- my-org -s my-squad --stored
+
+# Load assistant from a specific file path
+npm run eval -- my-org -a resources/my-org/assistants/qa-tester.md
+
+# Provide variable overrides
+npm run eval -- my-org -s my-squad -v eval-variables.json
+```
+
+Evals must be pushed first (`npm run push -- my-org evals`). Eval definitions live in `resources/<org>/evals/*.yml`.
 
 ### Webhook Local Testing
-
-Use the local mock receiver when validating Vapi `serverMessages` delivery.
 
 ```bash
 # 1) Run local receiver
 npm run mock:webhook
 
-# 2) Expose localhost (example)
+# 2) Expose localhost
 ngrok http 8787
 ```
 
-Then set your assistant `server.url` to the ngrok HTTPS URL and include event types like:
-
-- `speech-update`
-- `status-update`
-- `end-of-call-report`
-
-The mock server exposes:
-
-- `POST /webhook` (or `POST /`)
-- `GET /health`
-- `GET /events`
-
----
-
-## Project Structure
-
-```
-vapi-gitops/
-├── docs/
-│   ├── Vapi Prompt Optimization Guide.md   # Prompt authoring reference
-│   ├── environment-scoped-resources.md     # Env isolation & promotion workflow
-│   └── changelog.md                        # Template for per-customer change tracking
-├── src/
-│   ├── pull.ts                 # Pull platform state (with git stash/pop merge)
-│   ├── push.ts                 # Push local state to platform
-│   ├── apply.ts                # Orchestrator: pull → merge → push
-│   ├── call.ts                 # WebSocket call script
-│   ├── types.ts                # TypeScript interfaces
-│   ├── config.ts               # Environment & configuration
-│   ├── api.ts                  # Vapi HTTP client
-│   ├── state.ts                # State file management
-│   ├── resources.ts            # Resource loading (YAML, MD, TS)
-│   ├── resolver.ts             # Reference resolution
-│   ├── credentials.ts          # Credential resolution (name ↔ UUID)
-│   └── delete.ts               # Deletion & orphan checks
-├── resources/
-│   ├── dev/                    # Dev environment resources (push:dev reads here)
-│   │   ├── assistants/
-│   │   ├── tools/
-│   │   ├── squads/
-│   │   ├── structuredOutputs/
-│   │   └── simulations/
-│   ├── stg/                    # Staging resources (push:stg reads here)
-│   │   └── (same structure)
-│   └── prod/                   # Production resources (push:prod reads here)
-│       └── (same structure)
-├── scripts/
-│   └── mock-vapi-webhook-server.ts # Local server message receiver
-├── .env.example                # Example env var file
-├── .env.dev                    # Dev environment secrets (gitignored)
-├── .env.stg                    # Staging environment secrets (gitignored)
-├── .env.prod                   # Prod environment secrets (gitignored)
-├── .vapi-state.dev.json        # Dev state file
-├── .vapi-state.stg.json        # Staging state file
-└── .vapi-state.prod.json       # Prod state file
-```
+Set your assistant's `server.url` to the ngrok HTTPS URL.
 
 ---
 
@@ -351,7 +291,7 @@ vapi-gitops/
 
 ### Assistants with System Prompts (`.md`)
 
-Assistants with system prompts use **Markdown with YAML frontmatter**. The system prompt is written as readable Markdown below the config:
+Markdown with YAML frontmatter — the system prompt is readable Markdown below the config:
 
 ```markdown
 ---
@@ -360,7 +300,7 @@ voice:
   provider: 11labs
   voiceId: abc123
 model:
-  model: gpt-4o
+  model: gpt-4.1
   provider: openai
   toolIds:
     - my-tool
@@ -381,28 +321,6 @@ You are a helpful assistant for the business you represent.
 
 - Always be polite
 - Never make up information
-```
-
-**Benefits:**
-
-- System prompts are readable Markdown (not escaped YAML strings)
-- Proper syntax highlighting in editors
-- Easy to write headers, lists, tables
-- Configuration stays cleanly separated at the top
-
-### Assistants without System Prompts (`.yml`)
-
-Simple assistants without custom system prompts use plain YAML:
-
-```yaml
-name: Simple Assistant
-voice:
-  provider: vapi
-  voiceId: Elliot
-model:
-  model: gpt-4o-mini
-  provider: openai
-firstMessage: Hello!
 ```
 
 ### Tools (`.yml`)
@@ -455,6 +373,14 @@ members:
   - assistantId: specialist-agent
 ```
 
+### Evals (`.yml`)
+
+```yaml
+name: Booking Happy Path
+type: eval
+# (eval config as per Vapi API)
+```
+
 ### Simulations
 
 **Personality** (`simulations/personalities/`):
@@ -472,7 +398,6 @@ name: Happy Path - New Customer
 description: New customer calling to schedule an appointment
 prompt: |
   You are a new customer calling to schedule your first appointment.
-  Be cooperative and provide all requested information.
 ```
 
 **Simulation** (`simulations/tests/`):
@@ -490,142 +415,6 @@ name: Booking Flow Tests
 simulationIds:
   - booking-test-case-1
   - booking-test-case-2
-  - booking-test-case-3
-```
-
----
-
-## How-To Guides
-
-### How to Add a New Assistant
-
-**Option 1: With System Prompt (recommended)**
-
-Create `resources/dev/assistants/my-assistant.md`:
-
-```markdown
----
-name: My Assistant
-voice:
-  provider: 11labs
-  voiceId: abc123
-model:
-  model: gpt-4o
-  provider: openai
-  toolIds:
-    - my-tool
----
-
-# Your System Prompt Here
-
-Instructions for the assistant...
-```
-
-**Option 2: Without System Prompt**
-
-Create `resources/dev/assistants/my-assistant.yml`:
-
-```yaml
-name: My Assistant
-voice:
-  provider: vapi
-  voiceId: Elliot
-model:
-  model: gpt-4o-mini
-  provider: openai
-```
-
-Then push:
-
-```bash
-npm run push:dev
-```
-
-### How to Add a Tool
-
-Create `resources/dev/tools/my-tool.yml`:
-
-```yaml
-type: function
-function:
-  name: do_something
-  description: Does something useful
-  parameters:
-    type: object
-    properties:
-      input:
-        type: string
-    required:
-      - input
-server:
-  url: https://my-api.com/endpoint
-```
-
-### How to Reference Resources
-
-Use the **filename without extension** as the resource ID:
-
-```yaml
-# In an assistant
-model:
-  toolIds:
-    - my-tool # → resources/<env>/tools/my-tool.yml
-    - utils/helper-tool # → resources/<env>/tools/utils/helper-tool.yml
-artifactPlan:
-  structuredOutputIds:
-    - call-summary # → resources/<env>/structuredOutputs/call-summary.yml
-```
-
-```yaml
-# In a squad
-members:
-  - assistantId: intake-agent # → resources/<env>/assistants/intake-agent.md
-```
-
-```yaml
-# In a simulation
-personalityId: skeptical-sam # → resources/<env>/simulations/personalities/skeptical-sam.yml
-scenarioId: happy-path # → resources/<env>/simulations/scenarios/happy-path.yml
-```
-
-### How to Delete a Resource
-
-1. **Remove references** to the resource from other files
-2. **Delete the file**: `rm resources/dev/tools/my-tool.yml`
-3. **Push**: `npm run push:dev`
-
-The engine will:
-
-- Detect the resource is in state but not in filesystem
-- Check for orphan references (will error if still referenced)
-- Delete from Vapi
-- Remove from state file
-
-### How to Organize Resources into Folders
-
-Create subdirectories only when they help organize related resources by feature or workflow:
-
-```
-resources/<env>/
-├── assistants/
-│   ├── shared/
-│   │   └── fallback.md
-│   └── support/
-│       └── intake.md
-├── tools/
-│   ├── shared/
-│   │   └── transfer-call.yml
-│   └── support/
-│       └── lookup-customer.yml
-```
-
-Reference using full paths:
-
-```yaml
-model:
-  toolIds:
-    - shared/transfer-call
-    - support/lookup-customer
 ```
 
 ---
@@ -633,8 +422,6 @@ model:
 ## How the Engine Works
 
 ### Sync Workflow
-
-Your local files are the source of truth. The engine respects that:
 
 ```
 pull (default)     pull --force        push
@@ -645,40 +432,21 @@ locally changed    everything          platform
 files
 ```
 
-**`pull`** downloads platform state. In default mode (git repo required), it detects locally modified or deleted files and skips them — your local work is preserved. New platform resources are still downloaded. Use `--force` to overwrite everything.
+**`pull`** — downloads platform state. Detects locally modified files and skips them (your work is preserved). Use `--force` to overwrite everything.
 
-**`push`** is the engine — reads local files and syncs them to the platform. Deleted files are removed from the platform.
+**`push`** — reads local files and syncs them to the platform. Handles creates, updates, and deletions.
 
-**`apply`** is the convenience wrapper — runs `pull` then `push` in sequence.
-
-> **Note:** The "skip locally changed files" feature requires a git repo with at least one commit. Without git, pull always overwrites (same as `--force`).
+**`apply`** — runs `pull` then `push` in sequence.
 
 ### Processing Order
 
-**Pull** (dependency order):
+**Push** (dependency order): Tools → Structured Outputs → Assistants → Squads → Personalities → Scenarios → Simulations → Simulation Suites → Evals
 
-1. Tools
-2. Structured Outputs
-3. Assistants
-4. Squads
-5. Personalities
-6. Scenarios
-7. Simulations
-8. Simulation Suites
-
-**Push** (dependency order):
-
-1. Tools → 2. Structured Outputs → 3. Assistants → 4. Squads
-2. Personalities → 6. Scenarios → 7. Simulations → 8. Simulation Suites
-
-**Delete** (reverse dependency order):
-
-1. Simulation Suites → 2. Simulations → 3. Scenarios → 4. Personalities
-2. Squads → 6. Assistants → 7. Structured Outputs → 8. Tools
+**Delete** (reverse dependency order): Evals → Simulation Suites → Simulations → ... → Tools
 
 ### Reference Resolution
 
-The engine automatically resolves resource IDs to Vapi UUIDs:
+Resource IDs (filenames without extension) are automatically resolved to Vapi UUIDs:
 
 ```yaml
 # You write:
@@ -692,64 +460,83 @@ toolIds:
 
 ### Credential Management
 
-Credentials (API keys, JWT secrets, etc.) are environment-specific and managed automatically through the state file. No secrets are stored in resource files or git.
+Credentials are managed automatically through the state file. No secrets in resource files or git.
 
-**How it works:**
-
-1. **Pull** fetches all credentials from `GET /credential` and stores `name-slug → UUID` in the state file
-2. **Pull** replaces credential UUIDs with human-readable names in resource files
-3. **Push** reverses the mapping — resolves credential names back to UUIDs before sending to the API
+1. **Pull** fetches credentials from Vapi and stores `name → UUID` in the state file
+2. Resource files use human-readable credential names
+3. **Push** resolves names back to UUIDs before sending to the API
 
 ```yaml
-# Resource file stores credential NAME (environment-agnostic)
+# Resource file (environment-agnostic)
 server:
-  url: https://my-api.com/endpoint
-  credentialId: my-server-credential # ← human-readable name
+  credentialId: my-server-credential
+
+# State file (environment-specific)
+# "my-server-credential": "2f6db611-ad08-4099-8bd8-74db37b0a07e"
 ```
-
-```json
-// State file stores credential UUID (environment-specific)
-{
-  "credentials": {
-    "my-server-credential": "2f6db611-ad08-4099-8bd8-74db37b0a07e"
-  }
-}
-```
-
-**Cross-environment workflow:**
-
-Each environment has its own state file with its own credential UUIDs. The same resource file works across all environments — only the state file differs:
-
-```
-.vapi-state.dev.json  → "my-cred": "uuid-for-dev"
-.vapi-state.stg.json  → "my-cred": "uuid-for-stg"
-.vapi-state.prod.json → "my-cred": "uuid-for-prod"
-```
-
-> **Note:** Credentials are auto-discovered from the Vapi API by name. Create credentials with the same name in each environment's Vapi org, and pull will populate the mappings automatically.
 
 ### State File
 
-Tracks mapping between resource IDs and Vapi UUIDs:
+Tracks resource ID ↔ Vapi UUID mappings per org:
 
 ```json
 {
-  "credentials": {
-    "my-server-credential": "uuid-0000"
-  },
-  "tools": {
-    "my-tool": "uuid-1234"
-  },
-  "assistants": {
-    "my-assistant": "uuid-5678"
-  },
-  "squads": {
-    "my-squad": "uuid-abcd"
-  },
-  "personalities": {
-    "skeptical-sam": "uuid-efgh"
-  }
+  "credentials": { "my-cred": "uuid-0000" },
+  "tools": { "my-tool": "uuid-1234" },
+  "assistants": { "my-assistant": "uuid-5678" },
+  "squads": { "my-squad": "uuid-abcd" },
+  "evals": { "booking-happy-path": "uuid-efgh" }
 }
+```
+
+---
+
+## Project Structure
+
+```
+vapi-gitops/
+├── docs/
+│   ├── Vapi Prompt Optimization Guide.md
+│   └── changelog.md
+├── src/
+│   ├── setup.ts               # Interactive setup wizard
+│   ├── interactive.ts          # Interactive pull/push/apply/call/cleanup flows
+│   ├── searchableCheckbox.ts   # Custom multi-select prompt component
+│   ├── pull.ts                 # Pull platform state
+│   ├── push.ts                 # Push local state to platform
+│   ├── apply.ts                # Orchestrator: pull → merge → push
+│   ├── call.ts                 # WebSocket call script
+│   ├── eval.ts                 # Eval runner
+│   ├── cleanup.ts              # Orphan cleanup
+│   ├── pull-cmd.ts             # Entry point: interactive or direct pull
+│   ├── push-cmd.ts             # Entry point: interactive or direct push
+│   ├── apply-cmd.ts            # Entry point: interactive or direct apply
+│   ├── call-cmd.ts             # Entry point: interactive or direct call
+│   ├── cleanup-cmd.ts          # Entry point: interactive or direct cleanup
+│   ├── types.ts                # TypeScript interfaces
+│   ├── config.ts               # Environment & configuration
+│   ├── api.ts                  # Vapi HTTP client
+│   ├── state.ts                # State file management
+│   ├── resources.ts            # Resource loading (YAML, MD, TS)
+│   ├── resolver.ts             # Reference resolution
+│   ├── credentials.ts          # Credential resolution (name ↔ UUID)
+│   └── delete.ts               # Deletion & orphan checks
+├── resources/
+│   └── <org>/                  # One directory per configured org
+│       ├── assistants/
+│       ├── tools/
+│       ├── squads/
+│       ├── structuredOutputs/
+│       ├── evals/
+│       └── simulations/
+│           ├── personalities/
+│           ├── scenarios/
+│           ├── tests/
+│           └── suites/
+├── scripts/
+│   └── mock-vapi-webhook-server.ts
+├── .env.<org>                  # API token per org (gitignored)
+└── .vapi-state.<org>.json      # State file per org
 ```
 
 ---
@@ -763,13 +550,7 @@ Tracks mapping between resource IDs and Vapi UUIDs:
 | `VAPI_TOKEN`    | ✅       | API authentication token                         |
 | `VAPI_BASE_URL` | ❌       | API base URL (defaults to `https://api.vapi.ai`) |
 
-### Excluded Fields
-
-Some fields are excluded when writing to files (server-managed):
-
-- `id`, `orgId`, `createdAt`, `updatedAt`
-- `analyticsMetadata`, `isDeleted`
-- `isServerUrlSecretSet`, `workflowIds`
+These are stored in `.env.<org>` files, one per configured organization.
 
 ---
 
@@ -795,21 +576,17 @@ The referenced resource doesn't exist. Check:
 
 Check the state file has correct UUID:
 
-1. Open `.vapi-state.{env}.json`
+1. Open `.vapi-state.<org>.json`
 2. Find the resource entry
 3. If incorrect, delete entry and re-run push
 
 ### "Credential with ID not found" errors
 
-The credential UUID doesn't exist in the target environment. Fix:
+The credential UUID doesn't exist in the target org. Fix:
 
-1. Run `npm run pull:{env}` to fetch credentials into the state file
-2. If the credential doesn't exist in the target org, create it in the Vapi dashboard with the same name
+1. Run `npm run pull -- <org>` to fetch credentials into the state file
+2. If the credential doesn't exist, create it in the Vapi dashboard with the same name
 3. Pull again — the mapping will be auto-populated
-
-### "Unresolved credential" warnings
-
-A resource file has a `credentialId` that couldn't be resolved to a UUID. This means the credential name isn't in the state file. Run `pull` to populate credential mappings.
 
 ### "property X should not exist" API errors
 
@@ -823,3 +600,4 @@ Some properties can't be updated after creation. Add them to `UPDATE_EXCLUDED_KE
 - [Tools API](https://docs.vapi.ai/api-reference/tools/create)
 - [Structured Outputs API](https://docs.vapi.ai/api-reference/structured-outputs/structured-output-controller-create)
 - [Squads API](https://docs.vapi.ai/api-reference/squads/create)
+- [Evals API](https://docs.vapi.ai/api-reference/evals)

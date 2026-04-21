@@ -1,9 +1,12 @@
+import { resolve } from "path";
+import { fileURLToPath } from "url";
 import { vapiRequest, VapiApiError } from "./api.ts";
 import {
   VAPI_ENV,
   VAPI_BASE_URL,
   FORCE_DELETE,
   APPLY_FILTER,
+  BASE_DIR,
   removeExcludedKeys,
 } from "./config.ts";
 import { loadState, saveState } from "./state.ts";
@@ -502,6 +505,27 @@ export async function applySimulationSuite(
   });
 }
 
+export async function applyEval(
+  resource: ResourceFile,
+  state: StateFile,
+): Promise<string> {
+  const { resourceId, data } = resource;
+  const existingUuid = state.evals[resourceId];
+
+  const payload = data as Record<string, unknown>;
+
+  if (existingUuid) {
+    const updatePayload = removeExcludedKeys(payload, "evals");
+    console.log(`  🔄 Updating eval: ${resourceId} (${existingUuid})`);
+    await vapiRequest("PATCH", `/eval/${existingUuid}`, updatePayload);
+    return existingUuid;
+  } else {
+    console.log(`  ✨ Creating eval: ${resourceId}`);
+    const result = await vapiRequest("POST", "/eval", payload);
+    return result.id;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Post-Apply: Update Tools with Assistant References (for handoff tools)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -587,11 +611,12 @@ function isPartialApply(): boolean {
 }
 
 function shouldApplyResourceType(type: ResourceType): boolean {
-  // If filtering by specific files, check if any file matches this type
   if (APPLY_FILTER.filePaths?.length) {
-    return true; // We'll filter by resourceId later
+    const folder = FOLDER_MAP[type];
+    return APPLY_FILTER.filePaths.some(
+      (fp) => fp.includes(`/${folder}/`) || fp.includes(`\\${folder}\\`),
+    );
   }
-  // If filtering by types, only include matching types
   if (APPLY_FILTER.resourceTypes?.length) {
     return APPLY_FILTER.resourceTypes.includes(type);
   }
@@ -604,13 +629,14 @@ function filterResourcesByPaths<T>(
 ): ResourceFile<T>[] {
   if (!APPLY_FILTER.filePaths?.length) return resources;
 
-  // Get all resourceIds that match the file paths for this type
   const matchingIds = new Set<string>();
 
   for (const filePath of APPLY_FILTER.filePaths) {
-    // Try to match the file path to a resourceId
+    const resolvedInput = resolve(BASE_DIR, filePath);
+
     for (const resource of resources) {
       if (
+        resource.filePath === resolvedInput ||
         resource.filePath.endsWith(filePath) ||
         filePath.endsWith(resource.resourceId + ".yml") ||
         filePath.endsWith(resource.resourceId + ".yaml") ||
@@ -814,6 +840,7 @@ async function main(): Promise<void> {
     scenarios: 0,
     simulations: 0,
     simulationSuites: 0,
+    evals: 0,
   };
 
   // From here on, any path out of the function (success OR thrown error) must
@@ -837,6 +864,8 @@ async function main(): Promise<void> {
     await loadResources<Record<string, unknown>>("simulations");
   const allSimulationSuitesRaw =
     await loadResources<Record<string, unknown>>("simulationSuites");
+  const allEvalsRaw =
+    await loadResources<Record<string, unknown>>("evals");
 
   const loadedResources: LoadedResources = {
     tools: allToolsRaw,
@@ -847,6 +876,7 @@ async function main(): Promise<void> {
     scenarios: allScenariosRaw,
     simulations: allSimulationsRaw,
     simulationSuites: allSimulationSuitesRaw,
+    evals: allEvalsRaw,
   };
 
   state = await maybeBootstrapState(loadedResources, state);
@@ -904,6 +934,7 @@ async function main(): Promise<void> {
   const allSimulationSuites = resolveCredentials(
     filterDefaults(allSimulationSuitesRaw),
   );
+  const allEvals = resolveCredentials(filterDefaults(allEvalsRaw));
 
   // Filter resources based on apply filter
   const tools = shouldApplyResourceType("tools")
@@ -929,6 +960,9 @@ async function main(): Promise<void> {
     : [];
   const simulationSuites = shouldApplyResourceType("simulationSuites")
     ? filterResourcesByPaths(allSimulationSuites, "simulationSuites")
+    : [];
+  const evals = shouldApplyResourceType("evals")
+    ? filterResourcesByPaths(allEvals, "evals")
     : [];
 
   // Auto-dependency resolution context
@@ -963,6 +997,7 @@ async function main(): Promise<void> {
       if (scenarios.length > 0) typesToDelete.push("scenarios");
       if (simulations.length > 0) typesToDelete.push("simulations");
       if (simulationSuites.length > 0) typesToDelete.push("simulationSuites");
+      if (evals.length > 0) typesToDelete.push("evals");
     }
   }
 
@@ -983,6 +1018,7 @@ async function main(): Promise<void> {
       scenarios: allScenariosRaw,
       simulations: allSimulationsRaw,
       simulationSuites: allSimulationSuitesRaw,
+      evals: allEvalsRaw,
     },
     state,
     typesToDelete,
@@ -995,6 +1031,7 @@ async function main(): Promise<void> {
   // 4. Simulation building blocks (personalities, scenarios)
   // 5. Simulations (references personalities, scenarios)
   // 6. Simulation suites (references simulations)
+  // 7. Evals
 
   if (tools.length > 0) {
     console.log("\n🔧 Applying tools...\n");
@@ -1136,6 +1173,20 @@ async function main(): Promise<void> {
     }
   }
 
+  if (evals.length > 0) {
+    console.log("\n🧪 Applying evals...\n");
+    for (const evalResource of evals) {
+      try {
+        const uuid = await applyEval(evalResource, state);
+        state.evals[evalResource.resourceId] = uuid;
+        applied.evals++;
+      } catch (error) {
+        console.error(formatApiError(evalResource.resourceId, error));
+        throw error;
+      }
+    }
+  }
+
   // Second pass: Link resources to assistants (include auto-applied deps)
   const allAppliedTools = [...tools, ...autoAppliedTools];
   if (allAppliedTools.length > 0) {
@@ -1179,6 +1230,7 @@ async function main(): Promise<void> {
       console.log(`   Simulations: ${applied.simulations}`);
     if (applied.simulationSuites > 0)
       console.log(`   Simulation Suites: ${applied.simulationSuites}`);
+    if (applied.evals > 0) console.log(`   Evals: ${applied.evals}`);
   } else {
     console.log("📋 Summary:");
     console.log(`   Tools: ${Object.keys(state.tools).length}`);
@@ -1193,6 +1245,7 @@ async function main(): Promise<void> {
     console.log(
       `   Simulation Suites: ${Object.keys(state.simulationSuites).length}`,
     );
+    console.log(`   Evals: ${Object.keys(state.evals).length}`);
   }
   } finally {
     // Always flush state, even on partial failure — resources that already
@@ -1209,15 +1262,24 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the apply engine
-main().catch((error) => {
-  if (error instanceof VapiApiError) {
-    console.error(`\n❌ Apply failed: ${error.apiMessage}`);
-  } else {
-    console.error(
-      "\n❌ Apply failed:",
-      error instanceof Error ? error.message : error,
-    );
-  }
-  process.exit(1);
-});
+export async function runPush(): Promise<void> {
+  return main();
+}
+
+const isMainModule =
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
+  main().catch((error) => {
+    if (error instanceof VapiApiError) {
+      console.error(`\n❌ Apply failed: ${error.apiMessage}`);
+    } else {
+      console.error(
+        "\n❌ Apply failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    process.exit(1);
+  });
+}

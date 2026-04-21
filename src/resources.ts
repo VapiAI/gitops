@@ -15,6 +15,7 @@ export const FOLDER_MAP: Record<ResourceType, string> = {
   scenarios: "simulations/scenarios",
   simulations: "simulations/tests",
   simulationSuites: "simulations/suites",
+  evals: "evals",
 };
 
 // Reverse map: folder path to resource type

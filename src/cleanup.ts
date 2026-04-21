@@ -1,3 +1,5 @@
+import { resolve } from "path";
+import { fileURLToPath } from "url";
 import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
 import { loadState } from "./state.ts";
 
@@ -103,7 +105,7 @@ async function main(): Promise<void> {
       `❌ Refusing to run destructive cleanup without explicit confirmation.`,
     );
     console.error(
-      `   Re-run with: npm run cleanup:${VAPI_ENV} -- --force --confirm ${VAPI_ENV}`,
+      `   Re-run with: npm run cleanup -- ${VAPI_ENV} --force --confirm ${VAPI_ENV}`,
     );
     process.exit(1);
   }
@@ -118,6 +120,7 @@ async function main(): Promise<void> {
     ...Object.values(state.scenarios),
     ...Object.values(state.simulations),
     ...Object.values(state.simulationSuites),
+    ...Object.values(state.evals),
   ]);
 
   // A state file with zero tracked resources is almost always a fresh clone,
@@ -129,7 +132,7 @@ async function main(): Promise<void> {
     );
     console.error(
       `   This usually means the state was never bootstrapped. Run ` +
-        `\`npm run pull:${VAPI_ENV}:bootstrap\` first, then retry.`,
+        `\`npm run pull -- ${VAPI_ENV} --bootstrap\` first, then retry.`,
     );
     process.exit(1);
   }
@@ -239,7 +242,7 @@ async function main(): Promise<void> {
     );
     console.log("🔒 DRY-RUN MODE - No resources were deleted");
     console.log("   To actually delete, run:");
-    console.log(`   npm run cleanup:${VAPI_ENV} -- --force`);
+    console.log(`   npm run cleanup -- ${VAPI_ENV} --force`);
     console.log(
       "═══════════════════════════════════════════════════════════════\n",
     );
@@ -271,7 +274,13 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((error) => {
-  console.error("\n❌ Cleanup failed:", error);
-  process.exit(1);
-});
+export { main as runCleanup };
+
+const isMainModule =
+  resolve(process.argv[1] ?? "") === resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  main().catch((error) => {
+    console.error("\n❌ Cleanup failed:", error);
+    process.exit(1);
+  });
+}

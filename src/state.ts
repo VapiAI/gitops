@@ -18,6 +18,7 @@ function createEmptyState(): StateFile {
     scenarios: {},
     simulations: {},
     simulationSuites: {},
+    evals: {},
   };
 }
 

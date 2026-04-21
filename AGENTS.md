@@ -6,9 +6,9 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **Prompt quality:** Whenever you create a new assistant or change an existing assistant’s system prompt, read **`docs/Vapi Prompt Optimization Guide.md`** first. It goes deeper on structure, voice constraints, tool usage, and evaluation than the summary in this file.
 
-**Environment-scoped resources:** Resources live in `resources/<env>/` (e.g. `resources/dev/`, `resources/prod/`). Each environment directory is isolated — `push:dev` only touches `resources/dev/`, `push:prod` only touches `resources/prod/`. See **`docs/environment-scoped-resources.md`** for the full promotion workflow and rationale.
+**Org-scoped resources:** Resources live in `resources/<org>/` (e.g. `resources/my-org/`, `resources/my-org-prod/`). Each org directory is isolated — `npm run push -- my-org` only touches `resources/my-org/`. Run `npm run setup` to create a new org.
 
-**Template-safe first run:** In a fresh clone, prefer `npm run pull:dev:bootstrap` (or the matching env) to refresh `.vapi-state.<env>.json` and credential mappings without materializing the target org's resources into `resources/<env>/`. `push:<env>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
+**Template-safe first run:** In a fresh clone, prefer `npm run pull -- <org> --bootstrap` to refresh `.vapi-state.<org>.json` and credential mappings without materializing the target org's resources into `resources/<org>/`. `npm run push -- <org>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
 
 **Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being pulled at all (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<env>/.vapi-ignore` with gitignore-style patterns. See `resources/<env>/.vapi-ignore.example` for syntax and examples. Ignored resources are silently skipped on every pull and never tracked in state — distinct from "locally deleted" which keeps an entry in state.
 
@@ -38,20 +38,20 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 | I want to...                        | What to do                                                                    |
 | ----------------------------------- | ----------------------------------------------------------------------------- |
-| Edit an assistant's system prompt   | Edit the markdown body in `resources/<env>/assistants/<name>.md`              |
-| Change assistant settings           | Edit the YAML frontmatter in the same `.md` file                              |
-| Add a new tool                      | Create `resources/<env>/tools/<name>.yml`                                     |
-| Add a new assistant                 | Create `resources/<env>/assistants/<name>.md`                                 |
-| Create a multi-agent squad          | Create `resources/<env>/squads/<name>.yml`                                    |
-| Add post-call analysis              | Create `resources/<env>/structuredOutputs/<name>.yml`                         |
-| Write test simulations              | Create files under `resources/<env>/simulations/`                             |
-| Promote resources across envs       | Copy files from `resources/dev/` to `resources/stg/` or `resources/prod/`     |
-| Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                              |
-| Push changes to Vapi                | `npm run push:dev` or `npm run push:prod`                                     |
-| Pull latest from Vapi               | `npm run pull:dev`, `npm run pull:dev:force`, or `npm run pull:dev:bootstrap` |
-| Pull one known remote resource      | `npm run pull:dev -- assistants --id <uuid>`                                  |
-| Push only one file                  | `npm run push:dev resources/dev/assistants/my-agent.md`                       |
-| Test a call                         | `npm run call:dev -- -a <assistant-name>`                                     |
+| Edit an assistant's system prompt   | Edit the markdown body in `resources/<org>/assistants/<name>.md`                  |
+| Change assistant settings           | Edit the YAML frontmatter in the same `.md` file                                  |
+| Add a new tool                      | Create `resources/<org>/tools/<name>.yml`                                         |
+| Add a new assistant                 | Create `resources/<org>/assistants/<name>.md`                                     |
+| Create a multi-agent squad          | Create `resources/<org>/squads/<name>.yml`                                        |
+| Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
+| Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
+| Promote resources across orgs       | Copy files between `resources/<org-a>/` and `resources/<org-b>/`                  |
+| Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                                  |
+| Push changes to Vapi                | `npm run push -- <org>`                                                           |
+| Pull latest from Vapi               | `npm run pull -- <org>`, `--force`, or `--bootstrap`                              |
+| Pull one known remote resource      | `npm run pull -- <org> --type assistants --id <uuid>`                             |
+| Push only one file                  | `npm run push -- <org> resources/<org>/assistants/my-agent.md`                    |
+| Test a call                         | `npm run call -- <org> -a <assistant-name>`                                       |
 
 ---
 
@@ -60,7 +60,6 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 ```
 docs/
 ├── Vapi Prompt Optimization Guide.md          # In-depth prompt authoring
-├── environment-scoped-resources.md            # Environment isolation & promotion workflow
 ├── changelog.md                               # Template for tracking per-customer config changes
 └── learnings/                                 # Gotchas, recipes, and troubleshooting
     ├── README.md                              # Task-routed index — start here
@@ -80,15 +79,14 @@ docs/
     └── voicemail-detection.md                 # Voicemail vs human classification
 
 resources/
-├── dev/                     # Dev environment resources (push:dev reads here)
+├── <org>/                   # Org-scoped resources (npm run push -- <org> reads here)
 │   ├── assistants/
 │   ├── tools/
 │   ├── squads/
 │   ├── structuredOutputs/
+│   ├── evals/
 │   └── simulations/
-├── stg/                     # Staging environment resources (push:stg reads here)
-│   └── (same structure)
-└── prod/                    # Production environment resources (push:prod reads here)
+└── <another-org>/           # Another org (each is isolated)
     └── (same structure)
 
 scripts/
@@ -103,7 +101,7 @@ scripts/
 
 Assistants are voice agents that handle phone calls. They are defined as **Markdown files with YAML frontmatter**.
 
-**File:** `resources/<env>/assistants/<name>.md`
+**File:** `resources/<org>/assistants/<name>.md`
 
 ```markdown
 ---
@@ -315,7 +313,7 @@ artifactPlan:
 
 Tools are functions the assistant can call during a conversation.
 
-**File:** `resources/<env>/tools/<name>.yml`
+**File:** `resources/<org>/tools/<name>.yml`
 
 #### Function Tool (calls a webhook)
 
@@ -414,7 +412,7 @@ function:
 
 Structured outputs extract data from call transcripts after the call ends. They run LLM analysis on the conversation.
 
-**File:** `resources/<env>/structuredOutputs/<name>.yml`
+**File:** `resources/<org>/structuredOutputs/<name>.yml`
 
 #### Boolean Output (yes/no evaluation)
 
@@ -496,12 +494,12 @@ schema:
 
 Squads define multi-agent systems where assistants can hand off to each other.
 
-**File:** `resources/<env>/squads/<name>.yml`
+**File:** `resources/<org>/squads/<name>.yml`
 
 ```yaml
 name: My Squad
 members:
-  - assistantId: intake-agent-a1b2c3d4 # References resources/<env>/assistants/<id>.md
+  - assistantId: intake-agent-a1b2c3d4 # References resources/<org>/assistants/<id>.md
     assistantOverrides: # Override assistant settings within this squad
       metadata:
         position: # Visual position in dashboard editor
@@ -647,10 +645,10 @@ Resources reference each other by **filename without extension**:
 
 | From          | Field                                | References              | Example                                   |
 | ------------- | ------------------------------------ | ----------------------- | ----------------------------------------- |
-| Assistant     | `model.toolIds[]`                    | Tool files              | `- end-call-tool`                         |
-| Assistant     | `artifactPlan.structuredOutputIds[]` | Structured Output files | `- customer-data`                         |
-| Squad         | `members[].assistantId`              | Assistant files         | `assistantId: intake-agent-a1b2c3d4`      |
-| Squad handoff | `destinations[].assistantName`       | Assistant `name` field  | `assistantName: Booking Assistant`        |
+| Assistant     | `model.toolIds[]`                    | Tool files              | `- end-call-tool`                          |
+| Assistant     | `artifactPlan.structuredOutputIds[]` | Structured Output files | `- customer-data`                          |
+| Squad         | `members[].assistantId`              | Assistant files         | `assistantId: intake-agent-a1b2c3d4`       |
+| Squad handoff | `destinations[].assistantName`       | Assistant `name` field  | `assistantName: Booking Assistant`         |
 | Simulation    | `personalityId`                      | Personality files       | `personalityId: skeptical-sam-a0000001`   |
 | Simulation    | `scenarioId`                         | Scenario files          | `scenarioId: happy-path-booking-a0000002` |
 | Suite         | `simulationIds[]`                    | Simulation test files   | `- booking-test-1-a0000001`               |
@@ -739,26 +737,35 @@ Concrete example conversations showing expected behavior.
 ## Available Commands
 
 ```bash
+# Setup
+npm run setup                                      # Interactive wizard: API key, org slug, resource selection
+
 # Sync
-npm run pull:dev              # Pull from Vapi (preserve local changes)
-npm run pull:dev:force        # Pull from Vapi (overwrite everything)
-npm run pull:dev:bootstrap    # Refresh state without writing remote resources locally
-npm run pull:dev -- squads --id <uuid>  # Pull one known remote resource by UUID
-# `--id` requires exactly one resource type; it will error if omitted or combined with multiple types
-npm run push:dev              # Push all local changes to Vapi
-npm run push:dev assistants   # Push only assistants
-npm run push:dev resources/dev/assistants/my-agent.md  # Push single file
+npm run pull -- <org>                              # Pull from Vapi (preserve local changes)
+npm run pull -- <org> --force                      # Pull from Vapi (overwrite everything)
+npm run pull -- <org> --bootstrap                  # Refresh state without writing remote resources locally
+npm run pull -- <org> --type squads --id <uuid>    # Pull one known remote resource by UUID
+npm run push -- <org>                              # Push all local changes to Vapi
+npm run push -- <org> assistants                   # Push only assistants
+npm run push -- <org> resources/<org>/assistants/my-agent.md  # Push single file
+npm run apply -- <org>                             # Pull then push (full sync)
 
 # Testing
-npm run call:dev -- -a <assistant-name>   # Call an assistant via WebSocket
-npm run call:dev -- -s <squad-name>       # Call a squad via WebSocket
-npm run mock:webhook                       # Run local webhook receiver for server message testing
+npm run call -- <org> -a <assistant-name>          # Call an assistant via WebSocket
+npm run call -- <org> -s <squad-name>              # Call a squad via WebSocket
+npm run eval -- <org> -s <squad-name>              # Run evals against a squad
+npm run eval -- <org> -a <assistant-name>          # Run evals against an assistant
+npm run mock:webhook                               # Run local webhook receiver for server message testing
+
+# Maintenance
+npm run cleanup -- <org>                           # Dry-run: show orphaned remote resources
+npm run cleanup -- <org> --force                   # Delete orphaned remote resources
 
 # Build
-npm run build                 # Type-check
+npm run build                                      # Type-check
 ```
 
-Replace `dev` with `prod` for production environment.
+All commands accept an org slug (e.g. `my-org`). Running without arguments launches interactive mode.
 
 ---
 
