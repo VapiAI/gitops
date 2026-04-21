@@ -71,7 +71,7 @@ interface VapiResource {
 }
 
 function readConfirmToken(argv: string[]): string | undefined {
-  // Accept either `--confirm <env>` or `--confirm=<env>`.
+  // Accept either `--confirm <slug>` or `--confirm=<slug>`.
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--confirm") return argv[i + 1];
@@ -98,8 +98,8 @@ async function main(): Promise<void> {
 
   // Destructive cleanup must be double-gated. `--force` alone is not enough
   // because it is easy to set habitually or copy from another command where
-  // it has a different meaning. Require `--confirm <env>` so the caller has
-  // to name the environment they intend to wipe.
+  // it has a different meaning. Require `--confirm <slug>` so the caller has
+  // to name the org they intend to wipe.
   if (!dryRun && confirmToken !== VAPI_ENV) {
     console.error(
       `❌ Refusing to run destructive cleanup without explicit confirmation.`,
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
 
   // A state file with zero tracked resources is almost always a fresh clone,
   // a corrupted state, or a bootstrap that has not written yet. Deleting from
-  // that baseline would wipe the org. Block it explicitly.
+  // that baseline would wipe the entire org. Block it explicitly.
   if (!dryRun && stateIds.size === 0) {
     console.error(
       `❌ Refusing to run destructive cleanup: state file has 0 tracked resources.`,
@@ -180,6 +180,7 @@ async function main(): Promise<void> {
       endpoint: "/eval/simulation/suite",
       deleteEndpoint: "/eval/simulation/suite",
     },
+    { name: "evals", endpoint: "/eval", deleteEndpoint: "/eval" },
   ];
 
   for (const { name, endpoint, deleteEndpoint } of resourceTypes) {
@@ -242,7 +243,9 @@ async function main(): Promise<void> {
     );
     console.log("🔒 DRY-RUN MODE - No resources were deleted");
     console.log("   To actually delete, run:");
-    console.log(`   npm run cleanup -- ${VAPI_ENV} --force`);
+    console.log(
+      `   npm run cleanup -- ${VAPI_ENV} --force --confirm ${VAPI_ENV}`,
+    );
     console.log(
       "═══════════════════════════════════════════════════════════════\n",
     );

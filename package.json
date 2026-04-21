@@ -13,8 +13,8 @@
     "call": "tsx src/call-cmd.ts",
     "cleanup": "tsx src/cleanup-cmd.ts",
     "eval": "tsx src/eval.ts",
-    "mock:webhook": "tsx scripts/mock-vapi-webhook-server.ts",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

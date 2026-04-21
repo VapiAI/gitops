@@ -205,7 +205,7 @@ async function checkMicrophonePermission(): Promise<boolean> {
       // sox not installed or permission denied
       console.log("⚠️  Could not verify microphone access.");
       console.log(
-        "   If prompted, please grant microphone permission in System Preferences.",
+        "   If prompted, please grant microphone permission in System Settings.",
       );
       console.log(
         "   System Settings > Privacy & Security > Microphone\n",

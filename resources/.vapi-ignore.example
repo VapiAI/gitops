@@ -1,12 +1,18 @@
 # .vapi-ignore — explicit opt-out for resources this repo does NOT manage.
 #
-# Resources matching any pattern below are skipped during `pull:<env>` —
-# never written to disk, never tracked in state. Use this for:
+# Resources matching any pattern below are skipped during `npm run pull --
+# <org>` — never written to disk, never tracked in state. Use this for:
 #   - Resources owned by another team or repo
 #   - Legacy/broken resources you don't want to touch
 #   - Resource types you don't care about (e.g. an entire `simulations/**`)
 #
-# To activate this file, copy it to `.vapi-ignore` (no `.example` suffix).
+# To activate this file, copy it into your org's resource directory and drop
+# the `.example` suffix:
+#
+#   cp resources/.vapi-ignore.example resources/<org>/.vapi-ignore
+#
+# Each org gets its own file — the engine reads
+# `resources/<org>/.vapi-ignore` on every pull for that org.
 #
 # ─────────────────────────────────────────────────────────────────────
 # Pattern syntax
@@ -16,6 +22,7 @@
 #   - tools/...
 #   - squads/...
 #   - structuredOutputs/...
+#   - evals/...
 #   - simulations/personalities/...
 #   - simulations/scenarios/...
 #   - simulations/tests/...

@@ -75,10 +75,10 @@ Every command works in two modes:
 | `npm run push` | ✅ | `npm run push -- <org> [flags]` | Push local resources to Vapi |
 | `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | Pull → Merge → Push in one shot |
 | `npm run call` | ✅ | `npm run call -- <org> -a <name>` | Start a WebSocket call |
-| `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force]` | Delete orphaned remote resources |
+| `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Delete orphaned remote resources (destructive run requires `--confirm <org>`) |
 | `npm run eval` | — | `npm run eval -- <org> -s <squad>` | Run evals against an assistant/squad |
-| `npm run mock:webhook` | — | — | Local webhook receiver for testing |
 | `npm run build` | — | — | Type-check the codebase |
+| `npm test` | — | — | Run regression tests (`node:test`) |
 
 ### Interactive Mode
 
@@ -95,15 +95,24 @@ npm run pull
 # → Select org
 # → All resources / Let me pick…
 # → Shows which resources are already local (✔)
+# → "Overwrite locally modified files?" — defaults to NO (local-first)
 # → Confirm and execute
+
+npm run cleanup
+# → Select org
+# → Dry-run preview of what would be deleted
+# → "Proceed with actual deletion?" — defaults to NO
+# → Destructive run is gated by both your confirm AND --confirm <org>
 ```
 
 Navigation:
 - **Type** to search/filter resources
-- **Space** to toggle selection
-- **Ctrl+A** to select/deselect all visible
+- **Space** to toggle the focused row (or toggle the whole group when the cursor is on a header)
+- **Ctrl+A** to select/deselect all currently-visible rows
+- **Ctrl+G** to toggle every item in the focused group
+- **→ / ←** (right / left arrow) to expand or collapse the focused group
 - **Enter** to confirm
-- **Esc** to go back to the previous step
+- **Esc** to clear the search; press again to step back to the previous prompt
 
 ### Direct Mode
 
@@ -221,7 +230,20 @@ npm run pull -- my-org
 # ✨  new-tool -> resources/my-org/tools/new-tool.yml
 ```
 
-Use `--force` to overwrite everything with the platform version.
+Detection works in two layers, so it covers both day-to-day and fresh-clone
+workflows:
+
+1. **Git-tracked changes** — files that show up in `git status` (modified,
+   deleted, or individually untracked) are preserved.
+2. **mtime fallback** — if git can't help (no commits yet, the resource tree
+   isn't tracked at all, or git just had nothing to say), files that are
+   newer than `.vapi-state.<org>.json` are still preserved. This is the safety
+   net for the "fresh clone, edit a file, run pull again" case.
+
+Interactive `npm run pull` defaults to local-first too — it asks
+`Overwrite locally modified files?` (default `No`) before forwarding the
+pull. Pass `--force` directly (or answer `Yes` to that prompt) to overwrite
+everything with the platform version.
 
 ### Selective Push
 
@@ -232,12 +254,22 @@ Push only specific resources instead of everything:
 npm run push -- my-org assistants
 npm run push -- my-org tools
 
-# By specific file
+# By specific file (long form)
 npm run push -- my-org resources/my-org/assistants/my-assistant.md
+
+# By specific file (short form — folder/filename)
+npm run push -- my-org assistants/my-assistant.md
+npm run push -- my-org simulations/personalities/skeptical-sam.yml
 
 # Multiple files
 npm run push -- my-org resources/my-org/assistants/a.md resources/my-org/tools/b.yml
 ```
+
+> A bare resource id like `npm run push -- my-org my-assistant` (no folder,
+> no extension) is **rejected explicitly**. The CLI prints
+> `Unrecognized argument: my-assistant` and exits with a non-zero code rather
+> than silently falling through to a full apply. Pass either a type
+> (`assistants`) or a path (`assistants/my-assistant.md`).
 
 ### Auto-Dependency Resolution
 
@@ -272,18 +304,6 @@ npm run eval -- my-org -s my-squad -v eval-variables.json
 ```
 
 Evals must be pushed first (`npm run push -- my-org evals`). Eval definitions live in `resources/<org>/evals/*.yml`.
-
-### Webhook Local Testing
-
-```bash
-# 1) Run local receiver
-npm run mock:webhook
-
-# 2) Expose localhost
-ngrok http 8787
-```
-
-Set your assistant's `server.url` to the ngrok HTTPS URL.
 
 ---
 
@@ -497,7 +517,17 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 vapi-gitops/
 ├── docs/
 │   ├── Vapi Prompt Optimization Guide.md
+<<<<<<< HEAD
 │   └── changelog.md
+=======
+│   ├── changelog.md
+│   └── learnings/                      # Gotchas, recipes, troubleshooting per area
+│       ├── assistants.md
+│       ├── tools.md
+│       ├── squads.md
+│       ├── simulations.md
+│       └── ...
+>>>>>>> e280ea5 (docs: align README and AGENTS with org-slug model and P0 fixes)
 ├── src/
 │   ├── setup.ts               # Interactive setup wizard
 │   ├── interactive.ts          # Interactive pull/push/apply/call/cleanup flows
@@ -533,8 +563,12 @@ vapi-gitops/
 │           ├── scenarios/
 │           ├── tests/
 │           └── suites/
-├── scripts/
-│   └── mock-vapi-webhook-server.ts
+├── tests/
+│   ├── credentials.test.ts     # Credential walker scoping (P0-1 regression suite)
+│   ├── clean-resource.test.ts  # null-preservation in pull (P0-3 regression suite)
+│   ├── path-matching.test.ts   # Short-form path matching (P0-7 regression suite)
+│   ├── cleanup-safety.test.ts  # --confirm + empty-state gates (P0-4 regression suite)
+│   └── cli-arg-parsing.test.ts # Bare-id refusal, --confirm pass-through (P0-7)
 ├── .env.<org>                  # API token per org (gitignored)
 └── .vapi-state.<org>.json      # State file per org
 ```
@@ -591,6 +625,42 @@ The credential UUID doesn't exist in the target org. Fix:
 ### "property X should not exist" API errors
 
 Some properties can't be updated after creation. Add them to `UPDATE_EXCLUDED_KEYS` in `src/config.ts`.
+
+### "Refusing to run destructive cleanup" errors
+
+`npm run cleanup` is intentionally double-gated for destructive runs:
+
+- `--force` alone is not enough — you also have to name the org with
+  `--confirm <org>`. This catches the common mistake of copy-pasting `--force`
+  from another command where it had a different meaning.
+- An empty state file (zero tracked resources) is refused even with both
+  flags. This prevents a fresh clone or a corrupted state from being misread
+  as "all remote resources are orphaned" and wiping the org.
+
+```bash
+# Wrong — refused
+npm run cleanup -- my-org --force
+
+# Right — destructive run
+npm run cleanup -- my-org --force --confirm my-org
+
+# Bootstrapping into an empty state? Pull first.
+npm run pull -- my-org --bootstrap
+```
+
+The interactive `npm run cleanup` flow handles both gates for you (it shows
+the dry-run preview, asks you to confirm, and forwards `--force --confirm
+<org>` automatically when you say yes).
+
+### "Unrecognized argument" / push appears to do nothing
+
+If you typed `npm run push -- my-org foo` (a bare resource id with no folder
+or extension), the CLI now refuses with `Unrecognized argument: foo` rather
+than silently running a full apply. Pass either:
+
+- a resource type — `npm run push -- my-org assistants`, or
+- a path — `npm run push -- my-org assistants/foo.yml` (short form)
+  or `npm run push -- my-org resources/my-org/assistants/foo.yml` (long form).
 
 ---
 

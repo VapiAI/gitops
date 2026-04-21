@@ -125,8 +125,8 @@ export async function loadResources<T>(
     const ext = extname(filePath);
 
     // Compute resourceId as path relative to the resource type directory, without extension
-    // e.g., /resources/assistants/support/intake.yml → support/intake
-    // e.g., /resources/assistants/inbound-support.yml → inbound-support (backwards compatible)
+    // e.g., /resources/<org>/assistants/support/intake.yml → support/intake
+    // e.g., /resources/<org>/assistants/inbound-support.yml → inbound-support
     const relativePath = relative(resourceDir, filePath);
     const resourceId = relativePath.slice(0, -ext.length);
 

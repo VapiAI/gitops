@@ -10,7 +10,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **Template-safe first run:** In a fresh clone, prefer `npm run pull -- <org> --bootstrap` to refresh `.vapi-state.<org>.json` and credential mappings without materializing the target org's resources into `resources/<org>/`. `npm run push -- <org>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
 
-**Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being pulled at all (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<env>/.vapi-ignore` with gitignore-style patterns. See `resources/<env>/.vapi-ignore.example` for syntax and examples. Ignored resources are silently skipped on every pull and never tracked in state — distinct from "locally deleted" which keeps an entry in state.
+**Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being pulled at all (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<org>/.vapi-ignore` with gitignore-style patterns. See `resources/.vapi-ignore.example` for syntax and examples. Ignored resources are silently skipped on every pull and never tracked in state — distinct from "locally deleted" which keeps an entry in state.
 
 **Learnings & recipes:** Before configuring resources or debugging issues, read the relevant file in **`docs/learnings/`**. Load only what you need:
 
@@ -46,7 +46,6 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
 | Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
 | Promote resources across orgs       | Copy files between `resources/<org-a>/` and `resources/<org-b>/`                  |
-| Test webhook event delivery locally | Run `npm run mock:webhook` and tunnel with ngrok                                  |
 | Push changes to Vapi                | `npm run push -- <org>`                                                           |
 | Pull latest from Vapi               | `npm run pull -- <org>`, `--force`, or `--bootstrap`                              |
 | Pull one known remote resource      | `npm run pull -- <org> --type assistants --id <uuid>`                             |
@@ -88,9 +87,6 @@ resources/
 │   └── simulations/
 └── <another-org>/           # Another org (each is isolated)
     └── (same structure)
-
-scripts/
-└── mock-vapi-webhook-server.ts        # Local webhook receiver for server message testing
 ```
 
 ---
@@ -755,7 +751,6 @@ npm run call -- <org> -a <assistant-name>          # Call an assistant via WebSo
 npm run call -- <org> -s <squad-name>              # Call a squad via WebSocket
 npm run eval -- <org> -s <squad-name>              # Run evals against a squad
 npm run eval -- <org> -a <assistant-name>          # Run evals against an assistant
-npm run mock:webhook                               # Run local webhook receiver for server message testing
 
 # Maintenance
 npm run cleanup -- <org>                           # Dry-run: show orphaned remote resources
@@ -844,12 +839,3 @@ When transferring to human:
 4. Create suites (batch simulations together)
 5. Run via Vapi dashboard or API
 
-### Mock Server Testing (Webhook/Message Receipt)
-
-If you need a local mock server to validate webhook payloads or message delivery behavior, you can add scripts under `/scripts` (for example: `scripts/mock-vapi-webhook-server.ts`) and run them locally during testing.
-
-- Default expectation: no provider API key is needed for local receive-only mock testing.
-- If a provider-specific key is required, refer to the Vapi monorepo secrets workflow and use `dotenvx` to decrypt the needed values.
-- Assume decryption only works when the corresponding private keys are already available in your zsh environment.
-- For local webhook validation, prioritize core `serverMessages` event types such as `speech-update`, `status-update`, and `end-of-call-report`.
-- To test callbacks from Vapi into your local machine, expose the mock server with a tunnel like `ngrok` and use that public HTTPS URL in `assistant.server.url`.

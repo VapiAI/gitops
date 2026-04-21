@@ -107,6 +107,14 @@ function parseFlags(): {
 
     if (arg === "--force" || arg === "--bootstrap") continue;
 
+    // --confirm <slug>: consumed by cleanup.ts directly. Eat the value here so
+    // parseFlags' strict-arg check below doesn't trip on the slug.
+    if (arg === "--confirm" && args[i + 1]) {
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--confirm=")) continue;
+
     // --type / -t (repeatable): accumulate resource types
     if ((arg === "--type" || arg === "-t") && args[i + 1]) {
       const typeArg = args[i + 1]!;
@@ -144,7 +152,25 @@ function parseFlags(): {
     // File path
     if (arg.includes("/") || /\.(yml|yaml|md|ts)$/.test(arg)) {
       filePaths.push(arg);
+      continue;
     }
+
+    // Unknown long flags pass through (forward-compatibility for future
+    // flags consumed by individual commands like cleanup/eval).
+    if (arg.startsWith("--")) continue;
+
+    // Bare positional that didn't match anything. Refuse explicitly so the
+    // user does not silently run a full apply when they meant a partial. The
+    // previous behavior was to silently drop the argument; for bare resource
+    // ids (e.g. `npm run push -- <org> foo`) this triggered a full apply
+    // with full orphan-deletion check, which can wipe state with `--force`.
+    console.error(`❌ Unrecognized argument: ${arg}`);
+    console.error(
+      `   Expected a resource type (e.g. assistants, tools), a folder path ` +
+        `(e.g. assistants/foo.yml or resources/<org>/assistants/foo.yml), or ` +
+        `a flag (--force, --bootstrap, --type, --id).`,
+    );
+    process.exit(1);
   }
 
   if (filePaths.length > 0) {
@@ -163,8 +189,8 @@ function parseFlags(): {
 
 function loadEnvFile(env: string, baseDir: string): void {
   const envFiles = [
-    join(baseDir, `.env.${env}`), // .env.dev, .env.stg, .env.prod
-    join(baseDir, `.env.${env}.local`), // .env.dev.local (for local overrides)
+    join(baseDir, `.env.${env}`), // e.g. .env.my-org
+    join(baseDir, `.env.${env}.local`), // e.g. .env.my-org.local (local overrides)
     join(baseDir, ".env.local"), // .env.local (always loaded last)
   ];
 
@@ -223,7 +249,9 @@ export const VAPI_BASE_URL = process.env.VAPI_BASE_URL || "https://api.vapi.ai";
 
 if (!VAPI_TOKEN) {
   console.error("❌ VAPI_TOKEN environment variable is required");
-  console.error("   Create a .env.dev file with: VAPI_TOKEN=your-token");
+  console.error(
+    `   Create a .env.${VAPI_ENV} file with: VAPI_TOKEN=your-token`,
+  );
   process.exit(1);
 }
 

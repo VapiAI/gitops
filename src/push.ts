@@ -96,6 +96,10 @@ async function upsertResourceWithStateRecovery(options: {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Must stay in sync with `VALID_RESOURCE_TYPES` in `src/types.ts`. Used by
+// `hasAnyLoadedResources`, `getTargetedResourceTypes`, and the credential /
+// state-sanity checks — dropping a type here silently disables those
+// pre-flight checks for that type.
 const ALL_RESOURCE_TYPES: ResourceType[] = [
   "tools",
   "structuredOutputs",
@@ -105,6 +109,7 @@ const ALL_RESOURCE_TYPES: ResourceType[] = [
   "scenarios",
   "simulations",
   "simulationSuites",
+  "evals",
 ];
 
 function warnUnresolvedCredentials(
@@ -610,12 +615,31 @@ function isPartialApply(): boolean {
   );
 }
 
+// Match a CLI-supplied path against a folder name. Common shapes the user
+// can pass:
+//   - `resources/<org>/assistants/foo.yml`
+//   - `./resources/<org>/assistants/foo.yml`
+//   - `assistants/foo.yml`            ← short form
+//   - `assistants/support/intake.yml` ← short form with subdir
+//   - absolute path
+// The previous version only matched `/<folder>/` (with a leading slash),
+// so the short form silently no-op'd: the type was never loaded into the
+// apply pipeline and the more permissive `filterResourcesByPaths` was
+// never even consulted.
+export function pathMatchesFolder(filePath: string, folder: string): boolean {
+  return (
+    filePath === folder ||
+    filePath.startsWith(`${folder}/`) ||
+    filePath.startsWith(`${folder}\\`) ||
+    filePath.includes(`/${folder}/`) ||
+    filePath.includes(`\\${folder}\\`)
+  );
+}
+
 function shouldApplyResourceType(type: ResourceType): boolean {
   if (APPLY_FILTER.filePaths?.length) {
     const folder = FOLDER_MAP[type];
-    return APPLY_FILTER.filePaths.some(
-      (fp) => fp.includes(`/${folder}/`) || fp.includes(`\\${folder}\\`),
-    );
+    return APPLY_FILTER.filePaths.some((fp) => pathMatchesFolder(fp, folder));
   }
   if (APPLY_FILTER.resourceTypes?.length) {
     return APPLY_FILTER.resourceTypes.includes(type);
@@ -1257,6 +1281,9 @@ async function main(): Promise<void> {
       console.error(
         "\n⚠️  Failed to persist state file after apply:",
         saveError instanceof Error ? saveError.message : saveError,
+      );
+      console.error(
+        `   Local state may be out of sync with platform. Run \`npm run pull -- ${VAPI_ENV} --bootstrap\` to recover.`,
       );
     }
   }

@@ -99,13 +99,23 @@ function gitHasCommits(): boolean {
 }
 
 // Returns relative paths of all locally modified, deleted, or untracked files.
-// Uses `-z` (null-terminated) format so filenames containing spaces, newlines,
-// or quotes parse correctly without the ad-hoc quote/arrow stripping that the
-// plain porcelain format requires. With `-z`, renames emit two separate
-// null-terminated records: `XY new\0old\0` — we want `new`, so we consume
-// the record after any `R`/`C` status.
+//
+// Two flags matter here:
+//
+// - `--untracked-files=all`: by default, `git status --porcelain` collapses
+//   untracked directories to a single entry like `?? resources/<org>/`. In a
+//   fresh-clone workflow where the resource tree is not yet tracked, that
+//   collapsed entry would not match the per-file lookup downstream and locally
+//   edited files would silently get overwritten on pull. `=all` forces git to
+//   list each individual file.
+//
+// - `-z` (null-terminated): so filenames containing spaces, newlines, or
+//   quotes parse correctly without the ad-hoc quote/arrow stripping that the
+//   plain porcelain format requires. With `-z`, renames emit two separate
+//   null-terminated records: `XY new\0old\0` — we want `new`, so we consume
+//   the record after any `R`/`C` status.
 function getLocallyChangedFiles(): Set<string> {
-  const status = gitCmd("status --porcelain -z");
+  const status = gitCmd("status --porcelain --untracked-files=all -z");
   const files = new Set<string>();
   const records = status.split("\0");
   for (let i = 0; i < records.length; i++) {
@@ -332,7 +342,9 @@ function removeUuidMappings(
 // Resource Processing
 // ─────────────────────────────────────────────────────────────────────────────
 
-function cleanResource(resource: VapiResource): Record<string, unknown> {
+export function cleanResource(
+  resource: VapiResource,
+): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
 
   // Preserve `null` values: the API uses `null` to represent an intentionally
@@ -704,7 +716,17 @@ export async function pullResourceType(
         folderPath,
         `${resourceId}.yml`,
       );
-      if (changedFiles.has(mdPath) || changedFiles.has(ymlPath)) {
+      const yamlPath = join(
+        "resources",
+        VAPI_ENV,
+        folderPath,
+        `${resourceId}.yaml`,
+      );
+      if (
+        changedFiles.has(mdPath) ||
+        changedFiles.has(ymlPath) ||
+        changedFiles.has(yamlPath)
+      ) {
         console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
         newStateSection[resourceId] = resource.id;
         skipped++;
@@ -712,20 +734,33 @@ export async function pullResourceType(
       }
     }
 
-    // Skip locally edited files even without git (mtime-based detection)
-    // If the resource file is newer than the state file, it was locally modified
-    if (!bootstrap && !force && !isNew && !changedFiles) {
+    // Skip locally edited files even without git (mtime-based detection).
+    // If the resource file is newer than the state file, it was locally
+    // modified after the last successful pull. This is the safety net for the
+    // fresh-clone case: if git either isn't enabled at all OR has nothing
+    // useful to say about the resource tree (untracked, no changes, etc.),
+    // fall through here. The bug we are guarding against was treating an
+    // empty `changedFiles` Set as "git already gave us the answer" — it has
+    // not, and the mtime check must run.
+    if (
+      !bootstrap &&
+      !force &&
+      !isNew &&
+      (!changedFiles || changedFiles.size === 0)
+    ) {
       const dir = join(RESOURCES_DIR, folderPath);
-      const localFile =
-        [join(dir, `${resourceId}.md`), join(dir, `${resourceId}.yml`), join(dir, `${resourceId}.yaml`)]
-          .find((p) => existsSync(p));
+      const localFile = [
+        join(dir, `${resourceId}.md`),
+        join(dir, `${resourceId}.yml`),
+        join(dir, `${resourceId}.yaml`),
+      ].find((p) => existsSync(p));
       if (localFile) {
         const stateFilePath = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
         if (existsSync(stateFilePath)) {
           const localMtime = statSync(localFile).mtimeMs;
           const stateMtime = statSync(stateFilePath).mtimeMs;
           if (localMtime > stateMtime) {
-            console.log(`   ⏭️  ${resourceId} (locally modified, skipping)`);
+            console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
             newStateSection[resourceId] = resource.id;
             skipped++;
             continue;
