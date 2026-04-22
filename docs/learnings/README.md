@@ -23,6 +23,7 @@ Each file targets a specific topic so you can load only the context you need.
 | Building a multilingual agent (English/Spanish, language switching) | [multilingual.md](multilingual.md) |
 | Streaming audio via WebSocket transport | [websocket.md](websocket.md) |
 | Building an outbound calling agent | [outbound-agents.md](outbound-agents.md) |
+| Bulk-dialing from a CSV (Outbound Call Campaigns) | [outbound-campaigns.md](outbound-campaigns.md) |
 | Voicemail detection / VM vs human classification | [voicemail-detection.md](voicemail-detection.md) |
 | Enforcing call time limits / graceful call ending | [call-duration.md](call-duration.md) |
 
@@ -59,6 +60,7 @@ Proven patterns and setup guides:
 | File | What it covers |
 |------|----------------|
 | [outbound-agents.md](outbound-agents.md) | Outbound agent design, IVR navigation (DTMF), opening statements, identity handling, pacing, conversation flow, metrics |
+| [outbound-campaigns.md](outbound-campaigns.md) | Outbound Call Campaigns feature: CSV format, dynamic variables (extra columns → `variableValues`), concurrency, scheduling, completion semantics |
 | [latency.md](latency.md) | Pipeline latency budget, quick-win matrix, iron triangle, model selection, prompt optimization, endpointing tuning |
 | [fallbacks.md](fallbacks.md) | Error-handling hooks, endedReason filters, transcriber/voice fallback chains, phone number fallback |
 | [azure-openai-fallback.md](azure-openai-fallback.md) | BYOK Azure OpenAI multi-region setup, credential isolation, region pinning, runtime failover behavior |
