@@ -92,7 +92,7 @@ Pronunciation dictionaries control how TTS voices say specific words. They are *
 | **ElevenLabs** | Phoneme rules (IPA/CMU, English only) + alias rules (all languages) | `pronunciationDictionaryLocators` on voice config | Phoneme: `eleven_turbo_v2`, `eleven_flash_v2`. Alias: all models |
 | **Vapi built-in** | None | N/A | N/A |
 
-**Cartesia pronunciation dictionaries** are created via the Vapi API (`POST /provider/cartesia/pronunciation-dictionary`), then referenced by ID in the voice config. This is the same pattern as `credentialId` — the provider resource lives outside gitops, the reference is gitops-managed.
+**Pronunciation dictionaries** are created via the Vapi API, then referenced by ID in the voice config. This is the same pattern as `credentialId` — the provider resource lives outside gitops, the reference is gitops-managed.
 
 ```yaml
 voice:
@@ -101,6 +101,76 @@ voice:
   voiceId: your-voice-id
   pronunciationDictId: pdict_xxxxxxxxxxxxx
 ```
+
+#### Cartesia CRUD
+
+**Create** a new dictionary:
+
+```bash
+curl -X POST "https://api.vapi.ai/provider/cartesia/pronunciation-dictionary" \
+  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Pronunciation Dictionary",
+    "items": [
+      { "text": "MyBrand", "alias": "my-brand" },
+      { "text": "API", "alias": "ay pee eye" }
+    ]
+  }'
+```
+
+**Update** an existing dictionary — use `itemsToAdd` and/or `itemsToRemove`:
+
+```bash
+curl -X PATCH \
+  "https://api.vapi.ai/provider/cartesia/pronunciation-dictionary/<vapi-resource-uuid>" \
+  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "itemsToAdd": [{ "text": "NewTerm", "alias": "new-term" }],
+    "itemsToRemove": ["OldTerm"]
+  }'
+```
+
+**List** all dictionaries: `GET /provider/cartesia/pronunciation-dictionary`
+
+**Delete** a dictionary: `DELETE /provider/cartesia/pronunciation-dictionary/<vapi-resource-uuid>`
+
+**Gotcha — alias style matters:** Period-separated aliases (e.g. `"B. 2. B."`) create sentence boundaries in Cartesia Sonic-3, producing choppy pronunciation with micro-pauses. Use sounds-like aliases instead (e.g. `"bee to bee"`). This is the Cartesia-recommended approach for acronyms.
+
+#### ElevenLabs CRUD
+
+ElevenLabs dictionaries use `rules` instead of `items`. The `rules` field supports two rule types: `alias` (all models, all languages) and `phoneme` (IPA/CMU, English only, `eleven_turbo_v2` / `eleven_flash_v2`).
+
+**Create** a new dictionary:
+
+```bash
+curl -X POST "https://api.vapi.ai/provider/11labs/pronunciation-dictionary" \
+  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My ElevenLabs Dictionary",
+    "rules": [
+      { "string_to_replace": "MyBrand", "type": "alias", "alias": "my-brand" }
+    ]
+  }'
+```
+
+**Update** an existing dictionary — `rules` must be the **only** field in the body:
+
+```bash
+curl -X PATCH \
+  "https://api.vapi.ai/provider/11labs/pronunciation-dictionary/<vapi-resource-uuid>" \
+  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rules": [
+      { "string_to_replace": "NewTerm", "type": "alias", "alias": "new-term" }
+    ]
+  }'
+```
+
+**Gotcha — strict validation on PATCH:** If `rules` is missing, the API returns `"Rules are required to update a pronunciation dictionary"`. If any other fields are present alongside `rules`, it returns `"Only rules can be updated for a pronunciation dictionary"`.
 
 **Recommendation:** For multilingual use cases, Cartesia sonic-3 with a pronunciation dictionary is the strongest option — IPA works across all languages. Combine with prompt-level pronunciation rules (belt-and-suspenders) and transcriber `keyterm` for a three-layer approach: TTS output, LLM text generation, and STT input.
 
