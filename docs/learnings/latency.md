@@ -103,6 +103,22 @@ For English, use [LiveKit Smart Endpointing](https://docs.vapi.ai/customization/
 
 See [assistants.md](assistants.md) for `waitSeconds` vs `smartEndpointingPlan` interaction details.
 
+### Deepgram Flux: eager end-of-turn for sub-budget LLM time
+
+If you're already pushing latency budgets on Deepgram Nova-3, switching to a Flux model (`flux-general-en` / `flux-general-multi`) and setting `eagerEotThreshold` lets the LLM begin generating *before* the user fully stops speaking. Deepgram emits an `EagerEndOfTurn` event below the EOT confidence threshold so Vapi can speculatively start the LLM call; a later `TurnResumed` cancels the speculation if the user keeps talking.
+
+Trade-off: more LLM calls (some get cancelled) for lower end-to-end latency on the turns that complete cleanly. Best for low-latency, high-volume agents that can absorb the extra LLM cost.
+
+```yaml
+transcriber:
+  provider: deepgram
+  model: flux-general-en
+  eagerEotThreshold: 0.4   # earlier triggers, more cancellations
+  eotThreshold: 0.7
+```
+
+See [assistants.md → Deepgram Flux](assistants.md) for the full field reference and gotchas (Vapi vs Deepgram range mismatches, no cross-field validation).
+
 ---
 
 ## Interruption Design (Barge-In)

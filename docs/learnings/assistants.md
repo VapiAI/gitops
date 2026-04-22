@@ -82,6 +82,50 @@ transcriber:
     - technical-acronym
 ```
 
+### Deepgram Flux: end-of-turn detection knobs
+
+Vapi exposes all four of Deepgram Flux's end-of-turn detection parameters on the `transcriber` schema. They only apply when `model` starts with `flux-`.
+
+| Vapi field | Deepgram param | Vapi range | Default |
+|---|---|---|---|
+| `eotThreshold` | `eot_threshold` | 0.5 – 0.9 | 0.7 |
+| `eagerEotThreshold` | `eager_eot_threshold` | 0 – 1 | unset (eager mode disabled) |
+| `eotTimeoutMs` | `eot_timeout_ms` | 500 – 10000 | 5000 |
+| `languageHint` | `language_hint` | array of BCP-47 codes | unset |
+
+**Dashboard exposes only `eotThreshold` and `eotTimeoutMs`.** `eagerEotThreshold` and `languageHint` are API-only fields — set them in your gitops yaml frontmatter and the engine PATCHes them straight through.
+
+**`eagerEotThreshold` enables a separate event class.** Setting any value turns on Deepgram's `EagerEndOfTurn` events, which let the LLM start generating speculatively before the user fully stops (with `TurnResumed` cancellations if the user keeps talking). This is the main reason to use Flux over Nova-3 — see [latency.md](latency.md) for the trade-off.
+
+**`languageHint` is silently dropped on non-`flux-general-multi` models.** No error — if you set it on `flux-general-en` it just won't apply.
+
+**Vapi doesn't enforce Deepgram's `eager_eot_threshold ≤ eot_threshold` rule.** A bad combination passes Vapi validation and fails at the Deepgram websocket. Keep `eagerEotThreshold` strictly less than `eotThreshold`.
+
+**Vapi's `eagerEotThreshold` validator is looser than Deepgram's.** Vapi accepts `0–1` but Deepgram only accepts `0.3–0.9`. Stay inside `0.3–0.9` to be safe.
+
+```yaml
+transcriber:
+  provider: deepgram
+  model: flux-general-en
+  eotThreshold: 0.7
+  eagerEotThreshold: 0.4
+  eotTimeoutMs: 6000
+```
+
+Multilingual variant:
+
+```yaml
+transcriber:
+  provider: deepgram
+  model: flux-general-multi
+  eotThreshold: 0.7
+  languageHint:
+    - en
+    - es
+```
+
+See [Deepgram's Flux configuration guide](https://developers.deepgram.com/docs/flux/configuration) for tuning recommendations across simple / low-latency / high-reliability / complex-pipeline modes.
+
 ### Pronunciation dictionaries (TTS-level)
 
 Pronunciation dictionaries control how TTS voices say specific words. They are **provider-specific**:
