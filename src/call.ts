@@ -435,7 +435,9 @@ async function connectWebSocket(
 
     // Graceful shutdown
     const cleanup = () => {
-      console.log("\n👋 Ending call...");
+      clearWrittenLine(process.stdout, lastTranscript);
+      lastTranscript = "";
+      console.log("👋 Ending call...");
       if (micStream) {
         micStream.stop();
       }
@@ -508,10 +510,67 @@ async function connectWebSocket(
     };
 
     ws.onclose = (event) => {
-      console.log(`\n📴 Call ended (code: ${event.code})`);
+      clearWrittenLine(process.stdout, lastTranscript);
+      lastTranscript = "";
+      console.log(`📴 Call ended (code: ${event.code})`);
       cleanup();
     };
   });
+}
+
+// Approximate terminal display width of a string. Most terminals render
+// emojis and CJK glyphs as 2 cells and ASCII as 1; we use a coarse range
+// check rather than pulling in a full Unicode width table. Iteration is by
+// code point so surrogate pairs (emoji) count once.
+function getDisplayWidth(text: string): number {
+  let width = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === 0xfe0f || (code >= 0x200b && code <= 0x200f)) {
+      // Variation selectors / zero-width joiners: no display width
+      continue;
+    }
+    if (
+      (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
+      (code >= 0x2e80 && code <= 0x303e) || // CJK radicals / punctuation
+      (code >= 0x3041 && code <= 0x33ff) || // Hiragana, Katakana, etc.
+      (code >= 0x3400 && code <= 0x4dbf) || // CJK Extension A
+      (code >= 0x4e00 && code <= 0x9fff) || // CJK Unified Ideographs
+      (code >= 0xa000 && code <= 0xa4cf) || // Yi Syllables
+      (code >= 0xac00 && code <= 0xd7a3) || // Hangul Syllables
+      (code >= 0xf900 && code <= 0xfaff) || // CJK Compatibility Ideographs
+      (code >= 0xfe30 && code <= 0xfe4f) || // CJK Compatibility Forms
+      (code >= 0xff00 && code <= 0xff60) || // Fullwidth forms
+      (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth signs
+      (code >= 0x1f300 && code <= 0x1f64f) || // Emoji: misc symbols / pictographs / emoticons
+      (code >= 0x1f680 && code <= 0x1f6ff) || // Emoji: transport / map
+      (code >= 0x1f900 && code <= 0x1f9ff) || // Supplemental symbols / pictographs
+      (code >= 0x1fa70 && code <= 0x1faff) || // Symbols & pictographs extended-A
+      (code >= 0x2600 && code <= 0x27bf) // Misc symbols, dingbats
+    ) {
+      width += 2;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
+// Erase the previously-written partial transcript, accounting for terminal
+// wrap. \r alone only returns to column 0 of the *current* row, so wrapped
+// content above the cursor would otherwise stay on screen and pile up as
+// the partial is rewritten over and over.
+function clearWrittenLine(stream: NodeJS.WriteStream, text: string): void {
+  if (!text || !stream.isTTY) return;
+  const cols = stream.columns || 80;
+  const rows = Math.max(1, Math.ceil(getDisplayWidth(text) / cols));
+
+  readline.cursorTo(stream, 0);
+  readline.clearLine(stream, 0);
+  for (let i = 1; i < rows; i++) {
+    readline.moveCursor(stream, 0, -1);
+    readline.clearLine(stream, 0);
+  }
 }
 
 function handleControlMessage(
@@ -523,20 +582,18 @@ function handleControlMessage(
     case "transcript": {
       const tm = message as TranscriptMessage;
       const prefix = tm.role === "user" ? "🎤 You" : "🤖 Assistant";
+      const line = `${prefix}: ${tm.transcript}`;
 
       if (tm.transcriptType === "final") {
-        // Clear partial and show final
-        process.stdout.write(
-          "\r" + " ".repeat(lastTranscript.length + 20) + "\r",
-        );
-        console.log(`${prefix}: ${tm.transcript}`);
+        clearWrittenLine(process.stdout, lastTranscript);
+        console.log(line);
         setLastTranscript("");
-      } else {
-        // Show partial (overwrite previous partial)
-        const line = `${prefix}: ${tm.transcript}`;
-        process.stdout.write(
-          "\r" + " ".repeat(lastTranscript.length + 20) + "\r",
-        );
+      } else if (process.stdout.isTTY) {
+        // Live partial overwrite only makes sense in a TTY. In non-TTY
+        // output (piped to a file, CI logs, etc.) every partial would
+        // print as its own line and produce huge spam — skip them and
+        // wait for the final.
+        clearWrittenLine(process.stdout, lastTranscript);
         process.stdout.write(line);
         setLastTranscript(line);
       }
@@ -546,7 +603,9 @@ function handleControlMessage(
       const sm = message as SpeechUpdateMessage;
       if (sm.status === "started") {
         const who = sm.role === "user" ? "You" : "Assistant";
-        console.log(`\n💬 ${who} started speaking...`);
+        clearWrittenLine(process.stdout, lastTranscript);
+        if (lastTranscript) setLastTranscript("");
+        console.log(`💬 ${who} started speaking...`);
       }
       break;
     }
@@ -565,7 +624,9 @@ function handleControlMessage(
         "assistant-not-found": "Assistant not found",
       };
       const label = cm.reason ? (reasonLabels[cm.reason] ?? cm.reason) : "unknown reason";
-      console.log(`\n📞 Call ended: ${label}`);
+      clearWrittenLine(process.stdout, lastTranscript);
+      if (lastTranscript) setLastTranscript("");
+      console.log(`📞 Call ended: ${label}`);
       break;
     }
     default:
