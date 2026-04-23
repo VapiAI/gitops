@@ -762,6 +762,27 @@ npm run build                                      # Type-check
 
 All commands accept an org slug (e.g. `my-org`). Running without arguments launches interactive mode.
 
+### `npm run call` CLI behavior
+
+The test-call CLI cleans its terminal output for the developer loop:
+
+- **Coalesced transcripts.** Chunked TTS providers (Cartesia Sonic, etc.) stream each utterance as 2–4 separate `final` transcript events. The CLI buffers consecutive finals from the same role and flushes them as one merged `🤖 Assistant:` / `🎤 You:` line after a 600 ms quiet window, on role change, on `speech-update` from the opposite role, on `call-ended`, and on Ctrl+C.
+- **Suppressed `mpg123` warnings.** macOS speaker output emits `Didn't have any audio data in callback (buffer underflow)` lines from native code on every chunk-boundary gap. The `npm run call` script wraps invocation in `bash -c` + a stderr filter that drops these lines so they no longer dominate the log. Requires `bash` on `PATH` (universal on macOS, Linux, WSL).
+- **Tool / handoff / status visibility.** The CLI surfaces previously-dropped WebSocket control messages:
+  - `🔧 Tool call: <name>(<args>)` — regular tool invocations
+  - `🔀 Handoff → <Target Name>` — squad handoffs (detected from `handoff_to_<Target_Name>` function names)
+  - `✅ Tool result: <name> → <preview>` / `❌ Tool failed: <name> → <preview>` — tool responses, truncated to 200 chars
+  - `📞 Status: <state>[+reason]` — `in-progress`, `forwarding`, `ended`
+  - `⚠️ Hang warning` — impending termination
+  - `🔀 Transfer → <destination>` — number / SIP / cross-assistant transfers
+- **Discovery mode.** Set `VAPI_CALL_DEBUG=1` in the environment to log unknown control message types (high-frequency events like `conversation-update`, `model-output`, `function-call`, `user-interrupted` are silently dropped by default to keep the log readable):
+
+  ```bash
+  VAPI_CALL_DEBUG=1 npm run call -- <org> -s <squad>
+  ```
+
+These are CLI-only changes — no runtime behavior change for the agent, no per-customer config required. Every downstream customer clone of this template inherits them automatically.
+
 ---
 
 ## Discovering Available Settings

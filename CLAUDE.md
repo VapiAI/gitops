@@ -25,3 +25,12 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
    - Multilingual agents → `docs/learnings/multilingual.md`
    - WebSocket transport → `docs/learnings/websocket.md`
    - Call time limits / graceful ending → `docs/learnings/call-duration.md`
+
+## Test-Call CLI Notes
+
+When debugging a customer issue with `npm run call -- <org> -s <squad>`:
+
+- Assistant utterances render as one coalesced line per turn (chunked TTS finals are buffered for 600 ms before flushing). If you need to see every raw final fragment for a transcriber/TTS investigation, lower or zero out `COALESCE_TIMEOUT_MS` in `src/call.ts`.
+- `mpg123` `buffer underflow` stderr warnings are filtered out by the npm script wrapper. They are normal operational noise on macOS, not errors.
+- Tool calls, handoffs (`handoff_to_*`), tool results, status transitions, hang warnings, and transfer events render as distinct emoji-prefixed lines (`🔧`, `🔀`, `✅`, `❌`, `📞`, `⚠️`). Use these to trace squad routing without leaving the terminal for the dashboard.
+- High-frequency events (`conversation-update`, `model-output`, `function-call`, `user-interrupted`) are silently dropped by default. Set `VAPI_CALL_DEBUG=1` to surface them as `🔍 [debug] <type>: <preview>` lines when enumerating new event shapes.
