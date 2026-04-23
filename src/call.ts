@@ -407,6 +407,50 @@ type ControlMessage =
   | CallEndedMessage
   | { type: string };
 
+// Cartesia Sonic and other chunked TTS providers stream each final
+// transcript as 2-4 separate events per utterance, often split mid-sentence.
+// Rather than rendering each fragment on its own `🤖 Assistant:` line, we
+// buffer consecutive finals from the same role and flush them as a single
+// merged line once the speaker pauses for `COALESCE_TIMEOUT_MS`. The same
+// mechanism helps with user transcriber micro-pauses (Soniox, Gladia).
+interface FinalBuffer {
+  role: "user" | "assistant";
+  fragments: string[];
+  flushTimer: NodeJS.Timeout | null;
+}
+
+interface CallDisplayState {
+  // The most recent partial transcript line written to stdout (so we can
+  // erase it before writing a new line — see `clearWrittenLine`).
+  lastTranscript: string;
+  // Pending buffered finals, waiting to be coalesced into a single line.
+  finalBuffer: FinalBuffer | null;
+}
+
+// Max wait between consecutive finals from the same role before the buffer
+// auto-flushes. 600ms empirically captures most Cartesia chunk gaps without
+// introducing noticeable display latency for the developer. Tune if your
+// voice provider streams slower or faster.
+const COALESCE_TIMEOUT_MS = 600;
+
+function flushFinalBuffer(state: CallDisplayState): void {
+  const buf = state.finalBuffer;
+  if (!buf) return;
+
+  if (buf.flushTimer) {
+    clearTimeout(buf.flushTimer);
+  }
+  state.finalBuffer = null;
+
+  const merged = buf.fragments.join(" ").replace(/\s+/g, " ").trim();
+  if (merged.length === 0) return;
+
+  const prefix = buf.role === "user" ? "🎤 You" : "🤖 Assistant";
+  clearWrittenLine(process.stdout, state.lastTranscript);
+  state.lastTranscript = "";
+  console.log(`${prefix}: ${merged}`);
+}
+
 async function connectWebSocket(
   websocketUrl: string,
   config: CallConfig,
@@ -431,12 +475,16 @@ async function connectWebSocket(
     let audioContext: ReturnType<typeof createAudioContext> | null = null;
     let micStream: ReturnType<typeof createMicrophoneStream> | null = null;
     let isConnected = false;
-    let lastTranscript = "";
+    const state: CallDisplayState = {
+      lastTranscript: "",
+      finalBuffer: null,
+    };
 
     // Graceful shutdown
     const cleanup = () => {
-      clearWrittenLine(process.stdout, lastTranscript);
-      lastTranscript = "";
+      flushFinalBuffer(state);
+      clearWrittenLine(process.stdout, state.lastTranscript);
+      state.lastTranscript = "";
       console.log("👋 Ending call...");
       if (micStream) {
         micStream.stop();
@@ -493,9 +541,7 @@ async function connectWebSocket(
         // Control message (JSON)
         try {
           const message = JSON.parse(event.data as string) as ControlMessage;
-          handleControlMessage(message, lastTranscript, (t) => {
-            lastTranscript = t;
-          });
+          handleControlMessage(message, state);
         } catch {
           // Ignore parse errors
         }
@@ -510,8 +556,9 @@ async function connectWebSocket(
     };
 
     ws.onclose = (event) => {
-      clearWrittenLine(process.stdout, lastTranscript);
-      lastTranscript = "";
+      flushFinalBuffer(state);
+      clearWrittenLine(process.stdout, state.lastTranscript);
+      state.lastTranscript = "";
       console.log(`📴 Call ended (code: ${event.code})`);
       cleanup();
     };
@@ -575,41 +622,69 @@ function clearWrittenLine(stream: NodeJS.WriteStream, text: string): void {
 
 function handleControlMessage(
   message: ControlMessage,
-  lastTranscript: string,
-  setLastTranscript: (t: string) => void,
+  state: CallDisplayState,
 ): void {
   switch (message.type) {
     case "transcript": {
       const tm = message as TranscriptMessage;
       const prefix = tm.role === "user" ? "🎤 You" : "🤖 Assistant";
-      const line = `${prefix}: ${tm.transcript}`;
 
       if (tm.transcriptType === "final") {
-        clearWrittenLine(process.stdout, lastTranscript);
-        console.log(line);
-        setLastTranscript("");
+        // A role change means we have a held final buffer from the other
+        // speaker (e.g. assistant buffered fragments, user barges in and
+        // starts emitting finals) — flush it immediately so the previous
+        // turn prints as a complete line before the new one accumulates.
+        if (state.finalBuffer && state.finalBuffer.role !== tm.role) {
+          flushFinalBuffer(state);
+        }
+
+        if (!state.finalBuffer) {
+          state.finalBuffer = {
+            role: tm.role,
+            fragments: [],
+            flushTimer: null,
+          };
+        }
+        state.finalBuffer.fragments.push(tm.transcript);
+
+        if (state.finalBuffer.flushTimer) {
+          clearTimeout(state.finalBuffer.flushTimer);
+        }
+        state.finalBuffer.flushTimer = setTimeout(() => {
+          flushFinalBuffer(state);
+        }, COALESCE_TIMEOUT_MS);
       } else if (process.stdout.isTTY) {
         // Live partial overwrite only makes sense in a TTY. In non-TTY
         // output (piped to a file, CI logs, etc.) every partial would
         // print as its own line and produce huge spam — skip them and
         // wait for the final.
-        clearWrittenLine(process.stdout, lastTranscript);
+        const line = `${prefix}: ${tm.transcript}`;
+        clearWrittenLine(process.stdout, state.lastTranscript);
         process.stdout.write(line);
-        setLastTranscript(line);
+        state.lastTranscript = line;
       }
       break;
     }
     case "speech-update": {
       const sm = message as SpeechUpdateMessage;
       if (sm.status === "started") {
+        // If there's a held final buffer from the other speaker, flush it
+        // before announcing the new speaker so the banner doesn't appear
+        // above still-pending transcript from the last turn.
+        if (state.finalBuffer && state.finalBuffer.role !== sm.role) {
+          flushFinalBuffer(state);
+        }
         const who = sm.role === "user" ? "You" : "Assistant";
-        clearWrittenLine(process.stdout, lastTranscript);
-        if (lastTranscript) setLastTranscript("");
+        clearWrittenLine(process.stdout, state.lastTranscript);
+        state.lastTranscript = "";
         console.log(`💬 ${who} started speaking...`);
       }
       break;
     }
     case "call-ended": {
+      // Flush any held fragments before the call-ended line so the last
+      // words printed match what the speaker actually said.
+      flushFinalBuffer(state);
       const cm = message as CallEndedMessage;
       const reasonLabels: Record<string, string> = {
         "silence-timed-out": "Silence timeout (no speech detected)",
@@ -624,8 +699,8 @@ function handleControlMessage(
         "assistant-not-found": "Assistant not found",
       };
       const label = cm.reason ? (reasonLabels[cm.reason] ?? cm.reason) : "unknown reason";
-      clearWrittenLine(process.stdout, lastTranscript);
-      if (lastTranscript) setLastTranscript("");
+      clearWrittenLine(process.stdout, state.lastTranscript);
+      state.lastTranscript = "";
       console.log(`📞 Call ended: ${label}`);
       break;
     }
