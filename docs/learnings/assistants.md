@@ -40,6 +40,38 @@ Priority order: top-level `inputPunctuationBoundaries` > `chunkPlan.punctuationB
 
 When merging voice overrides in squads, `inputPunctuationBoundaries` arrays are **unioned** (combined), not replaced. This can lead to more chunk boundaries than expected.
 
+### Cartesia-specific config gotchas
+
+Cartesia voices share the `voice` schema with other providers but reject several fields and require a few non-obvious nesting paths. Pushes fail with confusing 400s if you carry over an ElevenLabs config wholesale.
+
+| Field | Behavior on Cartesia | Workaround |
+|---|---|---|
+| `enableSsmlParsing` | **Rejected** — ElevenLabs-only field | Omit it on Cartesia voice config |
+| Top-level `voice.speed` | **Rejected** — must be nested | Use `voice.generationConfig.speed: 0.95` |
+| Top-level `voice.stability` / `voice.similarityBoost` | Ignored — ElevenLabs-only | Omit; Cartesia tunes consistency through `generationConfig` knobs |
+| `pronunciationDictId` | Supported on `sonic-3` only | Confirm `model: sonic-3` before attaching a dict |
+| `accentLocalization` | Nested under `generationConfig.experimental` | `voice.generationConfig.experimental.accentLocalization: 1` |
+
+```yaml
+voice:
+  provider: cartesia
+  model: sonic-3
+  voiceId: your-voice-id
+  pronunciationDictId: pdict_xxxxxxxxxxxxx
+  generationConfig:
+    speed: 0.95
+    experimental:
+      accentLocalization: 1
+```
+
+### Cartesia Sonic-3 garbles em-dashes and SSML `<break>` tags
+
+**What you might expect:** Em-dashes and `<break time='0.3s'/>` give you natural pauses, the same way they do on ElevenLabs.
+
+**What actually happens:** Sonic-3's chunking pipeline mishandles both. Em-dashes can produce truncated or stitched audio (occasionally swallowing the next word), and explicit `<break>` tags inside Cartesia output sometimes mangle nearby phonemes. The failure mode is intermittent and shows up as "weird audio glitches" in QA.
+
+**Recommendation:** When writing prompts for Cartesia Sonic-3, prefer commas, semicolons, and periods for pacing. If you're porting prompts from another TTS provider, search-and-replace `—` and `<break .../>` before pushing.
+
 ---
 
 ## Transcriber Configuration
@@ -383,6 +415,20 @@ These are complementary, not alternatives.
 | `backoffSeconds` | 1.0 |
 
 `numWords: 2` means the user must speak 2 words before the assistant stops talking. Lower values make the assistant more interruptible.
+
+### `numWords: 2` produces a 500–800ms TTS overlap window
+
+**Why this matters for transcript quality, not just feel:** While the assistant waits for the second word to land before stopping, both speakers are talking simultaneously. That overlap window is typically **500–800ms** at conversational pace. STT confidence drops sharply during overlap, so the customer's first sentence after a barge-in often arrives garbled — wrong words, dropped clauses, or low-confidence transcripts that get filtered out (see `confidenceThreshold` above).
+
+**Recommendation:** For barge-in-heavy use cases (objection handling, fast-paced dialogue), use `numWords: 1` and lean on Krisp denoising (`backgroundDenoisingEnabled: true`) to keep the assistant's own audio out of the customer's transcript. The trade-off is slightly more "false interrupts" on filler words like "um" or "yeah", which is usually preferable to garbled customer turns.
+
+```yaml
+stopSpeakingPlan:
+  numWords: 1
+  voiceSeconds: 0.2
+  backoffSeconds: 1.0
+backgroundDenoisingEnabled: true
+```
 
 ---
 
