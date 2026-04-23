@@ -401,10 +401,64 @@ interface CallEndedMessage {
   reason?: string;
 }
 
+// Individual tool call entries in a `tool-calls` event. Vapi can deliver
+// the function name and arguments either at the top level (recent shape)
+// or nested under a `function` object (older / server-url shape). We
+// accept both and fall back to `<unknown>` so an unfamiliar payload
+// never crashes the CLI.
+interface ToolCallItem {
+  id?: string;
+  name?: string;
+  arguments?: unknown;
+  function?: {
+    name?: string;
+    arguments?: unknown;
+  };
+}
+
+interface ToolCallsMessage {
+  type: "tool-calls";
+  toolCallList?: ToolCallItem[];
+  toolWithToolCallList?: Array<{ toolCall?: ToolCallItem }>;
+}
+
+interface ToolCallResultMessage {
+  type: "tool-call-result";
+  toolCallId?: string;
+  name?: string;
+  result?: unknown;
+  error?: unknown;
+}
+
+interface StatusUpdateMessage {
+  type: "status-update";
+  status?: string;
+  endedReason?: string;
+}
+
+interface HangMessage {
+  type: "hang";
+}
+
+interface TransferUpdateMessage {
+  type: "transfer-update";
+  destination?: {
+    type?: string;
+    assistantName?: string;
+    number?: string;
+    sipUri?: string;
+  };
+}
+
 type ControlMessage =
   | TranscriptMessage
   | SpeechUpdateMessage
   | CallEndedMessage
+  | ToolCallsMessage
+  | ToolCallResultMessage
+  | StatusUpdateMessage
+  | HangMessage
+  | TransferUpdateMessage
   | { type: string };
 
 // Cartesia Sonic and other chunked TTS providers stream each final
@@ -449,6 +503,87 @@ function flushFinalBuffer(state: CallDisplayState): void {
   clearWrittenLine(process.stdout, state.lastTranscript);
   state.lastTranscript = "";
   console.log(`${prefix}: ${merged}`);
+}
+
+// Print an out-of-band event (tool call, handoff, status change, etc.)
+// while respecting the in-flight transcript buffer and any partial line
+// that's currently being overwritten in the TTY. Without this wrapper,
+// event lines would either corrupt the partial overwrite region or
+// interleave awkwardly with a pending coalesced final.
+function printEvent(state: CallDisplayState, line: string): void {
+  flushFinalBuffer(state);
+  clearWrittenLine(process.stdout, state.lastTranscript);
+  state.lastTranscript = "";
+  console.log(line);
+}
+
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen)}... [truncated, ${text.length} chars]`;
+}
+
+function previewJson(value: unknown, maxLen: number): string {
+  try {
+    // Tool call arguments occasionally arrive as a JSON-encoded string
+    // instead of an object. Re-parse so the preview shows structured
+    // content rather than an escape-riddled single-line string.
+    let v: unknown = value;
+    if (typeof v === "string") {
+      const asString: string = v;
+      try {
+        v = JSON.parse(asString);
+      } catch {
+        return truncate(asString, maxLen);
+      }
+    }
+    const json = JSON.stringify(v);
+    if (typeof json !== "string") return "<unserializable>";
+    return truncate(json, maxLen);
+  } catch {
+    return "<unserializable>";
+  }
+}
+
+// Squad handoffs are delivered as `tool-calls` events where the function
+// name follows the `handoff_to_<Target_Name>` convention (underscores
+// replacing spaces in the target assistant's display name). Extract the
+// target name when this naming pattern applies so we can render a
+// distinct `🔀 Handoff → Target Name` line instead of a generic tool
+// call. Returns null when the name doesn't match the handoff pattern.
+function handoffTargetFromName(name: string): string | null {
+  const match = /^handoff_to_(.+)$/.exec(name);
+  const captured = match?.[1];
+  if (!captured) return null;
+  return captured.replace(/_/g, " ").trim();
+}
+
+function formatToolCall(call: ToolCallItem): string {
+  const name = call.name ?? call.function?.name ?? "<unknown>";
+  const args = call.arguments ?? call.function?.arguments;
+  const target = handoffTargetFromName(name);
+  if (target) {
+    return `🔀 Handoff → ${target}`;
+  }
+  if (args === undefined || args === null) {
+    return `🔧 Tool call: ${name}()`;
+  }
+  return `🔧 Tool call: ${name}(${previewJson(args, 160)})`;
+}
+
+function formatTransferDestination(
+  dest: TransferUpdateMessage["destination"],
+): string {
+  if (!dest) return "";
+  if (dest.type === "assistant" && dest.assistantName) {
+    return ` → ${dest.assistantName}`;
+  }
+  if (dest.type === "number" && dest.number) {
+    return ` → ${dest.number}`;
+  }
+  if (dest.type === "sip" && dest.sipUri) {
+    return ` → ${dest.sipUri}`;
+  }
+  return dest.type ? ` (${dest.type})` : "";
 }
 
 async function connectWebSocket(
@@ -704,8 +839,95 @@ function handleControlMessage(
       console.log(`📞 Call ended: ${label}`);
       break;
     }
+    case "tool-calls": {
+      const tm = message as ToolCallsMessage;
+      // Some payloads deliver tool calls directly in `toolCallList`;
+      // others nest them in `toolWithToolCallList[].toolCall` (the
+      // "tool + toolCall" pair shape Vapi uses when it also wants to
+      // include the registered tool definition). Normalize both.
+      const calls: ToolCallItem[] = [
+        ...(tm.toolCallList ?? []),
+        ...(tm.toolWithToolCallList
+          ?.map((e) => e.toolCall)
+          .filter((c): c is ToolCallItem => Boolean(c)) ?? []),
+      ];
+      for (const call of calls) {
+        try {
+          printEvent(state, formatToolCall(call));
+        } catch {
+          // Never let an unexpected tool call shape crash the CLI —
+          // just fall through and drop the formatter output.
+        }
+      }
+      break;
+    }
+    case "tool-call-result": {
+      const tm = message as ToolCallResultMessage;
+      const name = tm.name ?? "<tool>";
+      try {
+        if (tm.error !== undefined && tm.error !== null && tm.error !== "") {
+          printEvent(
+            state,
+            `❌ Tool failed: ${name} → ${previewJson(tm.error, 200)}`,
+          );
+        } else if (tm.result !== undefined) {
+          printEvent(
+            state,
+            `✅ Tool result: ${name} → ${previewJson(tm.result, 200)}`,
+          );
+        }
+      } catch {
+        // Preserve CLI stability on unexpected payload shapes.
+      }
+      break;
+    }
+    case "status-update": {
+      const sm = message as StatusUpdateMessage;
+      if (!sm.status) break;
+      // Drop `queued`, `ringing`, `scheduled` — they're irrelevant for a
+      // WebSocket-transport developer call (there's no phone leg) and
+      // just add noise. Surface the useful lifecycle transitions.
+      if (
+        sm.status === "in-progress" ||
+        sm.status === "forwarding" ||
+        sm.status === "ended"
+      ) {
+        const suffix =
+          sm.status === "ended" && sm.endedReason
+            ? ` (reason: ${sm.endedReason})`
+            : "";
+        printEvent(state, `📞 Status: ${sm.status}${suffix}`);
+      }
+      break;
+    }
+    case "hang": {
+      // `hang` is a heads-up that the call is about to terminate (e.g.
+      // silence timeout is imminent). Useful for debugging hang-reason
+      // issues; payload fields vary so we just surface the signal.
+      printEvent(state, `⚠️  Hang warning`);
+      break;
+    }
+    case "transfer-update": {
+      const tm = message as TransferUpdateMessage;
+      printEvent(state, `🔀 Transfer${formatTransferDestination(tm.destination)}`);
+      break;
+    }
     default:
-      // Ignore other message types
+      // Silently ignore other message types (conversation-update,
+      // model-output, function-call, user-interrupted, etc.). These
+      // fire frequently and would drown out real transcript content.
+      // Set `VAPI_CALL_DEBUG=1` in the environment to log unknown
+      // message types for discovery work.
+      if (process.env.VAPI_CALL_DEBUG === "1") {
+        try {
+          const m = message as Record<string, unknown>;
+          const typeStr = typeof m.type === "string" ? m.type : "<untyped>";
+          const preview = previewJson(m, 200);
+          printEvent(state, `🔍 [debug] ${typeStr}: ${preview}`);
+        } catch {
+          // Debug output is best-effort; never crash from it.
+        }
+      }
       break;
   }
 }
