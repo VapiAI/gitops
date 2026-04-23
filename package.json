@@ -10,7 +10,7 @@
     "apply": "tsx src/apply-cmd.ts",
     "push": "tsx src/push-cmd.ts",
     "pull": "tsx src/pull-cmd.ts",
-    "call": "tsx src/call-cmd.ts",
+    "call": "bash -c 'exec tsx src/call-cmd.ts \"$@\" 2> >(grep --line-buffered -v \"buffer underflow\" >&2)' --",
     "cleanup": "tsx src/cleanup-cmd.ts",
     "eval": "tsx src/eval.ts",
     "build": "tsc --noEmit",
