@@ -126,6 +126,59 @@ transcriber:
 
 See [Deepgram's Flux configuration guide](https://developers.deepgram.com/docs/flux/configuration) for tuning recommendations across simple / low-latency / high-reliability / complex-pipeline modes.
 
+### Deepgram Flux: `smartEndpointingPlan` silently disables Flux's own EOT
+
+**Critical gotcha — easy to miss, no warning emitted.** If you configure Deepgram Flux but also set `startSpeakingPlan.smartEndpointingPlan` (or the legacy `startSpeakingPlan.smartEndpointingEnabled`), Vapi will use that endpointing provider instead of Flux's `EndOfTurn` events. You'll pay for Flux, configure all the knobs, and get zero latency benefit from `eagerEotThreshold`.
+
+**Why this happens:** Vapi's `EndpointingBuffer` only honors a transcriber's built-in EOT when `smartEndpointingPlan.provider` either matches the transcriber provider OR is unset. The valid `smartEndpointingPlan.provider` values are `vapi`, `livekit`, and `custom-endpointing-model` — `deepgram` is not a valid value, so the equality check is unreachable for Flux. The only way Flux's EOT fires is if `smartEndpointingPlan` is unset.
+
+**It's especially insidious because LiveKit smart endpointing is commonly recommended elsewhere in Vapi guidance**, so customers tend to copy `smartEndpointingPlan: { provider: livekit }` forward when adding Flux. The override is silent — no error, no warning, no log line saying "Flux EOT ignored."
+
+#### How each value behaves
+
+| What you write | Wire validation | Effective result | Flux EOT fires? |
+|---|---|---|---|
+| Omit `smartEndpointingPlan` | passes | `undefined` | ✅ Yes |
+| `smartEndpointingPlan: null` | passes | `undefined` | ✅ Yes |
+| `smartEndpointingPlan: false` | likely 400 (validator expects an object with `provider`) | N/A | N/A — don't write this |
+| `smartEndpointingPlan: { provider: vapi }` | passes | Vapi smart endpointing wins | ❌ No |
+| `smartEndpointingPlan: { provider: livekit }` | passes | LiveKit endpointing wins | ❌ No |
+| `smartEndpointingPlan: { provider: custom-endpointing-model }` | passes | custom server wins | ❌ No |
+| `smartEndpointingEnabled: false` (legacy) | passes | normalized to `undefined` | ✅ Yes |
+| `smartEndpointingEnabled: true` (legacy) | passes | normalized to `{ provider: vapi }` | ❌ No |
+| `smartEndpointingEnabled: 'livekit'` (legacy) | passes | normalized to `{ provider: livekit }` | ❌ No |
+
+**Dashboard "Off" option:** Selecting `Off` from the Smart Endpointing dropdown sets `smartEndpointingPlan` to `undefined` on the wire (not `false`, not `null`). That's the canonical "no smart endpointing" state.
+
+#### Other `startSpeakingPlan` fields are safe to set
+
+Only `smartEndpointingPlan` and `smartEndpointingEnabled` block Flux's EOT. The rest are unaffected on the Flux EOT path:
+
+| Field | Effect on Flux EOT path |
+|---|---|
+| `waitSeconds` | Unrelated — applied in `turnTakingBuffer` as a post-VAD speaking cork. Safe to set. |
+| `customEndpointingRules` | Bypassed when Flux EOT fires (no error, just dead weight in config) |
+| `transcriptionEndpointingPlan` (punctuation timeouts) | Bypassed when Flux EOT fires |
+
+#### Cleanest gitops yaml pattern for Flux
+
+Just omit `smartEndpointingPlan` entirely. If you need to be explicit (e.g. overriding an inherited squad-level `smartEndpointingPlan`), set it to `null`:
+
+```yaml
+transcriber:
+  provider: deepgram
+  model: flux-general-en
+  eagerEotThreshold: 0.4
+  eotThreshold: 0.7
+
+startSpeakingPlan:
+  waitSeconds: 0.4
+  smartEndpointingPlan: null   # explicit "let Flux handle EOT"
+  # do NOT set smartEndpointingEnabled either
+```
+
+**Squad gotcha:** If your squad has `membersOverrides.startSpeakingPlan.smartEndpointingPlan`, that wins for every member regardless of what an individual assistant sets. Audit squad overrides before assuming a per-assistant `null` works.
+
 ### Pronunciation dictionaries (TTS-level)
 
 Pronunciation dictionaries control how TTS voices say specific words. They are **provider-specific**:

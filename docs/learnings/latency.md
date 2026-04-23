@@ -115,7 +115,13 @@ transcriber:
   model: flux-general-en
   eagerEotThreshold: 0.4   # earlier triggers, more cancellations
   eotThreshold: 0.7
+
+startSpeakingPlan:
+  waitSeconds: 0.4
+  smartEndpointingPlan: null   # REQUIRED — see warning below
 ```
+
+**⚠️ Critical:** If `startSpeakingPlan.smartEndpointingPlan` (or the legacy `smartEndpointingEnabled`) is set to *any* provider (`vapi`, `livekit`, `custom-endpointing-model`), Flux's `EndOfTurn` events are **silently ignored** and Vapi runs that endpointing instead. You'll pay for Flux and get zero latency benefit. Especially watch for inherited `smartEndpointingPlan: { provider: livekit }` from prior configs or squad-level `membersOverrides`. See [assistants.md → Deepgram Flux: `smartEndpointingPlan` silently disables Flux's own EOT](assistants.md) for the full behavior table.
 
 See [assistants.md → Deepgram Flux](assistants.md) for the full field reference and gotchas (Vapi vs Deepgram range mismatches, no cross-field validation).
 
