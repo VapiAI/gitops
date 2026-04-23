@@ -124,6 +124,91 @@ assistantOverrides:
 
 ---
 
+## Inline `model.messages` in `assistantOverrides` silently shadows the assistant `.md`
+
+**What you might expect:** `assistantOverrides` is a deep merge — partial fields override partial fields, and the assistant's own `.md` system prompt is preserved if you don't touch `model.messages`.
+
+**What actually happens:** If you add `model.messages` (or any `model.*` field that includes the system message) inside a squad member's `assistantOverrides`, that array fully replaces the assistant's compiled prompt at runtime. The `.md` body becomes dead code for that member — silently. There is no warning at push time, no diff in the dashboard that calls it out, and the only symptom is the assistant behaving differently in the squad than it does standalone.
+
+This is especially insidious when the override is large (e.g. a multi-thousand-character prompt pasted inline), because the inline text drifts away from the `.md` source over time and no longer matches.
+
+**Recommendation:**
+
+- Treat the assistant `.md` file as the single source of truth for the system prompt.
+- Use `assistantOverrides` for non-prompt knobs (`tools:append`, `temperature`, `firstMessage`, `firstMessageMode`, `voice`, `transcriber`).
+- If you genuinely need a different prompt for a squad context, create a second assistant `.md` and reference it as a separate squad member instead of inlining the prompt.
+
+```yaml
+# WRONG — this silently replaces the assistant's .md prompt
+members:
+  - assistantId: faq-specialist-a1b2c3d4
+    assistantOverrides:
+      model:
+        provider: openai
+        model: gpt-4.1
+        messages:
+          - role: system
+            content: |
+              You are an FAQ specialist. (...8000 chars of prompt drifting from the .md...)
+
+# CORRECT — keep the .md as the only prompt source
+members:
+  - assistantId: faq-specialist-a1b2c3d4
+    assistantOverrides:
+      model:
+        temperature: 0.3   # non-prompt overrides only
+      tools:append:
+        - type: handoff
+          # ...
+```
+
+---
+
+## `firstMessage` replays on every handoff re-entry, not just call start
+
+**What you might expect:** `firstMessage` is the assistant's opening line at the start of a call.
+
+**What actually happens:** With `firstMessageMode` at its default (`assistant-speaks-first`), `firstMessage` fires **every time control hands back to that assistant** — not just on the initial call. In a squad with cyclical routing (e.g. Primary → FAQ → Primary, or Closeout → Primary on objection), the customer hears the intro line repeated on each re-entry, which sounds like a hard reset of the conversation.
+
+**Recommendation:** For any squad member that can be re-entered after a handoff (i.e. any member except a strictly terminal one like Closeout), set:
+
+```yaml
+firstMessage: ""
+firstMessageMode: assistant-speaks-first-with-model-generated-message
+```
+
+The LLM then synthesizes a contextual continuation line on re-entry rather than replaying the intro. Pair this with a "CALL-START vs HANDOFF-RE-ENTRY" block at the top of the system prompt so the model knows which behavior to use:
+
+```
+# RE-ENTRY PROTOCOL
+
+If this is the first turn of the call (no prior conversation in your context),
+greet the caller and begin the workflow.
+
+If you are receiving control via a handoff (prior conversation present), do
+NOT re-greet. Pick up from where the previous specialist left off.
+```
+
+The terminal member (Closeout, etc.) is the only place a static `firstMessage` is safe — and only because nothing should hand back to it.
+
+---
+
+## Two silence handlers fire at once when both are configured
+
+**What you might expect:** `messagePlan.idleMessages` (per-assistant) and `customer.speech.timeout` hooks (per-assistant or via `membersOverrides.hooks`) are alternative ways to handle silence — pick one and the other is dormant.
+
+**What actually happens:** Both fire independently on the same silence event. If a member has `idleMessages` AND the squad has `membersOverrides.hooks` with a `customer.speech.timeout` action, the customer hears the idle message **and** the hook's spoken action back-to-back, often within the same beat. It feels like the agent is interrupting itself.
+
+**Recommendation:** Pick one mechanism per squad. Squad-level `customer.speech.timeout` hooks are usually preferable because:
+
+- They apply uniformly to every member without per-assistant duplication.
+- They support escalation patterns (`triggerMaxCount`, `triggerResetMode: onUserSpeech`) that idle messages don't.
+- They can chain `say` + `endCall` for graceful timeout-based hangup.
+
+If you choose hooks, leave `messagePlan` unset on each member (or set `idleMessages: []`). If you choose idle messages, omit the silence hook from `membersOverrides`. See [call-duration.md](call-duration.md) for the timeout-vs-hook distinction.
+
+---
+
 ## FAQ agent consolidation pattern
 
 When a squad has multiple specialist agents that each carry one knowledge base tool, the LLM must correctly classify and route the question before it even reaches a KB. If the routing is wrong, the KB returns "I don't have enough information" — not because the knowledge doesn't exist, but because the wrong KB was queried.

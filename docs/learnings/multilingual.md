@@ -255,6 +255,20 @@ voice: { provider: eleven-labs, voiceId: your-spanish-voice }
 
 ---
 
+## English-heavy `keyterm` array biases Deepgram `language: multi` toward English
+
+**What you might expect:** `keyterm` is a vocabulary boost — terms get recognized more reliably regardless of which language the customer is speaking.
+
+**What actually happens:** With `model: nova-3` and `language: multi`, the language ID step uses partial transcripts as a signal. A `keyterm` array dominated by English brand names, English product terms, or English acronyms tilts that signal toward English, especially on short utterances or code-switched turns. The result is Deepgram routing non-English speech through the English pipeline, producing low-confidence transcripts that may get filtered out entirely (see `confidenceThreshold` in `assistants.md`).
+
+This is most visible when a Spanish-only customer is misrecognized as English on their first utterance, which then cascades — the assistant responds in English, the customer gets confused, and the loop continues.
+
+**Recommendation for code-switching customers:** Use **Gladia Solaria** (`provider: gladia`, `languageBehaviour: automatic multiple languages`) instead of Deepgram `language: multi`. Solaria is built around code-switching as a first-class case and isn't biased by `keyterm` content the same way. See [Approach 1](#approach-1-single-static-agent) for the full transcriber comparison.
+
+**If you must stay on Deepgram multi:** Keep `keyterm` short (under 20 entries), include the customer's expected non-English equivalents, and avoid English-only acronyms that have no foreign-language form.
+
+---
+
 ## Further Reading
 
 - [Vapi Multilingual Documentation](https://docs.vapi.ai/customization/multilingual)

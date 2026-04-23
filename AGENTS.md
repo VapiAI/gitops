@@ -802,6 +802,19 @@ For the **complete schema** of all available properties on each resource type, c
 - **Assistant names** use natural language: `Intake Assistant`, `Booking Assistant`
 - **Structured output names** use `snake_case`: `customer_data`, `call_summary`
 
+### Renaming an existing resource
+
+The engine has a `name_mismatch` guard that auto-bootstraps state from the dashboard before applying changes. **Editing `.vapi-state.<org>.json` by hand to repoint a renamed file at the existing dashboard UUID does not work** — the bootstrap runs first, overwrites your manual edit, and the rename gets treated as "delete the old resource + create a new one."
+
+What this means in practice for renames:
+
+| Approach | What happens |
+|---|---|
+| Rename the file locally + `npm run push -- <org>` | New UUID is minted for the renamed file; the old UUID becomes orphaned in the dashboard. Run `npm run cleanup -- <org> --force` (or `npm run push -- <org> --force <file>`) to delete the orphan. |
+| Rename in the dashboard first, then `npm run pull -- <org>` | UUID is preserved. The pulled file lands with the new name and the existing UUID suffix; no orphan. |
+
+If preserving the UUID matters (e.g. it's referenced from a phone number, outbound campaign, or external integration), rename via the dashboard first and pull. Otherwise, accept the new UUID and clean up the orphan.
+
 ---
 
 ## Common Patterns
