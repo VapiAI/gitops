@@ -28,6 +28,36 @@ Despite being a configurable field, this setting currently has **no effect** on 
 
 ## Voice Configuration
 
+### Vapi-branded voices (`provider: 'vapi'`) need only a name
+
+**What you might expect:** Like other voice providers, you'd need to specify a model, a long opaque voice ID, and possibly tune stability/similarity/speed knobs.
+
+**What actually happens:** Vapi-branded voices are an abstraction. The complete config is just two fields:
+
+```yaml
+voice:
+  provider: vapi
+  voiceId: Elliot   # or any other Vapi voice name (Kylie, Clara, Spencer, etc.)
+```
+
+No model selection, no opaque voice ID, no chunk plan tuning required. The platform handles routing and automatically activates failover if the primary path errors mid-call.
+
+**Recommendation:** When you don't have a hard requirement for a specific third-party voice, prefer a Vapi-branded voice. You get:
+
+- A simpler, more readable yaml (one human-readable name)
+- Automatic resilience — calls keep flowing through provider-side blips
+- Forward-compatibility — voice quality improvements ship without yaml changes
+
+**Optional knobs** (all default to sensible values):
+
+| Field | Range | Notes |
+|---|---|---|
+| `speed` | 0.25–2 (default 1) | Effective range is clamped narrower than the input range; extreme values may not perceptibly differ from the limits |
+| `language` | ISO 639-1 codes | Defaults to `en-US` |
+| `pronunciationDictionary` | array of `{ pronunciationDictId, versionId? }` | Same dictionary IDs you'd attach to a direct-provider voice (see [Pronunciation dictionaries](#pronunciation-dictionaries-tts-level)) |
+
+**Gotcha:** voice names are case-sensitive — `voiceId: 'elliot'` (lowercase) returns a 400 at config validation. The full list of valid names is visible in the Vapi dashboard's voice picker.
+
 ### `chunkPlan.enabled: false` can reduce latency
 
 Disabling the chunk plan skips text formatting/preprocessing before TTS. This gives you raw LLM text (potentially with markdown or formatting artifacts) but lower latency.
