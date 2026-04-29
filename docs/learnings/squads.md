@@ -61,6 +61,7 @@ After a handoff, the new assistant does NOT get a raw copy of all prior messages
 | `none` | Clean slate — no prior context | Starting fresh (e.g., language switch) |
 | `lastNMessages` | Last N messages kept | Partial context preservation |
 | `userAndAssistantMessages` | User/bot turns only (tool calls stripped) | Clean handoff without tool noise |
+| `previousAssistantMessages` | Only history from before the current assistant's session — current assistant's tool-call data excluded | **PCI / compliance handoff back to a general assistant** — see [Sanitizing tool-call data across assistants](#sanitizing-tool-call-data-across-assistants-pci-pattern) below |
 
 ### The VM detection relay pattern
 
@@ -84,6 +85,43 @@ destinations:
 **Critical:** `blocking: true` ensures the greeting finishes before the fronter takes control. Without it, the fronter could interrupt mid-greeting.
 
 See [voicemail-detection.md](voicemail-detection.md) for the full two-agent relay architecture.
+
+---
+
+## Passing data between assistants
+
+Cross-reference: [docs.vapi.ai/squads/passing-data-between-assistants](https://docs.vapi.ai/squads/passing-data-between-assistants). The trust-tier framing came out of Mudflap progressive-auth work (PRISM-528).
+
+When a squad hands off mid-call, three approaches exist for getting data from one assistant to the next. They differ on trust level, latency, and determinism.
+
+| Approach | Mechanism | Trust | Latency |
+|---|---|---|---|
+| **Handoff arguments** | `function.parameters` on the handoff tool. The LLM fills the arg inline with the handoff call. | LLM-derived. Use for sentiment / intent classifications. **NOT a security boundary.** | Free (already in the handoff turn) |
+| **`variableExtractionPlan.schema`** | A dedicated LLM extraction call against the conversation transcript at handoff time. | LLM-derived. **NOT a security boundary.** | Adds a full LLM round-trip |
+| **Liquid variables in the destination prompt** | The variable bag is shared across squad members for the call's lifetime. The next assistant references `{{ customer.number }}`, prior alias values, etc. directly in its prompt or its tools' static `parameters`. | **Server-trusted IF the underlying values are call-level (Tier 1).** See [assistants.md → Liquid Variable Bag and Trust Tiers](assistants.md#liquid-variable-bag-and-trust-tiers). | Sub-millisecond, deterministic |
+
+**Crucial property:** call-level Liquid variables (`{{ customer.number }}`, `{{ phoneNumber.number }}`, `{{ call.id }}`, `{{ now }}`) persist across handoffs because they live on the call object, not the active assistant. The next assistant references the same trusted variable in its own tools' static `parameters` — no handoff-side configuration needed.
+
+### Static config per destination: `destination.assistantOverrides.variableValues`
+
+Defined on the handoff tool's destination, merged into the variable bag at handoff time, bypasses the LLM entirely. Use for per-destination static config the next assistant should know about: `{ "tier": "premium" }`, `{ "slaWindowSeconds": 30 }`.
+
+**Known limitation (logged in `improvements.md`):** Liquid templates inside `destination.assistantOverrides.variableValues` are NOT currently resolved at handoff time. If you write `"verifiedCaller": "{{ customer.number }}"`, the bag holds the literal string `"{{ customer.number }}"` instead of the resolved phone number. Workaround: rely on the squad-level variable bag persistence — call-level variables are already shared across squad members for the call's lifetime, so the next assistant can reference `{{ customer.number }}` directly. Use `assistantOverrides.variableValues` only for per-destination *literal* values.
+
+### Sanitizing tool-call data across assistants (PCI pattern)
+
+When a privileged sub-assistant collects sensitive data via tool calls (PCI card capture, SSN lookup), control needs to hand back to a general-purpose assistant without that general assistant ever seeing those tool responses. `contextEngineeringPlan.type: previousAssistantMessages` is the only Vapi primitive that scrubs current-assistant tool-call data from the next assistant's view — it's a handoff-time redaction, not an in-assistant one.
+
+```yaml
+# On the privileged assistant's handoff tool, returning to a general assistant
+destinations:
+  - type: assistant
+    assistantName: General Agent
+    contextEngineeringPlan:
+      type: previousAssistantMessages
+```
+
+Within a single assistant there is no equivalent. `request-complete` is a speech lever, `variableExtractionPlan` aliases give determinism but not invisibility, and tool responses are always in the next-completion conversation history. If the model must not see a value, your tool server must not place it in the response body in the first place. See [tools.md → Every tool result is in conversation history](tools.md#every-tool-result-is-in-conversation-history).
 
 ---
 

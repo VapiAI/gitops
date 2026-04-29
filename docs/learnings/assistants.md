@@ -535,6 +535,54 @@ They are merged, not mutually exclusive. But be aware of potential duplicates.
 
 ---
 
+## Liquid Variable Bag and Trust Tiers
+
+Cross-reference: [docs.vapi.ai/assistants/dynamic-variables](https://docs.vapi.ai/assistants/dynamic-variables). The trust-tier framing came out of Mudflap progressive-auth work (PRISM-528).
+
+Vapi exposes a Liquid templating layer in prompts, tool config, and overrides — `{{ customer.number }}`, `{{ now }}`, etc. The variables in scope at runtime fall into three trust tiers based on where they originate. This matters because anything you place in a security-sensitive field (tool static `parameters`, message templates that go to a backend) is only as trustworthy as the source of the variable.
+
+### Tier 1 — Server-trusted (safe for static `parameters` as a security boundary)
+
+Populated from signaling, validated config, validated API call payloads, or the server clock. The LLM has no write path to these mid-conversation.
+
+| Variable | Source |
+|---|---|
+| `{{ customer.number }}`, `{{ customer.sipUri }}` | SIP / Twilio signaling (inbound) or validated outbound API payload |
+| `{{ customer.name }}`, `{{ customer.email }}`, `{{ customer.extension }}` | Validated outbound API payload (only if you set them server-side) |
+| `{{ phoneNumber.number }}` | The Vapi number that placed/received the call |
+| `{{ call.id }}`, `{{ call.type }}`, `{{ call.startedAt }}` | Server-set call state |
+| `{{ now }}`, `{{ date }}`, `{{ time }}`, `{{ year }}`, `{{ month }}`, `{{ day }}` | Server clock at fulfill time |
+| Custom keys set in `assistantOverrides.variableValues` at call start | Validated API call payload |
+
+### Tier 2 — Conversation-derived (NOT a security boundary)
+
+| Variable | Why unsafe |
+|---|---|
+| `{{ messages }}`, `{{ transcript }}` | Includes raw user transcripts |
+| `{{ prompt }}` | Trusted at call-start, but pollutes if you template user input into it |
+
+### Tier 3 — LLM- or extraction-derived (NEVER a security boundary)
+
+| Variable | Why |
+|---|---|
+| `variableExtractionPlan` aliases | Only as trusted as the tool that produced them. An alias keyed on `{{ customer.number }}` is safe; one extracted from a tool whose response was shaped by user-spoken input is not. |
+| Handoff-tool-extracted variables (`variableExtractionPlan.schema` on a handoff destination) | LLM extraction pass against the transcript |
+| Handoff arguments (`function.parameters` on a handoff tool) | LLM-filled |
+
+For the security-boundary use of Tier 1 variables in tool config, see [tools.md → Static `parameters` is the LLM-invisibility primitive](tools.md#static-parameters-is-the-llm-invisibility-primitive-security-boundary). For how the variable bag persists across squad handoffs, see [squads.md → Passing data between assistants](squads.md#passing-data-between-assistants).
+
+### `{{ now }}` is UTC, hardcoded — use the `"now"` literal for timezone conversion
+
+The `{{ now }}` variable is a pre-formatted string with " UTC" appended (e.g. `"Jan 1, 2024, 12:00 PM UTC"`). To render in another timezone, use the LiquidJS `date` filter with the literal string `"now"` — NOT the variable:
+
+```liquid
+{{ "now" | date: "%I:%M %p", "America/Los_Angeles" }}
+```
+
+**Common antipattern:** `{{ now | date: "...", "TZ" }}`. This pipes the pre-formatted UTC string through the filter, which fails because `date` cannot reparse Vapi's "Jan 1, 2024, 12:00 PM UTC" format reliably. The quoted `"now"` literal is the only form that works.
+
+---
+
 ## Prompt Authoring
 
 ### Verbose negative-directive lists prime the banned phrases

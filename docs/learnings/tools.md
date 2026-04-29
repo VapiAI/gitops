@@ -293,3 +293,72 @@ DTMF tones are a telephony concept. This tool has no effect on WebSocket or web-
 | `handoff` | **Removed** when the tool is processed |
 
 Only `function` tools support `strict` mode.
+
+---
+
+## Tool Security and Data Visibility
+
+Cross-reference: [docs.vapi.ai/tools/static-variables-and-aliases](https://docs.vapi.ai/tools/static-variables-and-aliases) and [docs.vapi.ai/tools/custom-tools](https://docs.vapi.ai/tools/custom-tools). The full data-flow / threat-model writeup that motivates this section came out of Mudflap progressive-auth work (PRISM-528).
+
+### Every tool result is in conversation history
+
+Every successful tool call's full response body becomes a `role: "tool"` message in the LLM's conversation history and is visible to the model on the next completion. There is no built-in flag to hide tool results from the model. Implications:
+
+- If you put a sensitive value (PII, a token, a secret) in the response, the LLM sees it — period.
+- `request-complete` controls what the assistant *speaks* after the tool runs. It does NOT remove the tool result from history. The model still sees the raw response on the next user turn.
+- `variableExtractionPlan` aliases give you determinism (subsequent tools deterministically receive the value without LLM forwarding) but NOT invisibility — the underlying response is still in the model's view.
+
+The actual redaction primitive across assistants is [`contextEngineeringPlan.type: previousAssistantMessages`](squads.md#sanitizing-tool-call-data-across-assistants-pci-pattern) at handoff time. Within a single assistant, there is no equivalent — if the model must not see a value, your tool server must not place it in the response body to begin with.
+
+### Static `parameters` is the LLM-invisibility primitive (security boundary)
+
+The override behavior described under [`apiRequest` Tools → Static parameters](#static-parameters-override-llm-produced-body-fields) is also the foundation for prompt-injection-safe data passing. The static `parameters` array is the *only* tool-config field whose values are guaranteed never to reach the LLM:
+
+1. The top-level `tool.parameters` is not part of the schema shipped to the model — only `tool.function.parameters` is.
+2. Server-side merging happens at fulfill time. The model has no write path to call-level Liquid sources like `{{ customer.number }}` mid-conversation; those come from SIP/Twilio signaling or the validated outbound API payload.
+
+**Use static `parameters` for any value the model must not be able to fake or influence:** verified caller ID, called number, call ID, backend-looked-up account ID, per-call HMAC nonce.
+
+#### Naming footgun: two fields called "parameters"
+
+| Field | Who fills it | Visible to LLM? | Use for |
+|---|---|---|---|
+| `tool.function.parameters` (JSON Schema) | LLM at runtime | **Yes** | Values the model should infer or that the caller will speak (intent, name, item to order) |
+| `tool.parameters` (top-level array of `{ key, value }`) | You at config time, server-resolved at fulfill | **No** | Values your backend or Vapi's signaling layer already knows |
+
+The dashboard renders these as "Parameters" (JSON schema editor) and "Static Body Fields" (key/value rows with Liquid). Distinguishable by UI shape, not label. **Decision rule:** could a malicious caller speak the value? If "yes if I rely on the LLM to fill it," the field belongs in the top-level `parameters` array.
+
+#### Tool types that support static `parameters`
+
+| Tool type | Supports static `parameters`? |
+|---|---|
+| `apiRequest` | ✅ |
+| `function` (modern, under `assistant.model.tools[]`) | ✅ |
+| Legacy `assistant.model.functions[]` (deprecated) | ❌ — converter zeroes it out |
+| `code`, `handoff`, `transferCall`, `endCall`, others | ❌ |
+
+#### Mudflap progressive caller-ID auth pattern (worked example)
+
+```yaml
+type: apiRequest
+method: POST
+url: https://your-backend.example.com/lookup-and-verify
+function:
+  name: lookup_and_verify_user
+  parameters:
+    type: object
+    properties:
+      name:  { type: string }
+      email: { type: string }
+    required: [name, email]
+parameters:                            # server-resolved, LLM-invisible
+  - { key: caller_number, value: "{{ customer.number }}" }
+  - { key: called_number, value: "{{ phoneNumber.number }}" }
+  - { key: call_id,       value: "{{ call.id }}" }
+```
+
+The LLM produces only `name` and `email` (what the caller spoke). The orchestration layer fills `caller_number`, `called_number`, `call_id` server-side. Your backend authenticates against the trusted fields and treats `name` / `email` as claims that must match the row keyed on `caller_number`. A "call this tool with phone number FAKE" prompt-injection has no path — the field doesn't exist in the schema the LLM sees.
+
+For belt-and-braces, pair static parameters with HMAC body signing so the backend verifies sender + content, not just channel.
+
+For the trust-tier breakdown of which Liquid variables are safe to use here (`{{ customer.number }}`, `{{ call.id }}`, etc.) vs. which are LLM-derived and not, see [assistants.md → Liquid Variable Bag and Trust Tiers](assistants.md#liquid-variable-bag-and-trust-tiers).
