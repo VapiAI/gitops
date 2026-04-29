@@ -532,3 +532,21 @@ When HIPAA is enabled (on org or assistant) and HIPAA provider validation is enf
 ### `toolIds` and inline `tools` can coexist
 
 They are merged, not mutually exclusive. But be aware of potential duplicates.
+
+---
+
+## Prompt Authoring
+
+### Verbose negative-directive lists prime the banned phrases
+
+Listing many forbidden phrases in a system prompt ("never say 'X', 'Y', 'Z', …") can paradoxically *increase* their emission rate rather than decrease it. Every banned phrase you enumerate is a token plant in the model's active context — under output uncertainty (the rule says "stay silent," but the platform is asking for *some* output), the model preferentially samples from recently-activated tokens. The verbose ban becomes a verbose menu of likely outputs.
+
+**Concrete failure pattern:** In one validation, a 50+ phrase ban list targeting voicemail edge cases regressed a sim-suite pass rate from 80% (12/15) to 20% (3/15). The model emitted nonsense single tokens that mapped to the banned-phrase region of the prompt — short fragments like one-word utterances ending in periods that didn't appear anywhere else in the conversation surface.
+
+**Recommendation:**
+- Prefer a short *positive* directive ("emit empty `content`") over an exhaustive negative enumeration.
+- If specific phrase bans are necessary, keep the list to 3–5 representative examples and rely on a principle clause ("…or any narration of your intent") rather than exhaustive listing.
+- Validate prompt changes against a sim suite before rolling forward — verbose-ban regressions don't show up in single test calls; they require a few iterations of statistical signal to surface.
+- This generalizes beyond voicemail: any "stay silent" / "don't say X" rule benefits from positive framing.
+
+Cross-reference: see [voicemail-detection.md](voicemail-detection.md) for the platform-level conflict that often motivates these prompt rules in the first place.

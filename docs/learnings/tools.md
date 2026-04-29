@@ -123,6 +123,14 @@ If `endCallFunctionEnabled: true` is set on the assistant and no explicit `endCa
 
 When the LLM invokes an endCall tool, the call's `endedReason` is set to `assistant-ended-call` — not `customer-ended-call` or a generic hangup reason. Use this in post-call analysis and structured output evaluations.
 
+### Naming a tool resource ID in system-prompt prose causes TTS leak
+
+If your system prompt references a specific tool by its resource ID ("call the `your-end-call-feature-abc12345` tool"), the model can emit the resource ID as `content` (TTS-bound speech) instead of, or in addition to, invoking it via `tool_calls`. The TTS pipeline speaks the ID aloud as audio. If the call has anything looping audio back through STT (a personality bot in a sim, or a real human listening), the transcript captures partial syllables of the spoken ID.
+
+**Concrete signature:** A tool resource ID like `your-feature-name-abc12345` shows up in the AI transcript as something like `"feature name, a b c one two three four five"` — short, mangled fragments that map character-by-character to the tool ID.
+
+**Recommendation:** Refer to tool capabilities by **natural-language intent** in prose ("end the call", "transfer to a specialist", "look up the customer"), never by resource ID. The tool-calling layer picks the correct registered function from `toolIds` based on intent. If the LLM is reluctant to invoke a tool, fix the tool's `function.description` rather than naming the tool in the prompt body — see [transfers.md](transfers.md) for the same pattern in the transfer-tool context.
+
 ---
 
 ## handoff Tools

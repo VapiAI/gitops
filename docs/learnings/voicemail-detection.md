@@ -269,3 +269,35 @@ The detection assistant doesn't need post-call analysis — save the LLM call.
 | Agent hangs up on humans saying "sorry" | "sorry" misclassified as voicemail context | Add false-positive prevention rules |
 | Agent stuck on IVR forever | No timeout or exit condition | Set `silenceTimeoutSeconds` and `maxDurationSeconds` |
 | Greeting plays twice (handoff + fronter firstMessage) | Fronter has its own `firstMessage` | Set fronter `firstMessage: ""` or use model-generated mode |
+| Idle message ("Are you still there?") fires on voicemail edge cases | `idleTimeoutSeconds` < `silenceTimeoutSeconds` while assistant strategy is "stay silent on voicemail" | See "Idle messages collide with silence-based voicemail handling" below |
+
+---
+
+## Idle Messages and Voicemail Silence
+
+### Idle messages collide with silence-based voicemail handling
+
+When `messagePlan.idleMessages` is set with a tight `idleTimeoutSeconds` (e.g. 6s) AND the voicemail strategy is "stay silent and let platform-level `voicemailDetection` hang up the call," the two settings deadlock on every edge case where Vapi's detection has a coverage hole (full-mailbox prompts, some carrier-specific custom greetings, late-beep messages).
+
+**What you might expect:** The static `voicemailMessage` plays and the call ends. Idle messages don't fire because there's no assistant-side silence — the platform handles everything.
+
+**What actually happens:** When `voicemailDetection` misses, the LLM gets a turn. If the system prompt instructs it to stay silent on voicemail signals, the assistant goes silent — and `idleMessages` injects "Are you still there?" after `idleTimeoutSeconds`. Result: every voicemail-edge call ends with the idle prompt in the transcript, breaking any sim rubric that scores `idle_prompt_after_voicemail` or any post-call analysis that flags assistant utterances on voicemail. Cannot be fixed at the prompt level — even a perfect-silence prompt can't beat the platform timer.
+
+**Concrete signature:** Every failed transcript on a voicemail-edge sim suite ends with `AI: Are you still there?` while `endedReason` is `silence-timed-out`.
+
+**Recommendation:**
+- **Preferred — two-agent relay.** Use a classifier squad member that ends the call before the main assistant ever gets a voicemail turn. The main assistant's `idleTimeoutSeconds` stays tight for human conversations.
+- **Fallback — single-agent.** Set `idleTimeoutSeconds` >= `silenceTimeoutSeconds` so silence-timeout terminates the call before idle injection. This costs you idle-prompt responsiveness for genuinely-silent humans but eliminates the conflict.
+- Don't try to suppress this with system-prompt rules — the idle injection happens at the platform layer, not the LLM layer.
+
+```yaml
+# Single-agent fallback (less ideal — loses tight human-side idle responsiveness)
+silenceTimeoutSeconds: 15
+messagePlan:
+  idleMessageMaxSpokenCount: 1
+  idleMessages:
+    - Are you still there?
+  idleTimeoutSeconds: 30  # >= silenceTimeoutSeconds → idle never fires before call ends
+```
+
+Cross-reference: see [squads.md](squads.md) for the two-agent relay pattern, and [assistants.md](assistants.md) for prompt-authoring guidance on silence rules.
