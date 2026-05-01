@@ -608,16 +608,26 @@ The `{{ now }}` variable is a pre-formatted string with " UTC" appended (e.g. `"
 
 ## Prompt Authoring
 
-### Verbose negative-directive lists prime the banned phrases
+### Verbose negative-directive lists may prime the banned phrases
 
-Listing many forbidden phrases in a system prompt ("never say 'X', 'Y', 'Z', …") can paradoxically *increase* their emission rate rather than decrease it. Every banned phrase you enumerate is a token plant in the model's active context — under output uncertainty (the rule says "stay silent," but the platform is asking for *some* output), the model preferentially samples from recently-activated tokens. The verbose ban becomes a verbose menu of likely outputs.
+Long natural-language banlists in a system prompt ("never say 'X', 'Y', 'Z', …") are a plausible — though not deterministic — failure mode for output-leakage bugs. The intuition: every enumerated phrase is a token plant in the model's active context, and under output uncertainty (the rule says "stay silent," but the platform is asking for *some* output), recently-activated tokens can be over-sampled. The verbose ban can effectively serve as a verbose menu of likely outputs.
+
+This is a tendency, not a determinism. Short, well-targeted banlists in well-constrained prompts work fine. The risk scales with banlist length AND with whether the same forbidden strings ALSO appear elsewhere in the prompt — e.g., as the example value of a tool-call argument the model is supposed to fill in. That overlap (same surface form appearing in both "do this" and "don't say this" slots) is the highest-risk pattern.
 
 **Concrete failure pattern:** In one validation, a 50+ phrase ban list targeting voicemail edge cases regressed a sim-suite pass rate from 80% (12/15) to 20% (3/15). The model emitted nonsense single tokens that mapped to the banned-phrase region of the prompt — short fragments like one-word utterances ending in periods that didn't appear anywhere else in the conversation surface.
 
-**Recommendation:**
+**Patterns practitioners prefer for hard "do not output X" guarantees:**
+
+1. **Short, high-level safety directives** ("Do not output phone numbers") over enumerated bad strings. The model retains a principle better than a list, and a principle generalizes to phrasings the banlist would have missed anyway.
+2. **Pattern-based constraints applied outside the prompt** — post-filters / regex on the assistant's `content`, structured output schemas (JSON mode, `tool_choice: required`), or platform-level content filters. These are deterministic; prompts are probabilistic. When the cost of a leak is real (PII, compliance, silent-classifier semantics), the enforcement should not live in the prompt.
+3. **Separation of concerns between rule slots and example slots.** Don't place a string you forbid as the example value of a tool argument or a description field. If the argument needs an example, prefer a *shape* example over a literal that overlaps with banned content (e.g., `"e.g., a one- or two-word tag"` instead of `"e.g., 'live human pickup detected: hello?'"`).
+
+**Recommendation in roughly this order:**
+- If the platform exposes structured-output enforcement (`tool_choice: required`, response schemas, content filters), prefer that over prompt-only enforcement. Prompts are guidance; configuration is enforcement.
 - Prefer a short *positive* directive ("emit empty `content`") over an exhaustive negative enumeration.
+- Audit the prompt for any banned string that ALSO appears as an example or description value. Those overlap instances are higher-risk than abstract "never X" rules.
 - If specific phrase bans are necessary, keep the list to 3–5 representative examples and rely on a principle clause ("…or any narration of your intent") rather than exhaustive listing.
 - Validate prompt changes against a sim suite before rolling forward — verbose-ban regressions don't show up in single test calls; they require a few iterations of statistical signal to surface.
-- This generalizes beyond voicemail: any "stay silent" / "don't say X" rule benefits from positive framing.
+- This generalizes beyond voicemail: any "stay silent" / "don't say X" rule benefits from the four moves above.
 
 Cross-reference: see [voicemail-detection.md](voicemail-detection.md) for the platform-level conflict that often motivates these prompt rules in the first place.
