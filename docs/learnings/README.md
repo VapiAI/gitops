@@ -26,6 +26,7 @@ Each file targets a specific topic so you can load only the context you need.
 | Bulk-dialing from a CSV (Outbound Call Campaigns) | [outbound-campaigns.md](outbound-campaigns.md) |
 | Voicemail detection / VM vs human classification | [voicemail-detection.md](voicemail-detection.md) |
 | Enforcing call time limits / graceful call ending | [call-duration.md](call-duration.md) |
+| Authoring YAML resource files (scalar coercion, frontmatter conventions) | [yaml-conventions.md](yaml-conventions.md) |
 
 ---
 
@@ -43,6 +44,7 @@ Gotchas and silent defaults for each resource type:
 | [structured-outputs.md](structured-outputs.md) | Schema type gotchas, assistant_ids, default models, target modes, KPI patterns |
 | [simulations.md](simulations.md) | Personalities, evaluation comparators, chat-mode gotcha, missing references, full `/eval/simulation/*` API reference |
 | [webhooks.md](webhooks.md) | Default server messages, timeouts, unreachable servers, credential resolution, payload shape |
+| [yaml-conventions.md](yaml-conventions.md) | YAML 1.1 boolean coercion (`off`/`yes`/`no`), whitespace-truthy gotchas, discriminated-union sentinels, deprecated-field footguns, multi-line block scalars, anchors/aliases, frontmatter fence rules |
 
 ### Troubleshooting Runbooks
 
