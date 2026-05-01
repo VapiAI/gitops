@@ -59,19 +59,19 @@ you which stack PR closes the row.**
 | 5   | `push --dry-run`                                         | Cheapest operator-safety win                       | None       | RESOLVED 2026-04-30 (Stack C)     |
 | 6   | API-level optimistic concurrency                         | Server-side conflict rejection                     | Platform   | Deferred (Stack I, gated)         |
 | 7   | Voice edits drop pronunciation-dictionary attachments    | Silent regression on Cartesia + 11labs voice edits | #4         | Open (Stack G planned)            |
-| 8   | Dashboard prompt edits can in-place duplicate the prompt | Two stacked prompt versions = stitched output      | None       | Open (Stack D planned)            |
-| 9   | Provider-specific voice schema mismatch (push 400)       | `voice.speed` vs `voice.generationConfig.speed`    | None       | Partial — doc cheat-sheet (Stack A) |
+| 8   | Dashboard prompt edits can in-place duplicate the prompt | Two stacked prompt versions = stitched output      | None       | Partial — Stack D heuristic       |
+| 9   | Provider-specific voice schema mismatch (push 400)       | `voice.speed` vs `voice.generationConfig.speed`    | None       | RESOLVED 2026-04-30 (Stack D + A) |
 | 10  | Targeted assistant push mints duplicate tools            | Re-pushing assistant duplicates `end-call-*` tools | #4         | Partial                           |
-| 11  | Bidirectional SO ↔ assistant lockstep has no validation  | One-sided edits silently inconsistent              | None       | Open (Stack D planned)            |
+| 11  | Bidirectional SO ↔ assistant lockstep has no validation  | One-sided edits silently inconsistent              | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 12  | State file accumulates UUIDs without source files        | Silent gitops drift                                | None       | Partial                           |
 | 13  | `.agent/` and `.claude/handoffs/` not gitignored         | `git add -A` sweeps PII handoff scratch            | None       | RESOLVED 2026-04-30 (Stack A)     |
 | 14  | Multi-file push undocumented                             | Discoverability                                    | None       | RESOLVED 2026-04-30 (Stack A)     |
 | 15  | Scoped push rewrites entire state file                   | Pre-existing drift sweeps into focused commits     | #4         | Open (Stack J planned)            |
 | 16  | No CLI runner for simulation suites                      | Engine pushes them, can't run them                 | None       | Open (Stack E planned)            |
 | 17  | State file key-order churn produces noisy diffs          | Reorderings hide real changes                      | None       | RESOLVED 2026-04-30 (Stack B)     |
-| 18  | Structured-output `name` capped at 40 chars (no warning) | Push fails partway after partial application       | None       | Open (Stack D planned)            |
-| 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | Open (Stack D planned)            |
-| 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Open (Stack D heuristic planned)  |
+| 18  | Structured-output `name` capped at 40 chars (no warning) | Push fails partway after partial application       | None       | RESOLVED 2026-04-30 (Stack D)     |
+| 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | RESOLVED 2026-04-30 (Stack D)     |
+| 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Partial — Stack D heuristic       |
 
 ---
 

@@ -6,10 +6,12 @@ import {
   VAPI_BASE_URL,
   FORCE_DELETE,
   DRY_RUN,
+  STRICT_VALIDATION,
   APPLY_FILTER,
   BASE_DIR,
   removeExcludedKeys,
 } from "./config.ts";
+import { summarizeFindings, validateResources } from "./validate.ts";
 import { loadState, saveState } from "./state.ts";
 import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
 import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
@@ -908,6 +910,30 @@ async function main(): Promise<void> {
   };
 
   state = await maybeBootstrapState(loadedResources, state);
+
+  // Run client-side validators against the loaded resource set. In default
+  // mode, errors are surfaced as warnings so a single bad spec doesn't block
+  // an otherwise-good push. With --strict, any error-severity finding aborts
+  // before any API call.
+  console.log("\n🔎 Running validators...");
+  const findings = validateResources(loadedResources);
+  if (findings.length > 0) {
+    console.log(summarizeFindings(findings));
+  } else {
+    console.log("   ✅ No validation issues.");
+  }
+  const errorCount = findings.filter((f) => f.severity === "error").length;
+  if (errorCount > 0) {
+    if (STRICT_VALIDATION) {
+      console.error(
+        `\n❌ Validation failed (${errorCount} error(s)). --strict refuses to push. Fix the issues above or drop --strict.`,
+      );
+      process.exit(1);
+    }
+    console.warn(
+      `   ⚠️  ${errorCount} validation error(s) detected — push will continue (use --strict to abort on errors).`,
+    );
+  }
 
   // Resolve credential names → UUIDs in all resource data before applying
   const credMap = credentialForwardMap(state);

@@ -748,7 +748,9 @@ npm run push -- <org> assistants                   # Push only assistants
 npm run push -- <org> resources/<org>/assistants/my-agent.md  # Push single file
 npm run push -- <org> <path1> <path2>              # Push multiple specific files (one state write)
 npm run push -- <org> --dry-run                    # Preview without applying any platform changes
+npm run push -- <org> --strict                     # Abort push if any validator returns an error
 npm run apply -- <org>                             # Pull then push (full sync)
+npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
 
 # Testing
 npm run call -- <org> -a <assistant-name>          # Call an assistant via WebSocket
