@@ -54,7 +54,7 @@ you which stack PR closes the row.**
 | --- | -------------------------------------------------------- | -------------------------------------------------- | ---------- | --------------------------------- |
 | 1   | `push` drift detection                                   | Prevent silent overwrites of dashboard edits       | #4         | RESOLVED 2026-04-30 (Stack G)     |
 | 2   | `apply` same-file conflict                               | `apply` drops concurrent same-file dashboard edits | #4         | Partial — Stack G GET on push     |
-| 3   | Rollback                                                 | Current undo can clobber newer live changes        | #4, #5     | Open (Stack H planned)            |
+| 3   | Rollback                                                 | Current undo can clobber newer live changes        | #4, #5     | RESOLVED 2026-04-30 (Stack H)     |
 | 4   | State schema content hashes                              | Architectural unlock for #1, #2, #3, #6, #7        | None       | RESOLVED 2026-04-30 (Stack F)     |
 | 5   | `push --dry-run`                                         | Cheapest operator-safety win                       | None       | RESOLVED 2026-04-30 (Stack C)     |
 | 6   | API-level optimistic concurrency                         | Server-side conflict rejection                     | Platform   | Deferred (Stack I, gated)         |

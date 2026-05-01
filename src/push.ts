@@ -14,6 +14,20 @@ import {
 } from "./config.ts";
 import { summarizeFindings, validateResources } from "./validate.ts";
 import { checkDriftForUpdate } from "./drift.ts";
+import { writeSnapshot } from "./snapshot.ts";
+
+// Map a resource label to its state-file key. Used for snapshotting (Stack H)
+// — snapshot directories are keyed by the same names the state file uses.
+const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
+  tool: "tools",
+  "structured output": "structuredOutputs",
+  assistant: "assistants",
+  squad: "squads",
+  personality: "personalities",
+  scenario: "scenarios",
+  simulation: "simulations",
+  "simulation suite": "simulationSuites",
+};
 import {
   hashPayload,
   loadState,
@@ -88,6 +102,8 @@ async function upsertResourceWithStateRecovery(options: {
   // payload, hash it, and compare to lastPulledHash. Refuse to overwrite
   // without --overwrite. Skipped in dry-run because the operator just
   // wants to see what would happen, and skipped if no baseline hash.
+  // Stack H — when we successfully fetch the platform payload, snapshot
+  // it (and our outgoing payload) so `npm run rollback` has a target.
   if (!DRY_RUN) {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {
@@ -111,6 +127,47 @@ async function upsertResourceWithStateRecovery(options: {
           `   ⚠️  drift check failed for ${resourceLabel} ${resourceId}: ` +
             (driftErr instanceof Error ? driftErr.message : String(driftErr)) +
             ". Continuing.",
+        );
+      }
+
+      // Snapshot the current platform payload + our outgoing payload to a
+      // per-push directory so rollback can revert. Costs one extra GET per
+      // resource — acceptable for the safety guarantee. (Follow-up: plumb
+      // drift's GET result through to avoid the duplicate fetch.)
+      try {
+        const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
+        if (resourceType) {
+          const platformResponse = await fetch(
+            `${VAPI_BASE_URL}${updateEndpoint}`,
+            {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${process.env.VAPI_TOKEN}`,
+              },
+            },
+          );
+          if (platformResponse.ok) {
+            const platformPayloadForSnapshot = await platformResponse.json();
+            await writeSnapshot({
+              baseDir: BASE_DIR,
+              env: VAPI_ENV,
+              resourceType,
+              resourceId,
+              payload: {
+                outgoing: updatePayload,
+                platform: platformPayloadForSnapshot,
+              },
+            });
+          }
+        }
+      } catch (snapshotErr) {
+        // Snapshot failures should NOT block the push — the snapshot is a
+        // safety net, not a precondition. Log and move on.
+        console.warn(
+          `   ⚠️  snapshot failed for ${resourceLabel} ${resourceId}: ` +
+            (snapshotErr instanceof Error
+              ? snapshotErr.message
+              : String(snapshotErr)),
         );
       }
     }
