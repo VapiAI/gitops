@@ -7,11 +7,13 @@ import {
   FORCE_DELETE,
   DRY_RUN,
   STRICT_VALIDATION,
+  OVERWRITE_DRIFT,
   APPLY_FILTER,
   BASE_DIR,
   removeExcludedKeys,
 } from "./config.ts";
 import { summarizeFindings, validateResources } from "./validate.ts";
+import { checkDriftForUpdate } from "./drift.ts";
 import {
   hashPayload,
   loadState,
@@ -81,6 +83,38 @@ async function upsertResourceWithStateRecovery(options: {
   console.log(
     `  🔄 Updating ${resourceLabel}: ${resourceId} (${existingUuid})`,
   );
+
+  // Stack G — drift detection. Before PATCH, GET the current platform
+  // payload, hash it, and compare to lastPulledHash. Refuse to overwrite
+  // without --overwrite. Skipped in dry-run because the operator just
+  // wants to see what would happen, and skipped if no baseline hash.
+  if (!DRY_RUN) {
+    const stateEntry = stateSection[resourceId];
+    if (stateEntry) {
+      try {
+        const drift = await checkDriftForUpdate({
+          endpoint: updateEndpoint,
+          resourceLabel,
+          resourceId,
+          state: stateEntry,
+          overwrite: OVERWRITE_DRIFT,
+        });
+        if (drift.message) {
+          if (drift.ok) console.log(drift.message);
+          else console.error(drift.message);
+        }
+        if (!drift.ok) return null;
+      } catch (driftErr) {
+        // A drift check failure should NOT block the push — the existing
+        // PATCH path will surface the real error. Log and move on.
+        console.warn(
+          `   ⚠️  drift check failed for ${resourceLabel} ${resourceId}: ` +
+            (driftErr instanceof Error ? driftErr.message : String(driftErr)) +
+            ". Continuing.",
+        );
+      }
+    }
+  }
 
   try {
     await vapiRequest("PATCH", updateEndpoint, updatePayload);

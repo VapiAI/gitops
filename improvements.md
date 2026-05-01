@@ -52,13 +52,13 @@ you which stack PR closes the row.**
 
 | #   | Title                                                    | Why it matters                                     | Depends on | Status                            |
 | --- | -------------------------------------------------------- | -------------------------------------------------- | ---------- | --------------------------------- |
-| 1   | `push` drift detection                                   | Prevent silent overwrites of dashboard edits       | #4         | Open (Stack G planned)            |
-| 2   | `apply` same-file conflict                               | `apply` drops concurrent same-file dashboard edits | #4         | Open (Stack G planned)            |
+| 1   | `push` drift detection                                   | Prevent silent overwrites of dashboard edits       | #4         | RESOLVED 2026-04-30 (Stack G)     |
+| 2   | `apply` same-file conflict                               | `apply` drops concurrent same-file dashboard edits | #4         | Partial — Stack G GET on push     |
 | 3   | Rollback                                                 | Current undo can clobber newer live changes        | #4, #5     | Open (Stack H planned)            |
 | 4   | State schema content hashes                              | Architectural unlock for #1, #2, #3, #6, #7        | None       | RESOLVED 2026-04-30 (Stack F)     |
 | 5   | `push --dry-run`                                         | Cheapest operator-safety win                       | None       | RESOLVED 2026-04-30 (Stack C)     |
 | 6   | API-level optimistic concurrency                         | Server-side conflict rejection                     | Platform   | Deferred (Stack I, gated)         |
-| 7   | Voice edits drop pronunciation-dictionary attachments    | Silent regression on Cartesia + 11labs voice edits | #4         | Open (Stack G planned)            |
+| 7   | Voice edits drop pronunciation-dictionary attachments    | Silent regression on Cartesia + 11labs voice edits | #4         | RESOLVED 2026-04-30 (Stack G)     |
 | 8   | Dashboard prompt edits can in-place duplicate the prompt | Two stacked prompt versions = stitched output      | None       | Partial — Stack D heuristic       |
 | 9   | Provider-specific voice schema mismatch (push 400)       | `voice.speed` vs `voice.generationConfig.speed`    | None       | RESOLVED 2026-04-30 (Stack D + A) |
 | 10  | Targeted assistant push mints duplicate tools            | Re-pushing assistant duplicates `end-call-*` tools | #4         | Partial                           |
