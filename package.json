@@ -14,6 +14,7 @@
     "cleanup": "tsx src/cleanup-cmd.ts",
     "eval": "tsx src/eval.ts",
     "validate": "tsx src/validate-cmd.ts",
+    "sim": "tsx src/sim-cmd.ts",
     "build": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },
