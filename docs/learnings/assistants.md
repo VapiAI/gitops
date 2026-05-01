@@ -24,6 +24,29 @@ If omitted, Vapi defaults to `temperature: 0` and `maxTokens: 250`. This can cau
 
 Despite being a configurable field, this setting currently has **no effect** on call behavior. Don't rely on it.
 
+### `gpt-5` is a reasoning model; `gpt-5-chat-latest` is the non-reasoning chat variant
+
+OpenAI's `gpt-5` family on Vapi splits into two distinct shapes:
+
+| Model ID | Behavior | Use it for |
+|---|---|---|
+| `gpt-5` | **Reasoning model.** Generates internal reasoning tokens before any user-visible output. Reasoning tokens are billed and **count against `maxTokens`**. | Tasks where multi-step deduction over the prompt is the goal. |
+| `gpt-5-chat-latest` | **Non-reasoning chat variant.** Behaves like a standard chat completion. No hidden reasoning step. | Conversational SDR, tool-only triage, anything latency-sensitive. |
+
+**The footgun:** `gpt-5`'s reasoning tokens are invisible in the assistant config but are deducted from your `maxTokens` ceiling. A tool-only assistant configured with `model: gpt-5, maxTokens: 60` may have only a handful of tokens left after reasoning to emit a tool call. Symptoms cluster:
+
+- Model emits free-form text instead of the expected tool call ("voicing reasoning out loud") because the tool-call envelope can't fit in the leftover budget.
+- When multiple tools are available, the model picks whichever has the cheapest argument shape (e.g. `dtmf` with `keys: "0w"` is ~5 output tokens; a handoff with a sentence-long `reason` is ~25+). This looks like the model is misclassifying the situation but is actually a budget-fit decision.
+- The same prompt that worked correctly on `gpt-5-chat-latest` regresses to near-0% pass rate after a swap to `gpt-5` with no other config change.
+
+**Diagnostic signal:** if a model with a clear, well-described tool list still picks the wrong tool *and* the prompt explicitly forbids the picked tool in that case, suspect output-budget exhaustion before you suspect the prompt. Reasoning tokens spent silently bias output toward whatever is shortest.
+
+**Recommendation:**
+
+- **Tool-only / triage / classifier assistants** (must emit a tool call, never TTS): use `gpt-5-chat-latest`. Reasoning capability buys nothing — the job is "match transcript pattern, emit tool call."
+- **Conversational assistants where reasoning helps**: stick with `gpt-5-chat-latest` unless you have evidence reasoning is needed. If you do swap to `gpt-5`, set `maxTokens` to **at least 4–5x** the longest plausible visible response to leave headroom for the reasoning step. For a tool-only assistant, that means ≥150 even when the actual tool-call envelope is ~25 tokens.
+- **Default for new assistants in this repo:** `gpt-5-chat-latest` matches what every non-classifier assistant uses. Picking `gpt-5` should be a deliberate choice with a documented reason, not the result of grabbing the shortest model name from the API enum.
+
 ---
 
 ## Voice Configuration
