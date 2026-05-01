@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
 import { STATE_FILE_PATH, VAPI_ENV } from "./config.ts";
+import { sortedKeysReplacer } from "./state-serialize.ts";
 import type { StateFile } from "./types.ts";
+
+// Re-export the pure helper so callers can pull it from `state.ts` (same
+// import line as loadState/saveState) without forcing the config-laden
+// module on test code that just wants the serializer.
+export { sortedKeysReplacer } from "./state-serialize.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State Management
@@ -57,8 +63,16 @@ export async function saveState(state: StateFile): Promise<void> {
   // A crash or SIGINT mid-write leaves the original state intact rather than
   // truncating it. A truncated state file would silently wipe all UUID
   // mappings on the next load.
+  // sortedKeysReplacer enforces deterministic key ordering across every
+  // nested object so two semantically-equal state objects (with different
+  // insertion orders from push/pull/bootstrap merges) always serialize
+  // byte-identically. Without this, ~half of the state-file diff is pure
+  // reordering, which trains reviewers to skim past it.
   const tmpPath = `${STATE_FILE_PATH}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(state, null, 2) + "\n");
+  await writeFile(
+    tmpPath,
+    JSON.stringify(state, sortedKeysReplacer, 2) + "\n",
+  );
   await rename(tmpPath, STATE_FILE_PATH);
   console.log(`💾 Saved state file: ${STATE_FILE_PATH}`);
 }

@@ -68,7 +68,7 @@ you which stack PR closes the row.**
 | 14  | Multi-file push undocumented                             | Discoverability                                    | None       | RESOLVED 2026-04-30 (Stack A)     |
 | 15  | Scoped push rewrites entire state file                   | Pre-existing drift sweeps into focused commits     | #4         | Open (Stack J planned)            |
 | 16  | No CLI runner for simulation suites                      | Engine pushes them, can't run them                 | None       | Open (Stack E planned)            |
-| 17  | State file key-order churn produces noisy diffs          | Reorderings hide real changes                      | None       | Open (Stack B planned)            |
+| 17  | State file key-order churn produces noisy diffs          | Reorderings hide real changes                      | None       | RESOLVED 2026-04-30 (Stack B)     |
 | 18  | Structured-output `name` capped at 40 chars (no warning) | Push fails partway after partial application       | None       | Open (Stack D planned)            |
 | 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | Open (Stack D planned)            |
 | 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Open (Stack D heuristic planned)  |
