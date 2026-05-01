@@ -111,16 +111,18 @@ async function main(): Promise<void> {
   }
 
   const state = loadState();
+  // Stack F: state values are ResourceState objects, not bare UUIDs. Extract
+  // each .uuid for the orphan-detection set.
   const stateIds = new Set([
-    ...Object.values(state.assistants),
-    ...Object.values(state.tools),
-    ...Object.values(state.structuredOutputs),
-    ...Object.values(state.squads),
-    ...Object.values(state.personalities),
-    ...Object.values(state.scenarios),
-    ...Object.values(state.simulations),
-    ...Object.values(state.simulationSuites),
-    ...Object.values(state.evals),
+    ...Object.values(state.assistants).map((e) => e.uuid),
+    ...Object.values(state.tools).map((e) => e.uuid),
+    ...Object.values(state.structuredOutputs).map((e) => e.uuid),
+    ...Object.values(state.squads).map((e) => e.uuid),
+    ...Object.values(state.personalities).map((e) => e.uuid),
+    ...Object.values(state.scenarios).map((e) => e.uuid),
+    ...Object.values(state.simulations).map((e) => e.uuid),
+    ...Object.values(state.simulationSuites).map((e) => e.uuid),
+    ...Object.values(state.evals).map((e) => e.uuid),
   ]);
 
   // A state file with zero tracked resources is almost always a fresh clone,

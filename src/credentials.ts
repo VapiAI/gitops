@@ -16,16 +16,16 @@ import type { StateFile } from "./types.ts";
 
 export function credentialReverseMap(state: StateFile): Map<string, string> {
   const map = new Map<string, string>();
-  for (const [name, uuid] of Object.entries(state.credentials)) {
-    map.set(uuid, name);
+  for (const [name, entry] of Object.entries(state.credentials)) {
+    map.set(entry.uuid, name);
   }
   return map;
 }
 
 export function credentialForwardMap(state: StateFile): Map<string, string> {
   const map = new Map<string, string>();
-  for (const [name, uuid] of Object.entries(state.credentials)) {
-    map.set(name, uuid);
+  for (const [name, entry] of Object.entries(state.credentials)) {
+    map.set(name, entry.uuid);
   }
   return map;
 }

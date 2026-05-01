@@ -2,17 +2,53 @@
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Per-resource state metadata. Stack F architectural pivot: state values
+// changed from bare `string` (UUID) to a structured ResourceState carrying
+// content hashes, timestamps, and (Stack I) optional platform version IDs.
+//
+// Backwards compatibility: legacy state files loaded with bare string values
+// are migrated at load time in `loadState()` — each string becomes
+// { uuid: <string> } with no other fields. The first push or pull after
+// migration populates the hash fields. Until then, drift detection (Stack G)
+// short-circuits cleanly because `lastPulledHash` is undefined.
+//
+// Why preserve backwards-compat instead of doing a flag-day migration:
+//   - Customer state files are committed to git. A breaking schema change
+//     would require a coordinated merge across every customer fork.
+//   - The fields are all optional except `uuid`, so existing loaders that
+//     only need the UUID work unchanged after going through the helpers
+//     in this module.
+export interface ResourceState {
+  uuid: string;
+  // sha256 of the canonicalized platform payload at last pull. Set by
+  // `pull.ts` after `cleanResource()` + canonical sort. Used by Stack G
+  // drift detection.
+  lastPulledHash?: string;
+  // ISO-8601 timestamp of the last pull. Useful for triage when investigating
+  // "when did this drift?".
+  lastPulledAt?: string;
+  // sha256 of the canonicalized payload that was last sent on PATCH/POST.
+  // Distinct from `lastPulledHash` because we may push without pulling.
+  lastPushedHash?: string;
+  // Platform-provided ETag / version identifier (Stack I). Engine populates
+  // it from response headers when the platform exposes one.
+  platformVersionId?: string;
+}
+
+// `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. After
+// Stack F it carries `Record<string, ResourceState>` per section instead of
+// bare strings. `loadState()` migrates legacy data automatically.
 export interface StateFile {
-  credentials: Record<string, string>;
-  assistants: Record<string, string>;
-  structuredOutputs: Record<string, string>;
-  tools: Record<string, string>;
-  squads: Record<string, string>;
-  personalities: Record<string, string>;
-  scenarios: Record<string, string>;
-  simulations: Record<string, string>;
-  simulationSuites: Record<string, string>;
-  evals: Record<string, string>;
+  credentials: Record<string, ResourceState>;
+  assistants: Record<string, ResourceState>;
+  structuredOutputs: Record<string, ResourceState>;
+  tools: Record<string, ResourceState>;
+  squads: Record<string, ResourceState>;
+  personalities: Record<string, ResourceState>;
+  scenarios: Record<string, ResourceState>;
+  simulations: Record<string, ResourceState>;
+  simulationSuites: Record<string, ResourceState>;
+  evals: Record<string, ResourceState>;
 }
 
 export interface ResourceFile<T = Record<string, unknown>> {

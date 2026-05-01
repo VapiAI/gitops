@@ -1,13 +1,48 @@
 import { existsSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
 import { STATE_FILE_PATH, VAPI_ENV } from "./config.ts";
-import { sortedKeysReplacer } from "./state-serialize.ts";
-import type { StateFile } from "./types.ts";
+import {
+  asResourceState,
+  hashPayload,
+  sortedKeysReplacer,
+  upsertState,
+} from "./state-serialize.ts";
+import type { ResourceState, StateFile } from "./types.ts";
 
-// Re-export the pure helper so callers can pull it from `state.ts` (same
-// import line as loadState/saveState) without forcing the config-laden
-// module on test code that just wants the serializer.
-export { sortedKeysReplacer } from "./state-serialize.ts";
+// Re-export pure helpers so callers can import them from the same file as
+// loadState / saveState (less import churn) but the helpers themselves stay
+// config-free for testability.
+export {
+  asResourceState,
+  hashPayload,
+  sortedKeysReplacer,
+  upsertState,
+} from "./state-serialize.ts";
+
+// Returns just the UUID for the most common call site (resolver, push,
+// pull). Returns undefined if the value isn't a recognized shape.
+export function stateUuid(
+  section: Record<string, ResourceState>,
+  resourceId: string,
+): string | undefined {
+  const entry = section[resourceId];
+  return entry?.uuid;
+}
+
+// Migrate one section: wrap any legacy string values as { uuid: string }.
+// Mutates in place — safe because the parent `loadState()` clones first via
+// the empty-state spread.
+function migrateSection(
+  raw: Record<string, unknown> | undefined,
+): Record<string, ResourceState> {
+  const out: Record<string, ResourceState> = {};
+  if (!raw) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    const rs = asResourceState(value);
+    if (rs) out[key] = rs;
+  }
+  return out;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State Management
@@ -51,11 +86,27 @@ export function loadState(): StateFile {
   }
 
   console.log(`📄 Loaded state file for environment: ${VAPI_ENV}`);
-  // Merge with empty state to ensure all keys exist (for backwards compatibility)
-  return {
+  // Merge with empty state to ensure all keys exist, then run the legacy
+  // migration so old state files (Record<string, string>) become
+  // Record<string, ResourceState> without rewriting on disk until the next
+  // saveState(). A "deploy and immediately rollback" scenario therefore does
+  // NOT corrupt state — the read path is purely additive.
+  const merged = {
     ...createEmptyState(),
-    ...(content as Partial<StateFile>),
-  } as StateFile;
+    ...(content as Partial<Record<keyof StateFile, unknown>>),
+  };
+  return {
+    credentials: migrateSection(merged.credentials as Record<string, unknown>),
+    assistants: migrateSection(merged.assistants as Record<string, unknown>),
+    structuredOutputs: migrateSection(merged.structuredOutputs as Record<string, unknown>),
+    tools: migrateSection(merged.tools as Record<string, unknown>),
+    squads: migrateSection(merged.squads as Record<string, unknown>),
+    personalities: migrateSection(merged.personalities as Record<string, unknown>),
+    scenarios: migrateSection(merged.scenarios as Record<string, unknown>),
+    simulations: migrateSection(merged.simulations as Record<string, unknown>),
+    simulationSuites: migrateSection(merged.simulationSuites as Record<string, unknown>),
+    evals: migrateSection(merged.evals as Record<string, unknown>),
+  };
 }
 
 export async function saveState(state: StateFile): Promise<void> {
@@ -63,11 +114,6 @@ export async function saveState(state: StateFile): Promise<void> {
   // A crash or SIGINT mid-write leaves the original state intact rather than
   // truncating it. A truncated state file would silently wipe all UUID
   // mappings on the next load.
-  // sortedKeysReplacer enforces deterministic key ordering across every
-  // nested object so two semantically-equal state objects (with different
-  // insertion orders from push/pull/bootstrap merges) always serialize
-  // byte-identically. Without this, ~half of the state-file diff is pure
-  // reordering, which trains reviewers to skim past it.
   const tmpPath = `${STATE_FILE_PATH}.tmp`;
   await writeFile(
     tmpPath,

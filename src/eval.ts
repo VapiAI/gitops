@@ -250,10 +250,13 @@ function loadVariables(config: EvalConfig): Record<string, unknown> | undefined 
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function resolveId(id: string, stateSection: Record<string, string>): string {
+function resolveId(
+  id: string,
+  stateSection: Record<string, { uuid: string } | undefined>,
+): string {
   const clean = id.split("##")[0]?.trim() ?? "";
   if (UUID_RE.test(clean)) return clean;
-  return stateSection[clean] ?? clean;
+  return stateSection[clean]?.uuid ?? clean;
 }
 
 function resolveAssistantConfig(config: Record<string, unknown>, state: StateFile): Record<string, unknown> {
@@ -278,7 +281,9 @@ function resolveAssistantConfig(config: Record<string, unknown>, state: StateFil
     }
   }
   // Resolve credentials
-  const credMap = new Map(Object.entries(state.credentials));
+  const credMap = new Map(
+    Object.entries(state.credentials).map(([slug, rs]) => [slug, rs.uuid]),
+  );
   if (credMap.size > 0) return deepReplace(resolved, credMap) as Record<string, unknown>;
   return resolved;
 }
@@ -314,7 +319,9 @@ async function resolveSquadConfig(config: Record<string, unknown>, state: StateF
       }
     }
   }
-  const credMap = new Map(Object.entries(state.credentials));
+  const credMap = new Map(
+    Object.entries(state.credentials).map(([slug, rs]) => [slug, rs.uuid]),
+  );
   if (credMap.size > 0) return deepReplace(resolved, credMap) as Record<string, unknown>;
   return resolved;
 }
@@ -344,9 +351,9 @@ function loadEvals(state: StateFile, filter?: string): EvalDefinition[] {
   const evalState = state.evals ?? {};
   const evals: EvalDefinition[] = [];
 
-  for (const [resourceId, uuid] of Object.entries(evalState)) {
+  for (const [resourceId, entry] of Object.entries(evalState)) {
     if (filter && !resourceId.toLowerCase().includes(filter.toLowerCase())) continue;
-    evals.push({ resourceId, evalId: uuid, name: resourceId });
+    evals.push({ resourceId, evalId: entry.uuid, name: resourceId });
   }
 
   return evals;
@@ -443,7 +450,7 @@ async function main(): Promise<void> {
 
   if (config.squadName) {
     if (config.useStored) {
-      const squadId = state.squads[config.squadName];
+      const squadId = state.squads[config.squadName]?.uuid;
       if (!squadId) {
         console.error(`❌ Squad not found in state: ${config.squadName}`);
         console.error("   Available: " + Object.keys(state.squads).join(", "));
@@ -466,7 +473,7 @@ async function main(): Promise<void> {
     }
   } else {
     if (config.useStored) {
-      const assistantId = state.assistants[config.assistantName!];
+      const assistantId = state.assistants[config.assistantName!]?.uuid;
       if (!assistantId) {
         console.error(`❌ Assistant not found in state: ${config.assistantName}`);
         process.exit(1);

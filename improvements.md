@@ -55,7 +55,7 @@ you which stack PR closes the row.**
 | 1   | `push` drift detection                                   | Prevent silent overwrites of dashboard edits       | #4         | Open (Stack G planned)            |
 | 2   | `apply` same-file conflict                               | `apply` drops concurrent same-file dashboard edits | #4         | Open (Stack G planned)            |
 | 3   | Rollback                                                 | Current undo can clobber newer live changes        | #4, #5     | Open (Stack H planned)            |
-| 4   | State schema content hashes                              | Architectural unlock for #1, #2, #3, #6, #7        | None       | Open (Stack F planned)            |
+| 4   | State schema content hashes                              | Architectural unlock for #1, #2, #3, #6, #7        | None       | RESOLVED 2026-04-30 (Stack F)     |
 | 5   | `push --dry-run`                                         | Cheapest operator-safety win                       | None       | RESOLVED 2026-04-30 (Stack C)     |
 | 6   | API-level optimistic concurrency                         | Server-side conflict rejection                     | Platform   | Deferred (Stack I, gated)         |
 | 7   | Voice edits drop pronunciation-dictionary attachments    | Silent regression on Cartesia + 11labs voice edits | #4         | Open (Stack G planned)            |

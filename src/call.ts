@@ -292,9 +292,8 @@ function resolveTarget(
   resourceType: ResourceType,
 ): string {
   if (resourceType === "squad") {
-    const squads =
-      (state as StateFile & { squads?: Record<string, string> }).squads || {};
-    const uuid = squads[target];
+    const squads = state.squads || {};
+    const uuid = squads[target]?.uuid;
     if (!uuid) {
       console.error(`❌ Squad not found: ${target}`);
       console.error("   Available squads:");
@@ -308,7 +307,7 @@ function resolveTarget(
     }
     return uuid;
   } else {
-    const uuid = state.assistants[target];
+    const uuid = state.assistants[target]?.uuid;
     if (!uuid) {
       console.error(`❌ Assistant not found: ${target}`);
       console.error("   Available assistants:");

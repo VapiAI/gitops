@@ -1,4 +1,4 @@
-import type { StateFile } from "./types.ts";
+import type { ResourceState, StateFile } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ID Resolution - Convert resource IDs to Vapi UUIDs
@@ -11,9 +11,14 @@ function isUUID(value: string): boolean {
   return UUID_REGEX.test(value);
 }
 
-// Check if a UUID is tracked in a state section (reverse lookup)
-function isKnownUUID(uuid: string, stateSection: Record<string, string>): boolean {
-  return Object.values(stateSection).includes(uuid);
+// Check if a UUID is tracked in a state section (reverse lookup). After
+// Stack F, sections store ResourceState entries — extract `.uuid` for the
+// reverse-lookup membership check.
+function isKnownUUID(uuid: string, stateSection: Record<string, ResourceState>): boolean {
+  for (const entry of Object.values(stateSection)) {
+    if (entry.uuid === uuid) return true;
+  }
+  return false;
 }
 
 export function resolveToolId(
@@ -29,7 +34,7 @@ export function resolveToolId(
     return cleanId;
   }
   
-  const uuid = state.tools[cleanId];
+  const uuid = state.tools[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Tool reference not found: ${cleanId}`);
     return null;
@@ -58,7 +63,7 @@ export function resolveStructuredOutputIds(
         return cleanId;
       }
       
-      const uuid = state.structuredOutputs[cleanId];
+      const uuid = state.structuredOutputs[cleanId]?.uuid;
       if (!uuid) {
         console.warn(`  ⚠️  Structured output reference not found: ${cleanId}`);
         return null;
@@ -82,7 +87,7 @@ export function resolveAssistantId(
     return cleanId;
   }
   
-  const uuid = state.assistants[cleanId];
+  const uuid = state.assistants[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Assistant reference not found: ${cleanId}`);
     return null;
@@ -110,7 +115,7 @@ export function resolvePersonalityId(
     return cleanId;
   }
   
-  const uuid = state.personalities[cleanId];
+  const uuid = state.personalities[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Personality reference not found: ${cleanId}`);
     return null;
@@ -129,7 +134,7 @@ export function resolveScenarioId(
     return cleanId;
   }
   
-  const uuid = state.scenarios[cleanId];
+  const uuid = state.scenarios[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Scenario reference not found: ${cleanId}`);
     return null;
@@ -148,7 +153,7 @@ export function resolveSimulationId(
     return cleanId;
   }
   
-  const uuid = state.simulations[cleanId];
+  const uuid = state.simulations[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Simulation reference not found: ${cleanId}`);
     return null;
@@ -299,7 +304,7 @@ export function resolveReferences(
         if (isUUID(cleanId)) {
           evaluation.structuredOutputId = cleanId;
         } else {
-          const uuid = state.structuredOutputs[cleanId];
+          const uuid = state.structuredOutputs[cleanId]?.uuid;
           if (uuid) {
             evaluation.structuredOutputId = uuid;
           } else {

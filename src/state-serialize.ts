@@ -3,6 +3,9 @@
 // Kept config-free so tests can import without triggering the CLI argument
 // parser in `config.ts` (which `process.exit(1)`s when no env is supplied).
 
+import { createHash } from "crypto";
+import type { ResourceState } from "./types.ts";
+
 // JSON.stringify replacer that emits object keys in alphabetical order at
 // every nesting level. Without this, the state file diff includes pure
 // reorderings every time a resource map gets rebuilt from multiple sources
@@ -45,4 +48,44 @@ export function canonicalize(value: unknown): unknown {
     if (c !== undefined) sorted[k] = c;
   }
   return sorted;
+}
+
+// Stable sha256 of a payload after canonicalization. Used for content drift
+// detection (this stack populates the hashes; Stack G consumes them).
+export function hashPayload(payload: unknown): string {
+  const canonical = canonicalize(payload);
+  return createHash("sha256")
+    .update(JSON.stringify(canonical))
+    .digest("hex");
+}
+
+// Wrap a legacy state value (bare string UUID) as a ResourceState. Returns
+// undefined if the value isn't recognized — `loadState()` migrates the
+// shape, so an unrecognized value at load time means a corrupt state file.
+export function asResourceState(value: unknown): ResourceState | undefined {
+  if (typeof value === "string") return { uuid: value };
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof (value as { uuid?: unknown }).uuid === "string"
+  ) {
+    return value as ResourceState;
+  }
+  return undefined;
+}
+
+// Update or create the ResourceState entry for a resource with new content
+// hashes. Preserves whichever fields aren't being updated (e.g. setting
+// lastPushedHash leaves lastPulledHash intact). Critical for drift
+// detection — push must not stomp the lastPulledHash that pull populated.
+export function upsertState(
+  section: Record<string, ResourceState>,
+  resourceId: string,
+  patch: Partial<ResourceState> & { uuid: string },
+): void {
+  const existing = section[resourceId];
+  section[resourceId] = {
+    ...(existing ?? {}),
+    ...patch,
+  };
 }
