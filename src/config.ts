@@ -85,16 +85,19 @@ const VALID_TYPE_ARGS = [
 function parseFlags(): {
   forceDelete: boolean;
   bootstrapSync: boolean;
+  dryRun: boolean;
   applyFilter: ApplyFilter;
 } {
   const args = process.argv.slice(3);
   const result: {
     forceDelete: boolean;
     bootstrapSync: boolean;
+    dryRun: boolean;
     applyFilter: ApplyFilter;
   } = {
     forceDelete: args.includes("--force"),
     bootstrapSync: args.includes("--bootstrap"),
+    dryRun: args.includes("--dry-run"),
     applyFilter: {},
   };
 
@@ -105,7 +108,8 @@ function parseFlags(): {
     const arg = args[i];
     if (!arg) continue;
 
-    if (arg === "--force" || arg === "--bootstrap") continue;
+    if (arg === "--force" || arg === "--bootstrap" || arg === "--dry-run")
+      continue;
 
     // --confirm <slug>: consumed by cleanup.ts directly. Eat the value here so
     // parseFlags' strict-arg check below doesn't trip on the slug.
@@ -238,6 +242,7 @@ export const VAPI_ENV = parseEnvironment();
 export const {
   forceDelete: FORCE_DELETE,
   bootstrapSync: BOOTSTRAP_SYNC,
+  dryRun: DRY_RUN,
   applyFilter: APPLY_FILTER,
 } = parseFlags();
 

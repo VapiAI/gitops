@@ -1,5 +1,36 @@
-import { VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
+import { DRY_RUN, VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
 import type { VapiResponse } from "./types.ts";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dry-run accounting
+//
+// In `--dry-run` mode, mutating requests (POST/PATCH/DELETE) are gated and
+// counted instead of executed. The end-of-run summary in push.ts reads
+// `getDryRunCounts()` to print "would create N, would update M, would delete K."
+//
+// GETs always run — drift detection (Stack G) and dry-run preview both need
+// to fetch current platform state.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DRY_RUN_COUNTS = { POST: 0, PATCH: 0, DELETE: 0 };
+
+export function getDryRunCounts(): { POST: number; PATCH: number; DELETE: number } {
+  return { ...DRY_RUN_COUNTS };
+}
+
+function formatBodyPreview(body: Record<string, unknown>): string {
+  // One-line preview: the first ~120 chars of the canonicalized JSON,
+  // truncated with an ellipsis. Helps the operator see *what* is being
+  // requested without dumping a multi-page payload per resource.
+  let preview: string;
+  try {
+    preview = JSON.stringify(body);
+  } catch {
+    preview = String(body);
+  }
+  if (preview.length > 120) preview = `${preview.slice(0, 117)}...`;
+  return preview;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HTTP Client for Vapi API
@@ -60,6 +91,20 @@ export async function vapiRequest<T = VapiResponse>(
 ): Promise<T> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
+  if (DRY_RUN) {
+    DRY_RUN_COUNTS[method]++;
+    console.log(
+      `  🧪 [dry-run] would ${method} ${endpoint}  ${formatBodyPreview(body)}`,
+    );
+    // Returning a stable fake response shaped like a typical create response.
+    // For PATCH the engine ignores the return (other than for `.id`); for
+    // POST the engine writes the returned id into state. In dry-run the
+    // state file is never persisted, so the synthetic id is local-only.
+    return {
+      id: `dry-run-${method.toLowerCase()}-${Date.now()}`,
+    } as unknown as T;
+  }
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();
     const response = await fetch(url, {
@@ -92,6 +137,12 @@ export async function vapiRequest<T = VapiResponse>(
 
 export async function vapiDelete(endpoint: string): Promise<void> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
+
+  if (DRY_RUN) {
+    DRY_RUN_COUNTS.DELETE++;
+    console.log(`  🧪 [dry-run] would DELETE ${endpoint}`);
+    return;
+  }
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();

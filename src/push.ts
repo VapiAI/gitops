@@ -1,10 +1,11 @@
 import { resolve } from "path";
 import { fileURLToPath } from "url";
-import { vapiRequest, VapiApiError } from "./api.ts";
+import { vapiRequest, VapiApiError, getDryRunCounts } from "./api.ts";
 import {
   VAPI_ENV,
   VAPI_BASE_URL,
   FORCE_DELETE,
+  DRY_RUN,
   APPLY_FILTER,
   BASE_DIR,
   removeExcludedKeys,
@@ -841,6 +842,9 @@ async function main(): Promise<void> {
   console.log(
     `   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (dry-run)"}`,
   );
+  if (DRY_RUN) {
+    console.log("   Mode: 🧪 DRY-RUN (no API mutations, no state file write)");
+  }
   if (APPLY_FILTER.resourceTypes?.length) {
     console.log(`   Filter: ${APPLY_FILTER.resourceTypes.join(", ")}`);
   }
@@ -1230,10 +1234,17 @@ async function main(): Promise<void> {
   console.log(
     "\n═══════════════════════════════════════════════════════════════",
   );
-  console.log("✅ Apply complete!");
+  console.log(DRY_RUN ? "🧪 Dry-run complete (no changes applied)!" : "✅ Apply complete!");
   console.log(
     "═══════════════════════════════════════════════════════════════\n",
   );
+
+  if (DRY_RUN) {
+    const counts = getDryRunCounts();
+    console.log(
+      `🧪 Would create ${counts.POST}, would update ${counts.PATCH}, would delete ${counts.DELETE} (no API calls fired)`,
+    );
+  }
 
   // Summary - show what was applied vs total in state
   const totalApplied = Object.values(applied).reduce((a, b) => a + b, 0);
@@ -1275,16 +1286,26 @@ async function main(): Promise<void> {
     // Always flush state, even on partial failure — resources that already
     // received UUIDs from the API must be recorded so the next run does not
     // re-create them.
-    try {
-      await saveState(state);
-    } catch (saveError) {
-      console.error(
-        "\n⚠️  Failed to persist state file after apply:",
-        saveError instanceof Error ? saveError.message : saveError,
+    //
+    // EXCEPT in dry-run mode: no real API calls fired, so the state file
+    // would be polluted with synthetic dry-run UUIDs. Skip the save entirely.
+    if (DRY_RUN) {
+      console.log(
+        "\n🧪 [dry-run] Skipping state file write (would have written to "
+          + `.vapi-state.${VAPI_ENV}.json)`,
       );
-      console.error(
-        `   Local state may be out of sync with platform. Run \`npm run pull -- ${VAPI_ENV} --bootstrap\` to recover.`,
-      );
+    } else {
+      try {
+        await saveState(state);
+      } catch (saveError) {
+        console.error(
+          "\n⚠️  Failed to persist state file after apply:",
+          saveError instanceof Error ? saveError.message : saveError,
+        );
+        console.error(
+          `   Local state may be out of sync with platform. Run \`npm run pull -- ${VAPI_ENV} --bootstrap\` to recover.`,
+        );
+      }
     }
   }
 }
