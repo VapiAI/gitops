@@ -31,6 +31,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Building outbound calling agents | `docs/learnings/outbound-agents.md` |
 | Voicemail detection / VM vs human classification | `docs/learnings/voicemail-detection.md` |
 | Enforcing call time limits / graceful call ending | `docs/learnings/call-duration.md` |
+| Voice provider field cheat-sheet (Cartesia vs 11labs vs OpenAI etc.) | `docs/learnings/voice-providers.md` |
 
 ---
 
@@ -50,6 +51,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Pull latest from Vapi               | `npm run pull -- <org>`, `--force`, or `--bootstrap`                              |
 | Pull one known remote resource      | `npm run pull -- <org> --type assistants --id <uuid>`                             |
 | Push only one file                  | `npm run push -- <org> resources/<org>/assistants/my-agent.md`                    |
+| Push multiple specific files        | `npm run push -- <org> <path1> <path2>` (one state-file rewrite at the end)       |
 | Test a call                         | `npm run call -- <org> -a <assistant-name>`                                       |
 
 ---
@@ -744,6 +746,7 @@ npm run pull -- <org> --type squads --id <uuid>    # Pull one known remote resou
 npm run push -- <org>                              # Push all local changes to Vapi
 npm run push -- <org> assistants                   # Push only assistants
 npm run push -- <org> resources/<org>/assistants/my-agent.md  # Push single file
+npm run push -- <org> <path1> <path2>              # Push multiple specific files (one state write)
 npm run apply -- <org>                             # Pull then push (full sync)
 
 # Testing

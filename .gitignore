@@ -20,8 +20,12 @@ Thumbs.db
 
 tmp/
 
+# Local snapshots written by `npm run push` for `npm run rollback` recovery.
+# Operator-local; not shared.
+.vapi-state.*.snapshots/
+
 # Local agent state
 .claude/
-
-# Local-only audit notes (not part of the upstream repo)
-requested improvements.md
+.agent/
+.agent/handoffs/
+.claude/handoffs/
