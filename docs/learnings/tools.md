@@ -4,6 +4,43 @@ Non-obvious behaviors and silent defaults for Vapi tool types.
 
 ---
 
+## Common to All Tool Types
+
+### `function.description` must be under 1000 characters
+
+Vapi enforces a hard **1000-character maximum** on `function.description` across every tool type (`function`, `apiRequest`, `transferCall`, `endCall`, `dtmf`, `voicemail`, `handoff`, `code`). Tools with descriptions ≥ 1000 chars don't fail loudly at push time — they ship to the dashboard, but the LLM behavior degrades in ways that look like prompt or model bugs:
+
+- The tool may stop being invoked at the right moment (or at all).
+- The LLM may invoke a *different* (cheaper-to-emit / shorter-description) tool whose envelope fits its remaining context budget.
+- For platform-fired tool types like `type: voicemail` and `type: dtmf`, an over-limit description may degrade the trigger-detection signal that the platform pipeline reads from the description metadata.
+
+**Diagnostic signal:** if a tool with a long, detailed description (verbose WHEN-TO-CALL / STRATEGY / numbered phrase lists) is being mis-fired or ignored — measure the description length first, before changing the prompt or the model.
+
+**Recommendation:**
+
+- Validate description length at authoring time. A one-liner: `python3 -c 'import yaml,sys; print(len((yaml.safe_load(open(sys.argv[1])).get("function") or {}).get("description","")))' path/to/tool.yml`.
+- Keep descriptions **focused on the LLM-visible decision**: WHEN to call, WHEN NOT to call, the parameter shape. Drop:
+  - **Strategy sections** that duplicate logic already in the assistant's system prompt (e.g., "STRATEGY FOR REACHING A HUMAN" duplicates IVR-handling rules from the prompt).
+  - **Long phrase lists** for platform-fired tools like `type: voicemail`. Vapi's voicemail-detection pipeline runs independently of the LLM-visible description; a 38-numbered-phrase list adds noise without changing detection.
+  - **Anti-TTS-leakage META preambles**. Tool descriptions are never voiced by the TTS pipeline — they reach the LLM as function-spec metadata, not assistant content. The "do not verbalize" guard is unnecessary and costs ~150–250 chars.
+- Audit existing tools when symptoms appear:
+  ```bash
+  python3 -c '
+  import yaml, glob
+  for p in glob.glob("resources/*/tools/*.yml"):
+      d = (yaml.safe_load(open(p)).get("function") or {}).get("description","") or ""
+      if len(d) >= 1000: print(f"{p}: {len(d)} chars")
+  '
+  ```
+
+**Sweet spot:** 200–800 chars for a well-scoped tool. Above 800, audit for content that belongs in the assistant prompt instead.
+
+### `function.name` matches `^[A-Za-z0-9_-]+$`
+
+Tool names are validated against this regex by Vapi. Spaces, dots, slashes, parentheses, or unicode characters cause a 400 at push time. Use snake_case or camelCase (e.g. `end_call_vapi_testing`, `handoffToiFormSales`). The name is what the LLM emits in its function call, so keep it stable across config changes — renaming a tool invalidates any prompt rule that mentions the old name.
+
+---
+
 ## apiRequest Tools
 
 ### `body` is the single source of truth for the LLM schema
