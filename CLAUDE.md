@@ -26,6 +26,26 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
    - WebSocket transport → `docs/learnings/websocket.md`
    - Call time limits / graceful ending → `docs/learnings/call-duration.md`
 
+## Improvements log
+
+This repo maintains an upstream-only running log at `improvements.md` (repo
+root). It tracks engine friction, footguns, and improvement ideas surfaced
+during real customer work — both before and after fixes land.
+
+**When you (Claude or human) hit something that makes you go "this should be
+better," append or update an entry in `improvements.md` in the same change.**
+The format is **Problem → Current behavior → Risk → Current mitigation →
+Possible fix → Status**, ordered by severity / blast radius. Cite source
+file paths with line numbers so future readers can verify your claims.
+
+When a fix lands, mark the entry `[RESOLVED YYYY-MM-DD] (#<PR-number>)` at
+the top — don't delete it. The history is the point.
+
+Customer-fork logs (`gitops-mudflap/improvements.md`,
+`gitops-amazon3p/improvements.md`) feed upstream: when an entry there is
+generic enough to apply across customers, surface it here in the same
+revision.
+
 ## Test-Call CLI Notes
 
 When debugging a customer issue with `npm run call -- <org> -s <squad>`:
