@@ -86,6 +86,23 @@ destinations:
 
 See [voicemail-detection.md](voicemail-detection.md) for the full two-agent relay architecture.
 
+### Request-start transcript attribution and destination prompt context
+
+The handoff's `request-start` message is delivered via the SOURCE assistant's TTS pipeline. In the canonical transcript (`messagesOpenAIFormatted`), the spoken opener appears as a `role: assistant` content turn attributed to the source — not the destination. The destination assistant's runtime `messages` array, on the other hand, **does not** contain the request-start. The destination is woken up with no record of the opener having been delivered.
+
+This creates two distinct problems for the destination assistant's first generated turn:
+
+1. **The destination can't "see" that the opener was delivered.** Its system prompt may say "the handoff tool just delivered the opener" but the conversation history contradicts that (no prior assistant turn). Under that contradiction, the model defaults to its strong prior — typically "I'm an assistant on an outbound call, my first turn should be a greeting" — and re-greets, which the customer hears as a redundant intro right after the request-start opener.
+
+2. **Practitioner-pattern violation amplifies the re-greet.** If the destination's system prompt has the opener QUOTED VERBATIM inside a "do NOT say this" instruction, the model reads it as a high-activation token block in active context. With the conversation-history contradiction above, the model falls back on the most-activated tokens and generates the opener — the exact text the prompt told it not to say. Same priming mechanism that bites any prompt that quotes forbidden output text in a "never say this" block.
+
+**Recommendation** for any destination assistant whose role is to continue a handed-off conversation:
+
+- **Never quote forbidden output text verbatim in the prompt.** Describe the constraint structurally instead of by example. For instance, encode the rule as: *"The handoff tool just delivered the opener (a one-paragraph greeting introducing your role and the topic). Your first turn MUST be a continuation. Forbidden first-turn shapes: any greeting (Hey/Hi/Hello + name), any name introduction (this is X / I'm X), any company mention combined with self-introduction, any 'reaching out about' phrase."*
+- **Pair with the `firstMessage` patterns from above.** Set `firstMessage: ""` and `firstMessageMode: assistant-speaks-first-with-model-generated-message` (see [`firstMessage` replays on every handoff re-entry, not just call start](#firstmessage-replays-on-every-handoff-re-entry-not-just-call-start)). The model then synthesizes a contextual continuation rather than replaying any intro.
+
+For sim suites grading the destination's first-turn behavior, see [simulations.md → Squad handoff `request-start` is attributed to the SOURCE assistant in the transcript](simulations.md#squad-handoff-request-start-is-attributed-to-the-source-assistant-in-the-transcript) and the surrounding LLM-as-Judge artifact section — the same architectural fact has consequences for both prompt design AND rubric authoring.
+
 ---
 
 ## Passing data between assistants

@@ -104,6 +104,65 @@ Simulation resource files use placeholder UUIDs (`a0000000`) locally. After the 
 
 ---
 
+## LLM-as-Judge Transcript Artifacts (Squad Handoff Sims)
+
+When a sim suite uses LLM-as-judge evaluators (descriptive structured-output rubrics graded by a judge LLM reading the call transcript), several **platform-internal transcript shapes** routinely confuse the judge into reporting failures on calls where the audio is clean. These artifacts are invisible to a human listener but preserved in the canonical `messagesOpenAIFormatted` transcript that the judge reads.
+
+If your rubric grades anything related to handoffs or "did the assistant emit text," you must explicitly tell the judge about these artifacts in the rubric description, or accept ambient false negatives.
+
+### OpenAI dual-emission: `content` alongside `tool_calls`
+
+**What actually happens:** OpenAI chat-completions models periodically emit a non-empty `content` field on the SAME assistant turn that carries `tool_calls: [...]`. This happens even when the system prompt explicitly forbids it ("Output is a single tool call or empty content. No prose, ever.") — the behavior is RLHF-driven and no prompt engineering reliably bulletproofs it.
+
+Vapi's TTS pipeline correctly suppresses speaking this `content` (so the audio is clean), but the dual-emitted text is preserved verbatim in `messagesOpenAIFormatted`. An LLM judge reading the transcript sees both the `content` AND the `tool_calls` and naturally interprets the content as text the assistant emitted before/alongside the tool call.
+
+**Recommendation:** In any rubric description that grades "did the assistant emit text before the tool call," explicitly clarify:
+
+> Content emitted in the SAME turn as the `tool_calls` field (OpenAI dual-emission, where one turn has both non-empty `content` and `tool_calls: [...]`) is NOT spoken by the TTS pipeline. It is a transcript-only artifact and does NOT count as text-before-tool-call. The relevant question is: did the assistant emit any STANDALONE text turn (a turn with non-empty content and NO `tool_calls` field) BEFORE the tool_call turn?
+
+The structurally correct fix is at the OpenAI API layer — passing `tool_choice: "required"` forbids content emission entirely. As of this writing the parameter is not exposed on the Vapi assistant config schema; track via your customer's `improvements.md` if relevant and link to the platform request when filing.
+
+### Squad handoff `request-start` is attributed to the SOURCE assistant in the transcript
+
+**What actually happens:** When a squad handoff fires and the handoff tool has a `request-start` message (the spoken opening line, see [squads.md → VM detection relay pattern](squads.md#the-vm-detection-relay-pattern)), Vapi delivers that message via the SOURCE assistant's TTS pipeline — not the destination's. In the canonical transcript, the request-start text appears as a `role: assistant` content turn AFTER the source's tool_call turn, attributed to the source.
+
+A passing transcript for a squad handoff looks like:
+
+```
+[user]: Hello.
+[assistant (source) tool_calls: handoff_to_<destination>]: <empty content>
+[tool]: "No handoff destination returned."   ← platform success signal (see below)
+[assistant (source) content]: "<request-start opener text>"   ← attributed to source
+[user]: <response>
+[assistant (destination)]: <continuation turn — discovery question, brief ack, etc.>
+```
+
+An LLM judge with a rubric like "did the source emit any text before/alongside the handoff?" naturally interprets the request-start as the source speaking, even though the platform delivered it through the source's voice as part of the handoff mechanism.
+
+**Recommendation:** In any rubric description that grades source-assistant text emission around the handoff, explicitly clarify:
+
+> The handoff tool's `request-start` message is delivered via the SOURCE assistant's TTS pipeline, so it appears in the transcript as a `role: assistant` content turn AFTER the source's tool_call. This single occurrence is the EXPECTED, CORRECT delivery — count it as the one allowed opener (platform-delivered, not source-generated), not as a violation.
+
+### `"No handoff destination returned"` is a SUCCESS signal, not a failure
+
+**What you might expect:** A tool-result string that reads "no destination returned" sounds like an error.
+
+**What actually happens:** The platform emits the literal string `"No handoff destination returned"` as the source assistant's tool-result whenever a squad handoff fires successfully and control transfers to the destination. The English-language reading is the opposite of its semantic meaning — it indicates the handoff WORKED, not that it failed.
+
+LLM judges (and humans skim-reading transcripts) routinely interpret this as a handoff failure, leading to dashboard narrative claims like "the source assistant never invoked the handoff tool" when the handoff worked perfectly.
+
+**Recommendation:** In any rubric description grading "did the handoff fire," explicitly clarify:
+
+> A `tool` result with the literal string "No handoff destination returned" is the platform's STANDARD success signal for a squad handoff (control was transferred to the destination assistant). It is NOT an error. Treat it as positive confirmation that the handoff fired.
+
+### The audio-vs-transcript gap
+
+The three artifacts above share a common shape: the audio is clean (the customer hears the right thing), but the transcript JSON has artifacts the LLM judge interprets as failures. Prompt-tightening on the source assistant alone won't close the gap when the divergence is at the platform-transcript layer.
+
+**Recommendation:** When debugging "the audio sounds good but the rubric fails," pull the raw `messagesOpenAIFormatted` for one failing call (via `GET /eval/simulation/run/:id/item/:itemId` → `metadata.call.messages`) before assuming the assistant misbehaved. The judge's narrative description in the dashboard will tell you which evaluator failed, but the structured transcript view tells you why. Cross-reference: [squads.md → Request-start transcript attribution and destination prompt context](squads.md#request-start-transcript-attribution-and-destination-prompt-context) for the handoff-side of the same architectural fact.
+
+---
+
 # API Endpoint Reference
 
 All simulation endpoints are **alpha-tier** (mounted at `/api-alpha` in Swagger, `ApiTags(..., AlphaTag)`), require Bearer auth (private API key OR org JWT), and are scoped to the caller's organization.
