@@ -56,7 +56,7 @@ you which stack PR closes the row.**
 | 2   | `apply` same-file conflict                               | `apply` drops concurrent same-file dashboard edits | #4         | Open (Stack G planned)            |
 | 3   | Rollback                                                 | Current undo can clobber newer live changes        | #4, #5     | Open (Stack H planned)            |
 | 4   | State schema content hashes                              | Architectural unlock for #1, #2, #3, #6, #7        | None       | Open (Stack F planned)            |
-| 5   | `push --dry-run`                                         | Cheapest operator-safety win                       | None       | Open (Stack C planned)            |
+| 5   | `push --dry-run`                                         | Cheapest operator-safety win                       | None       | RESOLVED 2026-04-30 (Stack C)     |
 | 6   | API-level optimistic concurrency                         | Server-side conflict rejection                     | Platform   | Deferred (Stack I, gated)         |
 | 7   | Voice edits drop pronunciation-dictionary attachments    | Silent regression on Cartesia + 11labs voice edits | #4         | Open (Stack G planned)            |
 | 8   | Dashboard prompt edits can in-place duplicate the prompt | Two stacked prompt versions = stitched output      | None       | Open (Stack D planned)            |

@@ -747,6 +747,7 @@ npm run push -- <org>                              # Push all local changes to V
 npm run push -- <org> assistants                   # Push only assistants
 npm run push -- <org> resources/<org>/assistants/my-agent.md  # Push single file
 npm run push -- <org> <path1> <path2>              # Push multiple specific files (one state write)
+npm run push -- <org> --dry-run                    # Preview without applying any platform changes
 npm run apply -- <org>                             # Pull then push (full sync)
 
 # Testing
