@@ -16,6 +16,51 @@ Extra system messages beyond `messages[0]` are **not** included in the tester's 
 
 ---
 
+## Scenario Naming Convention (CRITICAL for dashboard navigability)
+
+When the same rubric needs to run against multiple personality variants in a sim suite, give EACH `(rubric, personality)` pair its own scenario file with a uniquely descriptive name — even if the rubric content is identical across them.
+
+**Why:** the dashboard's run-history view displays scenarios by `name`, NOT by which personality drove the test. If 4 sims share a scenario named `iForm Live Human Pickup Handling`, all 4 result entries show identically in the suite-run sidebar — you can't tell which test was the "quick" pickup vs the "self-id" pickup vs the "question" pickup vs the "ambiguous-short" pickup without drilling into each item to see the personality. This makes failure investigation painful: every flickering test looks like the same test.
+
+**Recommendation:** name each scenario as `<base>-<personality-variant>-handling`, with a descriptive `name:` field that calls out the personality being tested.
+
+```yaml
+# resources/<env>/simulations/scenarios/iform-live-human-pickup-quick-handling.yml
+name: iForm Live Human Pickup — Quick (bare hello)
+evaluations: [...]
+```
+
+```yaml
+# resources/<env>/simulations/scenarios/iform-live-human-pickup-self-id-handling.yml
+name: iForm Live Human Pickup — Self-ID (driver introduces themselves)
+evaluations: [...]   # identical rubric content as above; only name differs
+```
+
+```yaml
+# resources/<env>/simulations/scenarios/iform-live-human-pickup-question-handling.yml
+name: iForm Live Human Pickup — Question (skeptical "who's calling?")
+evaluations: [...]   # same
+```
+
+Each test (sim) file then references its variant-specific scenario:
+
+```yaml
+# resources/<env>/simulations/tests/iform-live-human-pickup-quick.yml
+name: iForm Live Human Pickup - Quick
+personalityId: live-human-pickup-quick-bot
+scenarioId: iform-live-human-pickup-quick-handling
+```
+
+**Cost:** scenario file duplication — each variant is a copy of the same rubric content with a different `name:` field. Cheap. The duplication is mechanical (you can clone the source scenario file 4-6 times with a one-line `name:` change each).
+
+**Pays for itself the first time** you debug a failed run and need to identify which test variant flickered. Particularly important for LLM-as-judge sim suites where the per-evaluator results are subtle and the scenario name is your primary navigation handle.
+
+**Anti-pattern:** putting one shared scenario behind N personality variants in the same suite. The dashboard sidebar shows N rows with identical scenario names, only distinguishable by clicking into each item to see the personality. Sim iteration time inflates because every failure investigation starts with "wait, which one was this?"
+
+Cross-reference: this convention surfaced as friction during the Mudflap iForm Voicemail Triage sim iteration (PRISM-481). Original suites shipped with one shared scenario per group (4 live-pickup tests sharing one scenario, 6 voicemail-edge-cases sharing one scenario); split into per-personality scenarios mid-iteration. Worth shipping new suites in the per-personality form from day one.
+
+---
+
 ## Evaluation Comparators
 
 Simulation evaluations support these comparators:
