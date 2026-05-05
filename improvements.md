@@ -66,7 +66,7 @@ you which stack PR closes the row.**
 | 12  | State file accumulates UUIDs without source files        | Silent gitops drift                                | None       | Partial                           |
 | 13  | `.agent/` and `.claude/handoffs/` not gitignored         | `git add -A` sweeps PII handoff scratch            | None       | RESOLVED 2026-04-30 (Stack A)     |
 | 14  | Multi-file push undocumented                             | Discoverability                                    | None       | RESOLVED 2026-04-30 (Stack A)     |
-| 15  | Scoped push rewrites entire state file                   | Pre-existing drift sweeps into focused commits     | #4         | Open (Stack J planned)            |
+| 15  | Scoped push rewrites entire state file                   | Pre-existing drift sweeps into focused commits     | #4         | RESOLVED 2026-04-30 (Stack J)     |
 | 16  | No CLI runner for simulation suites                      | Engine pushes them, can't run them                 | None       | RESOLVED 2026-04-30 (Stack E)     |
 | 17  | State file key-order churn produces noisy diffs          | Reorderings hide real changes                      | None       | RESOLVED 2026-04-30 (Stack B)     |
 | 18  | Structured-output `name` capped at 40 chars (no warning) | Push fails partway after partial application       | None       | RESOLVED 2026-04-30 (Stack D)     |

@@ -15,6 +15,7 @@ import {
 import { summarizeFindings, validateResources } from "./validate.ts";
 import { checkDriftForUpdate } from "./drift.ts";
 import { writeSnapshot } from "./snapshot.ts";
+import { mergeScoped } from "./state-merge.ts";
 
 // Map a resource label to its state-file key. Used for snapshotting (Stack H)
 // — snapshot directories are keyed by the same names the state file uses.
@@ -777,6 +778,40 @@ function filterResourcesByPaths<T>(
   return resources.filter((r) => matchingIds.has(r.resourceId));
 }
 
+// Stack J — track which resourceIds were actually written during this apply.
+// On scoped push, the end-of-run save merges only these entries back into
+// the on-disk state, leaving untouched entries alone. Without this, a scoped
+// push (`npm run push -- <env> assistants/foo.md`) sweeps in any pre-existing
+// drift across the entire state file (improvements.md #15).
+interface TouchedSets {
+  tools: Set<string>;
+  structuredOutputs: Set<string>;
+  assistants: Set<string>;
+  squads: Set<string>;
+  personalities: Set<string>;
+  scenarios: Set<string>;
+  simulations: Set<string>;
+  simulationSuites: Set<string>;
+  evals: Set<string>;
+  // refreshed on every push (bootstrap pull populates them)
+  credentials: Set<string>;
+}
+
+function emptyTouchedSets(): TouchedSets {
+  return {
+    tools: new Set(),
+    structuredOutputs: new Set(),
+    assistants: new Set(),
+    squads: new Set(),
+    personalities: new Set(),
+    scenarios: new Set(),
+    simulations: new Set(),
+    simulationSuites: new Set(),
+    evals: new Set(),
+    credentials: new Set(),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-Dependency Resolution
 // When pushing a resource with missing dependencies, auto-apply them first
@@ -965,6 +1000,10 @@ async function main(): Promise<void> {
 
   // Load current state (needed for reference resolution even in partial apply)
   let state = loadState();
+
+  // Stack J — track which resourceIds we actually mutate so the end-of-run
+  // save can merge into existing on-disk state instead of rewriting wholesale.
+  const touched: TouchedSets = emptyTouchedSets();
 
   // Track what was applied for summary
   const applied: Record<ResourceType, number> = {
@@ -1203,6 +1242,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(tool.data),
         });
+        touched.tools.add(tool.resourceId);
         applied.tools++;
       } catch (error) {
         console.error(formatApiError(tool.resourceId, error));
@@ -1221,6 +1261,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(output.data),
         });
+        touched.structuredOutputs.add(output.resourceId);
         applied.structuredOutputs++;
       } catch (error) {
         console.error(formatApiError(output.resourceId, error));
@@ -1252,6 +1293,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(assistant.data),
         });
+        touched.assistants.add(assistant.resourceId);
         applied.assistants++;
       } catch (error) {
         console.error(formatApiError(assistant.resourceId, error));
@@ -1277,6 +1319,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(squad.data),
         });
+        touched.squads.add(squad.resourceId);
         applied.squads++;
       } catch (error) {
         console.error(formatApiError(squad.resourceId, error));
@@ -1295,6 +1338,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(personality.data),
         });
+        touched.personalities.add(personality.resourceId);
         applied.personalities++;
       } catch (error) {
         console.error(formatApiError(personality.resourceId, error));
@@ -1313,6 +1357,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(scenario.data),
         });
+        touched.scenarios.add(scenario.resourceId);
         applied.scenarios++;
       } catch (error) {
         console.error(formatApiError(scenario.resourceId, error));
@@ -1331,6 +1376,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(simulation.data),
         });
+        touched.simulations.add(simulation.resourceId);
         applied.simulations++;
       } catch (error) {
         console.error(formatApiError(simulation.resourceId, error));
@@ -1349,6 +1395,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(suite.data),
         });
+        touched.simulationSuites.add(suite.resourceId);
         applied.simulationSuites++;
       } catch (error) {
         console.error(formatApiError(suite.resourceId, error));
@@ -1366,6 +1413,7 @@ async function main(): Promise<void> {
           uuid,
           lastPushedHash: hashPayload(evalResource.data),
         });
+        touched.evals.add(evalResource.resourceId);
         applied.evals++;
       } catch (error) {
         console.error(formatApiError(evalResource.resourceId, error));
@@ -1455,7 +1503,14 @@ async function main(): Promise<void> {
       );
     } else {
       try {
-        await saveState(state);
+        // Stack J — for scoped pushes, only persist entries we actually
+        // mutated. Re-load disk state and merge our touched entries on top
+        // so unrelated drift in untouched entries is left alone. A bare
+        // (non-partial) push falls through to the wholesale save.
+        const stateToWrite = partial
+          ? mergeScoped(loadState(), state, touched)
+          : state;
+        await saveState(stateToWrite);
       } catch (saveError) {
         console.error(
           "\n⚠️  Failed to persist state file after apply:",
