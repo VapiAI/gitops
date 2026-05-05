@@ -86,6 +86,7 @@ function parseFlags(): {
   forceDelete: boolean;
   bootstrapSync: boolean;
   dryRun: boolean;
+  strictValidation: boolean;
   applyFilter: ApplyFilter;
 } {
   const args = process.argv.slice(3);
@@ -93,11 +94,13 @@ function parseFlags(): {
     forceDelete: boolean;
     bootstrapSync: boolean;
     dryRun: boolean;
+    strictValidation: boolean;
     applyFilter: ApplyFilter;
   } = {
     forceDelete: args.includes("--force"),
     bootstrapSync: args.includes("--bootstrap"),
     dryRun: args.includes("--dry-run"),
+    strictValidation: args.includes("--strict"),
     applyFilter: {},
   };
 
@@ -108,7 +111,12 @@ function parseFlags(): {
     const arg = args[i];
     if (!arg) continue;
 
-    if (arg === "--force" || arg === "--bootstrap" || arg === "--dry-run")
+    if (
+      arg === "--force" ||
+      arg === "--bootstrap" ||
+      arg === "--dry-run" ||
+      arg === "--strict"
+    )
       continue;
 
     // --confirm <slug>: consumed by cleanup.ts directly. Eat the value here so
@@ -243,6 +251,7 @@ export const {
   forceDelete: FORCE_DELETE,
   bootstrapSync: BOOTSTRAP_SYNC,
   dryRun: DRY_RUN,
+  strictValidation: STRICT_VALIDATION,
   applyFilter: APPLY_FILTER,
 } = parseFlags();
 
