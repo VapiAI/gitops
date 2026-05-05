@@ -751,6 +751,7 @@ npm run push -- <org> --dry-run                    # Preview without applying an
 npm run push -- <org> --strict                     # Abort push if any validator returns an error
 npm run apply -- <org>                             # Pull then push (full sync)
 npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
+npm run sim -- <org> --suite <name> --target <name>  # Run a simulation suite against an assistant/squad
 
 # Testing
 npm run call -- <org> -a <assistant-name>          # Call an assistant via WebSocket
