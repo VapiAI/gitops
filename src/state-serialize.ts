@@ -89,3 +89,68 @@ export function upsertState(
     ...patch,
   };
 }
+
+// Pronunciation-dictionary drop check (improvements.md #7). Detects when a
+// dictionary attachment disappears from the platform between pulls. Two
+// shapes are supported because Vapi exposes a different field per provider:
+//
+//   - 11labs (documented at
+//     https://docs.vapi.ai/assistants/pronunciation-dictionaries):
+//     `voice.pronunciationDictionaryLocators` — array of
+//     { pronunciationDictionaryId, versionId }. Dashboard edits that
+//     change the voice can drop entries from this array.
+//
+//   - Cartesia (passthrough; not in Vapi docs but observed in real customer
+//     payloads): `voice.pronunciationDictId` — single string id. The
+//     Cartesia voice-picker silently drops the field on voice change.
+//
+// Pure-data (no network) so safe to import in tests.
+type VoiceLike = {
+  voice?: {
+    pronunciationDictId?: unknown;
+    pronunciationDictionaryLocators?: unknown;
+  };
+};
+
+function locatorsArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+export function checkPronunciationDictDrop(
+  resourceId: string,
+  priorPayload: unknown,
+  newPayload: unknown,
+): string | null {
+  const priorVoice = (priorPayload as VoiceLike | undefined)?.voice;
+  const newVoice = (newPayload as VoiceLike | undefined)?.voice;
+
+  // Cartesia single-id form. Drops 1 → 0.
+  if (
+    priorVoice?.pronunciationDictId &&
+    typeof priorVoice.pronunciationDictId === "string" &&
+    !newVoice?.pronunciationDictId
+  ) {
+    return (
+      `   ⚠️  ${resourceId}: voice.pronunciationDictId was "${priorVoice.pronunciationDictId}" ` +
+      `at last pull but is missing on platform now. ` +
+      `Cartesia voice picker drops this silently — re-attach if needed.`
+    );
+  }
+
+  // 11labs locator-array form. Catches array clears (N → 0) and shrinks
+  // (N → M, M < N). A drop from 0 → 0 (or undefined → undefined) is a
+  // no-op and rightly returns null.
+  const priorLocators = locatorsArray(priorVoice?.pronunciationDictionaryLocators);
+  if (priorLocators.length > 0) {
+    const newLocators = locatorsArray(newVoice?.pronunciationDictionaryLocators);
+    if (newLocators.length < priorLocators.length) {
+      return (
+        `   ⚠️  ${resourceId}: voice.pronunciationDictionaryLocators dropped from ` +
+        `${priorLocators.length} entry/entries at last pull to ${newLocators.length} on platform now. ` +
+        `11labs dashboard voice edits can drop these silently — re-attach if needed.`
+      );
+    }
+  }
+
+  return null;
+}

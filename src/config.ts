@@ -87,6 +87,7 @@ function parseFlags(): {
   bootstrapSync: boolean;
   dryRun: boolean;
   strictValidation: boolean;
+  overwriteDrift: boolean;
   applyFilter: ApplyFilter;
 } {
   const args = process.argv.slice(3);
@@ -95,12 +96,14 @@ function parseFlags(): {
     bootstrapSync: boolean;
     dryRun: boolean;
     strictValidation: boolean;
+    overwriteDrift: boolean;
     applyFilter: ApplyFilter;
   } = {
     forceDelete: args.includes("--force"),
     bootstrapSync: args.includes("--bootstrap"),
     dryRun: args.includes("--dry-run"),
     strictValidation: args.includes("--strict"),
+    overwriteDrift: args.includes("--overwrite"),
     applyFilter: {},
   };
 
@@ -115,7 +118,8 @@ function parseFlags(): {
       arg === "--force" ||
       arg === "--bootstrap" ||
       arg === "--dry-run" ||
-      arg === "--strict"
+      arg === "--strict" ||
+      arg === "--overwrite"
     )
       continue;
 
@@ -252,6 +256,7 @@ export const {
   bootstrapSync: BOOTSTRAP_SYNC,
   dryRun: DRY_RUN,
   strictValidation: STRICT_VALIDATION,
+  overwriteDrift: OVERWRITE_DRIFT,
   applyFilter: APPLY_FILTER,
 } = parseFlags();
 
