@@ -409,6 +409,17 @@ If a hook references a `toolId` that doesn't exist, Vapi logs a warning and cont
 
 `customer.speech.timeout` (hook) and `silenceTimeoutSeconds` (assistant) are separate mechanisms. The hook fires an action; the timeout ends the call. Configure them independently.
 
+### `silenceTimeoutSeconds` minimum is 10
+
+The Vapi API enforces a hard minimum of **10 seconds** on `silenceTimeoutSeconds`. Setting this field to anything less than 10 (e.g., `5` or `8`) will fail at push time with:
+
+```
+PATCH /assistant/<id> → 400
+silenceTimeoutSeconds must not be less than 10
+```
+
+The minimum is not documented in the gitops engine README and is only surfaced when you POST/PATCH. If you need an "end the call almost immediately" pattern (e.g., a voicemail-leaver that should fire `end_call` right after delivering its request-start message), drive that behavior through the assistant's prompt + `firstMessageMode: assistant-speaks-first-with-model-generated-message` + `endCallFunctionEnabled: true` so the model fires the end-call tool on activation. The 10-second timeout is then just a safety net, not the primary exit path.
+
 ### Available hook events
 
 - `call.ending` — call is about to end

@@ -21,6 +21,17 @@ Primitive schemas (`string`, `boolean`, `number`) are automatically wrapped in a
 
 The result is unwrapped before being returned. This is transparent but can cause confusion if you inspect raw API calls.
 
+### `structuredOutput.name` is limited to 1-40 characters
+
+The Vapi API enforces a hard 40-character maximum on the `name` field of any structured output (including inline structured outputs used inside scenario evaluations). Names longer than 40 chars fail at push time with:
+
+```
+POST /eval/simulation/scenario → 400
+evaluations.5.structuredOutput.Name must be between 1 and 40 characters
+```
+
+Long, descriptive evaluator names like `assistant_left_voicemail_and_ended_call_promptly` (48 chars) or `assistant_detected_hostile_recording_and_ended_call` (51 chars) will silently exceed the limit until you POST. Keep names compact (`assistant_ended_call_after_message`, `assistant_handled_hostile_recording`) and put the descriptive nuance in the `description` field, which has no length cap. The constraint applies to the field on every structured output type — both standalone resources and inline evaluations within scenarios.
+
 ---
 
 ## assistant_ids Must Be UUIDs

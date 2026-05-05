@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+# This repo uses npm (package-lock.json). Stray pnpm-lock.yaml files
+# can appear if someone accidentally runs `pnpm install` — never commit them.
+pnpm-lock.yaml
 
 # Environment files (secrets - never commit these!)
 # Covers dev/stg/prod and any org slug (e.g. .env.roofr-production)
