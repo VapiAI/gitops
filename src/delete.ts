@@ -3,6 +3,7 @@ import { FORCE_DELETE } from "./config.ts";
 import { extractReferencedIds } from "./resolver.ts";
 import type {
   ResourceFile,
+  ResourceState,
   StateFile,
   LoadedResources,
   OrphanedResource,
@@ -15,13 +16,13 @@ import type {
 
 export function findOrphanedResources(
   loadedResourceIds: string[],
-  stateResourceIds: Record<string, string>
+  stateResourceIds: Record<string, ResourceState>
 ): OrphanedResource[] {
   const orphaned: OrphanedResource[] = [];
 
-  for (const [resourceId, uuid] of Object.entries(stateResourceIds)) {
+  for (const [resourceId, entry] of Object.entries(stateResourceIds)) {
     if (!loadedResourceIds.includes(resourceId)) {
-      orphaned.push({ resourceId, uuid });
+      orphaned.push({ resourceId, uuid: entry.uuid });
     }
   }
 

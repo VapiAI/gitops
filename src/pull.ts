@@ -15,9 +15,9 @@ import {
   loadIgnorePatterns,
   matchesIgnore,
 } from "./config.ts";
-import { loadState, saveState } from "./state.ts";
+import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
-import type { StateFile, ResourceType } from "./types.ts";
+import type { ResourceState, StateFile, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -221,11 +221,11 @@ async function pullCredentials(state: StateFile): Promise<void> {
   const credentials = await fetchCredentials();
   console.log(`   Found ${credentials.length} credentials in Vapi`);
 
-  const newSection: Record<string, string> = {};
+  const newSection: Record<string, ResourceState> = {};
   // Build reverse map from existing state to preserve slug stability
   const existingReverse = new Map<string, string>();
-  for (const [slug, uuid] of Object.entries(state.credentials)) {
-    existingReverse.set(uuid, slug);
+  for (const [slug, entry] of Object.entries(state.credentials)) {
+    existingReverse.set(entry.uuid, slug);
   }
 
   for (const cred of credentials) {
@@ -234,7 +234,12 @@ async function pullCredentials(state: StateFile): Promise<void> {
     if (!slug) {
       slug = credentialSlug(cred);
     }
-    newSection[slug] = cred.id;
+    // Preserve existing hash metadata if the slug+uuid pair survives.
+    const prior = state.credentials[slug];
+    newSection[slug] =
+      prior && prior.uuid === cred.id
+        ? prior
+        : { uuid: cred.id, lastPulledAt: new Date().toISOString() };
     console.log(`   🔑 ${slug} -> ${cred.id}`);
   }
 
@@ -327,12 +332,12 @@ function findExistingResourceId(
 }
 
 function removeUuidMappings(
-  stateSection: Record<string, string>,
+  stateSection: Record<string, ResourceState>,
   uuid: string,
   keepResourceId?: string,
 ): void {
-  for (const [resourceId, mappedUuid] of Object.entries(stateSection)) {
-    if (mappedUuid === uuid && resourceId !== keepResourceId) {
+  for (const [resourceId, entry] of Object.entries(stateSection)) {
+    if (entry.uuid === uuid && resourceId !== keepResourceId) {
       delete stateSection[resourceId];
     }
   }
@@ -368,8 +373,8 @@ function buildReverseMap(
   const map = new Map<string, string>();
   const stateSection = state[resourceType];
 
-  for (const [resourceId, uuid] of Object.entries(stateSection)) {
-    map.set(uuid, resourceId);
+  for (const [resourceId, entry] of Object.entries(stateSection)) {
+    map.set(entry.uuid, resourceId);
   }
 
   return map;
@@ -653,7 +658,7 @@ export async function pullResourceType(
 
   const reverseMap = buildReverseMap(state, resourceType);
   const credReverse = credentialReverseMap(state);
-  const newStateSection: Record<string, string> = resourceIds?.length
+  const newStateSection: Record<string, ResourceState> = resourceIds?.length
     ? { ...state[resourceType] }
     : {};
   const existingResourceIds = bootstrap
@@ -728,7 +733,7 @@ export async function pullResourceType(
         changedFiles.has(yamlPath)
       ) {
         console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-        newStateSection[resourceId] = resource.id;
+        upsertState(newStateSection, resourceId, { uuid: resource.id });
         skipped++;
         continue;
       }
@@ -761,7 +766,7 @@ export async function pullResourceType(
           const stateMtime = statSync(stateFilePath).mtimeMs;
           if (localMtime > stateMtime) {
             console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-            newStateSection[resourceId] = resource.id;
+            upsertState(newStateSection, resourceId, { uuid: resource.id });
             skipped++;
             continue;
           }
@@ -783,7 +788,7 @@ export async function pullResourceType(
         console.log(
           `   🗑️  ${resourceId} (deleted locally, intent in state — add to .vapi-ignore to stop tracking)`,
         );
-        newStateSection[resourceId] = resource.id;
+        upsertState(newStateSection, resourceId, { uuid: resource.id });
         skipped++;
         continue;
       }
@@ -825,8 +830,15 @@ export async function pullResourceType(
     if (isNew) created++;
     else updated++;
 
-    // Update state
-    newStateSection[resourceId] = resource.id;
+    // Update state with new content hash + timestamp (Stack F).
+    // Hashing the resolved-with-credentials payload (the form we will save
+    // to disk) keeps `lastPulledHash` aligned with the source-of-truth diff
+    // basis used by drift detection in Stack G.
+    upsertState(newStateSection, resourceId, {
+      uuid: resource.id,
+      lastPulledHash: hashPayload(withCredNames),
+      lastPulledAt: new Date().toISOString(),
+    });
   }
 
   // Update state with new mappings

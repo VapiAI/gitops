@@ -12,7 +12,12 @@ import {
   removeExcludedKeys,
 } from "./config.ts";
 import { summarizeFindings, validateResources } from "./validate.ts";
-import { loadState, saveState } from "./state.ts";
+import {
+  hashPayload,
+  loadState,
+  saveState,
+  upsertState,
+} from "./state.ts";
 import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
 import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
 import {
@@ -26,6 +31,7 @@ import type {
   ResourceFile,
   StateFile,
   ResourceType,
+  ResourceState,
   LoadedResources,
 } from "./types.ts";
 
@@ -49,7 +55,7 @@ async function upsertResourceWithStateRecovery(options: {
   resourceLabel: string;
   resourceId: string;
   existingUuid?: string;
-  stateSection: Record<string, string>;
+  stateSection: Record<string, ResourceState>;
   updateEndpoint: string;
   updatePayload: Record<string, unknown>;
   createEndpoint: string;
@@ -189,7 +195,7 @@ async function getInvalidStateMappings(
     const trackedResources = resources[type]
       .map((resource) => ({
         resourceId: resource.resourceId,
-        uuid: state[type][resource.resourceId],
+        uuid: state[type][resource.resourceId]?.uuid,
       }))
       .filter(
         (
@@ -307,7 +313,7 @@ export async function applyTool(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.tools[resourceId];
+  const existingUuid = state.tools[resourceId]?.uuid;
 
   // Resolve references (but assistants may not exist yet on first pass)
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -361,7 +367,7 @@ export async function applyStructuredOutput(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.structuredOutputs[resourceId];
+  const existingUuid = state.structuredOutputs[resourceId]?.uuid;
 
   // Resolve references to assistants (but assistants might not exist yet in first pass)
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -386,7 +392,7 @@ export async function applyAssistant(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.assistants[resourceId];
+  const existingUuid = state.assistants[resourceId]?.uuid;
 
   // Resolve tool and structured output references
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -408,7 +414,7 @@ export async function applySquad(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.squads[resourceId];
+  const existingUuid = state.squads[resourceId]?.uuid;
 
   // Resolve assistant references in members
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -430,7 +436,7 @@ export async function applyPersonality(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.personalities[resourceId];
+  const existingUuid = state.personalities[resourceId]?.uuid;
 
   // Personalities contain inline assistant config, no external references to resolve
   const payload = data as Record<string, unknown>;
@@ -452,7 +458,7 @@ export async function applyScenario(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.scenarios[resourceId];
+  const existingUuid = state.scenarios[resourceId]?.uuid;
 
   // Resolve structuredOutputId references in evaluations
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -474,7 +480,7 @@ export async function applySimulation(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.simulations[resourceId];
+  const existingUuid = state.simulations[resourceId]?.uuid;
 
   // Resolve personality and scenario references
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -496,7 +502,7 @@ export async function applySimulationSuite(
   state: StateFile,
 ): Promise<string | null> {
   const { resourceId, data } = resource;
-  const existingUuid = state.simulationSuites[resourceId];
+  const existingUuid = state.simulationSuites[resourceId]?.uuid;
 
   // Resolve simulation references
   const payload = resolveReferences(data as Record<string, unknown>, state);
@@ -518,7 +524,7 @@ export async function applyEval(
   state: StateFile,
 ): Promise<string> {
   const { resourceId, data } = resource;
-  const existingUuid = state.evals[resourceId];
+  const existingUuid = state.evals[resourceId]?.uuid;
 
   const payload = data as Record<string, unknown>;
 
@@ -557,7 +563,7 @@ export async function updateToolAssistantRefs(
 
     if (!hasAssistantRefs) continue;
 
-    const uuid = state.tools[resourceId];
+    const uuid = state.tools[resourceId]?.uuid;
     if (!uuid) continue;
 
     // Resolve destinations now that all assistants exist
@@ -590,7 +596,7 @@ export async function updateStructuredOutputAssistantRefs(
       continue;
     }
 
-    const uuid = state.structuredOutputs[resourceId];
+    const uuid = state.structuredOutputs[resourceId]?.uuid;
     if (!uuid) continue;
 
     // Resolve assistant IDs now that all assistants exist
@@ -716,7 +722,10 @@ async function ensureToolExists(
     const uuid = await applyTool(tool, ctx.state);
     ctx.autoApplied.add(`tools:${toolId}`);
     if (!uuid) return;
-    ctx.state.tools[tool.resourceId] = uuid;
+    upsertState(ctx.state.tools, tool.resourceId, {
+      uuid,
+      lastPushedHash: hashPayload(tool.data),
+    });
     ctx.applied.tools++;
     ctx.autoAppliedTools.push(tool);
   } catch (error) {
@@ -746,7 +755,10 @@ async function ensureStructuredOutputExists(
     const uuid = await applyStructuredOutput(output, ctx.state);
     ctx.autoApplied.add(`structuredOutputs:${outputId}`);
     if (!uuid) return;
-    ctx.state.structuredOutputs[output.resourceId] = uuid;
+    upsertState(ctx.state.structuredOutputs, output.resourceId, {
+      uuid,
+      lastPushedHash: hashPayload(output.data),
+    });
     ctx.applied.structuredOutputs++;
     ctx.autoAppliedStructuredOutputs.push(output);
   } catch (error) {
@@ -820,7 +832,10 @@ async function ensureAssistantExists(
       ctx.autoApplied.add(`assistants:${assistantId}`);
       return;
     }
-    ctx.state.assistants[assistant.resourceId] = uuid;
+    upsertState(ctx.state.assistants, assistant.resourceId, {
+      uuid,
+      lastPushedHash: hashPayload(assistant.data),
+    });
     ctx.applied.assistants++;
     ctx.autoApplied.add(`assistants:${assistantId}`);
   } catch (error) {
@@ -1093,7 +1108,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applyTool(tool, state);
         if (!uuid) continue;
-        state.tools[tool.resourceId] = uuid;
+        upsertState(state.tools, tool.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(tool.data),
+        });
         applied.tools++;
       } catch (error) {
         console.error(formatApiError(tool.resourceId, error));
@@ -1108,7 +1126,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applyStructuredOutput(output, state);
         if (!uuid) continue;
-        state.structuredOutputs[output.resourceId] = uuid;
+        upsertState(state.structuredOutputs, output.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(output.data),
+        });
         applied.structuredOutputs++;
       } catch (error) {
         console.error(formatApiError(output.resourceId, error));
@@ -1136,7 +1157,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applyAssistant(assistant, state);
         if (!uuid) continue;
-        state.assistants[assistant.resourceId] = uuid;
+        upsertState(state.assistants, assistant.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(assistant.data),
+        });
         applied.assistants++;
       } catch (error) {
         console.error(formatApiError(assistant.resourceId, error));
@@ -1158,7 +1182,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applySquad(squad, state);
         if (!uuid) continue;
-        state.squads[squad.resourceId] = uuid;
+        upsertState(state.squads, squad.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(squad.data),
+        });
         applied.squads++;
       } catch (error) {
         console.error(formatApiError(squad.resourceId, error));
@@ -1173,7 +1200,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applyPersonality(personality, state);
         if (!uuid) continue;
-        state.personalities[personality.resourceId] = uuid;
+        upsertState(state.personalities, personality.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(personality.data),
+        });
         applied.personalities++;
       } catch (error) {
         console.error(formatApiError(personality.resourceId, error));
@@ -1188,7 +1218,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applyScenario(scenario, state);
         if (!uuid) continue;
-        state.scenarios[scenario.resourceId] = uuid;
+        upsertState(state.scenarios, scenario.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(scenario.data),
+        });
         applied.scenarios++;
       } catch (error) {
         console.error(formatApiError(scenario.resourceId, error));
@@ -1203,7 +1236,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applySimulation(simulation, state);
         if (!uuid) continue;
-        state.simulations[simulation.resourceId] = uuid;
+        upsertState(state.simulations, simulation.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(simulation.data),
+        });
         applied.simulations++;
       } catch (error) {
         console.error(formatApiError(simulation.resourceId, error));
@@ -1218,7 +1254,10 @@ async function main(): Promise<void> {
       try {
         const uuid = await applySimulationSuite(suite, state);
         if (!uuid) continue;
-        state.simulationSuites[suite.resourceId] = uuid;
+        upsertState(state.simulationSuites, suite.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(suite.data),
+        });
         applied.simulationSuites++;
       } catch (error) {
         console.error(formatApiError(suite.resourceId, error));
@@ -1232,7 +1271,10 @@ async function main(): Promise<void> {
     for (const evalResource of evals) {
       try {
         const uuid = await applyEval(evalResource, state);
-        state.evals[evalResource.resourceId] = uuid;
+        upsertState(state.evals, evalResource.resourceId, {
+          uuid,
+          lastPushedHash: hashPayload(evalResource.data),
+        });
         applied.evals++;
       } catch (error) {
         console.error(formatApiError(evalResource.resourceId, error));
