@@ -25,8 +25,9 @@ Use one assistant with a multilingual transcriber and voice.
 
 | Provider | Config | How it works |
 |----------|--------|--------------|
-| **Deepgram** (recommended) | `language: "multi"` on nova-3 | Auto-detects per-utterance across supported languages |
+| **Deepgram** (recommended) | `language: "multi"` on nova-3 | Auto-detects per-utterance across supported languages. Supports `keyterm` for vocabulary boosting (since Nov 2025). |
 | **Gladia** | `languageBehaviour: "automatic multiple languages"` | V2 solaria model with native code-switching |
+| **Soniox** | `model: stt-rt-v4`, `languages: [en, es]` | Single universal model handles 60+ languages — no per-language model swap. Supports `customVocabulary: [...]` for vocabulary boosting and `maxEndpointDelayMs` for turn-taking tuning. |
 | **Speechmatics** | `language: "en_es"` | Bilingual mode for Spanish+English |
 | **AssemblyAI** | `language: "multi"` | Universal streaming multilingual model |
 
@@ -263,9 +264,25 @@ voice: { provider: eleven-labs, voiceId: your-spanish-voice }
 
 This is most visible when a Spanish-only customer is misrecognized as English on their first utterance, which then cascades — the assistant responds in English, the customer gets confused, and the loop continues.
 
-**Recommendation for code-switching customers:** Use **Gladia Solaria** (`provider: gladia`, `languageBehaviour: automatic multiple languages`) instead of Deepgram `language: multi`. Solaria is built around code-switching as a first-class case and isn't biased by `keyterm` content the same way. See [Approach 1](#approach-1-single-static-agent) for the full transcriber comparison.
+**Recommendation for code-switching customers:** Use **Gladia Solaria** (`provider: gladia`, `languageBehaviour: automatic multiple languages`) or **Soniox** (`provider: soniox`, `model: stt-rt-v4`, `languages: [en, es]`) instead of Deepgram `language: multi`. Both are built around code-switching as a first-class case and aren't biased by vocabulary-boost content the same way. Soniox is the strongest pick when you need code-switching detection AND vocabulary boosting in the same call — it supports `customVocabulary: [...]` (the equivalent of Deepgram's `keyterm`) on the same single universal model that handles all 60+ languages. See [Approach 1](#approach-1-single-static-agent) for the full transcriber comparison.
 
 **If you must stay on Deepgram multi:** Keep `keyterm` short (under 20 entries), include the customer's expected non-English equivalents, and avoid English-only acronyms that have no foreign-language form.
+
+### Soniox sample config (multilingual + vocabulary boost)
+
+```yaml
+transcriber:
+  provider: soniox
+  model: stt-rt-v4
+  language: en             # primary / default language (ISO 639-1)
+  languages: [en, es]      # hint set for code-switching; omit for single-language
+  customVocabulary:
+    - your-brand-name
+    - domain-specific-term
+    - non-English-equivalent
+  confidenceThreshold: 0.3
+  # maxEndpointDelayMs: 800   # optional turn-taking tuning
+```
 
 ---
 

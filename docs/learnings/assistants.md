@@ -167,6 +167,22 @@ transcriber:
     - technical-acronym
 ```
 
+**Soniox supports the same idea as `customVocabulary`.** Soniox `stt-rt-v4` (a single universal model that handles all 60+ languages) accepts `customVocabulary: [...]` — an array of strings that biases recognition toward domain-specific terms. This is the Soniox equivalent of Deepgram `keyterm`, and unlike Deepgram nova-3, it works in multilingual mode without the English-bias caveat documented in [multilingual.md](multilingual.md). Pair with `languages: [en, es]` for code-switching plus vocabulary boost in the same call.
+
+```yaml
+transcriber:
+  provider: soniox
+  model: stt-rt-v4
+  language: en
+  languages: [en, es]      # optional; omit for single-language
+  customVocabulary:
+    - your-brand-name
+    - industry-specific-term
+    - product-name
+    - tarjeta de combustible    # non-English equivalents are fine
+  confidenceThreshold: 0.3
+```
+
 ### Deepgram Flux: end-of-turn detection knobs
 
 Vapi exposes all four of Deepgram Flux's end-of-turn detection parameters on the `transcriber` schema. They only apply when `model` starts with `flux-`.
