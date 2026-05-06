@@ -496,6 +496,17 @@ These are complementary, not alternatives.
 
 `numWords: 2` means the user must speak 2 words before the assistant stops talking. Lower values make the assistant more interruptible.
 
+### `voiceSeconds` maximum is 0.5
+
+The Vapi API enforces a hard maximum of **0.5 seconds** on `stopSpeakingPlan.voiceSeconds`. Setting this higher (e.g., `0.75` or `1.0`) fails at push time with:
+
+```
+PATCH /assistant/<id> → 400
+stopSpeakingPlan.voiceSeconds must not be greater than 0.5
+```
+
+The cap is undocumented in the schema reference but enforced server-side. When widening barge-in tolerance for assistants that handle continuous speech (voicemail prompts, IVR menus, fast personas), `numWords` is the load-bearing knob — `voiceSeconds` can only be tightened up to the cap (default 0.2 → max 0.5). For example, on a Soniox-transcribed classifier handling voicemail audio, `numWords: 5` does most of the work; `voiceSeconds: 0.5` is just a tighter ceiling.
+
 ### `numWords: 2` produces a 500–800ms TTS overlap window
 
 **Why this matters for transcript quality, not just feel:** While the assistant waits for the second word to land before stopping, both speakers are talking simultaneously. That overlap window is typically **500–800ms** at conversational pace. STT confidence drops sharply during overlap, so the customer's first sentence after a barge-in often arrives garbled — wrong words, dropped clauses, or low-confidence transcripts that get filtered out (see `confidenceThreshold` above).
