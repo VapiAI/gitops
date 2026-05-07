@@ -16,6 +16,10 @@ import { summarizeFindings, validateResources } from "./validate.ts";
 import { checkDriftForUpdate } from "./drift.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
+import {
+  findExistingResourceByName,
+  type RemoteResource,
+} from "./dep-dedup.ts";
 
 // Map a resource label to its state-file key. Used for snapshotting (Stack H)
 // — snapshot directories are keyed by the same names the state file uses.
@@ -827,6 +831,66 @@ interface DependencyContext {
   autoApplied: Set<string>;
   autoAppliedTools: ResourceFile<Record<string, unknown>>[];
   autoAppliedStructuredOutputs: ResourceFile<Record<string, unknown>>[];
+  // Stack — Gap #10 dedup. Lazy-fetched at most once per push when an
+  // auto-apply path needs to verify the tool/SO doesn't already exist on
+  // the dashboard under a different state key. `undefined` = not yet
+  // fetched; an empty array means "we tried, dashboard returned 0".
+  existingRemoteTools?: RemoteResource[];
+  existingRemoteStructuredOutputs?: RemoteResource[];
+  // Touched sets — adoption needs to mark touched so scoped state-merge
+  // (#15 / Stack J) persists the adopted UUID under the local resourceId.
+  touched: TouchedSets;
+}
+
+// Gap #10 — lazy-fetch the live dashboard tool list once per push. Used by
+// `ensureToolExists` to detect bootstrap-renamed entries (e.g. local key
+// `b2b-invoice-end-call` vs state key `end-call-67aea057`) and live
+// dashboard duplicates from prior bug runs before minting another POST.
+async function getExistingRemoteTools(
+  ctx: DependencyContext,
+): Promise<RemoteResource[]> {
+  if (ctx.existingRemoteTools !== undefined) return ctx.existingRemoteTools;
+  if (DRY_RUN) {
+    // Honor dry-run: no API calls. Empty list = "no dashboard match
+    // possible" → falls through to existing create-skip log.
+    ctx.existingRemoteTools = [];
+    return ctx.existingRemoteTools;
+  }
+  try {
+    const remote = await fetchAllResources("tools");
+    ctx.existingRemoteTools = remote as unknown as RemoteResource[];
+  } catch (err) {
+    console.warn(
+      `   ⚠️  Could not fetch dashboard tools for dedup check: ${
+        err instanceof Error ? err.message : String(err)
+      }. Falling back to state-only dedup.`,
+    );
+    ctx.existingRemoteTools = [];
+  }
+  return ctx.existingRemoteTools;
+}
+
+async function getExistingRemoteStructuredOutputs(
+  ctx: DependencyContext,
+): Promise<RemoteResource[]> {
+  if (ctx.existingRemoteStructuredOutputs !== undefined)
+    return ctx.existingRemoteStructuredOutputs;
+  if (DRY_RUN) {
+    ctx.existingRemoteStructuredOutputs = [];
+    return ctx.existingRemoteStructuredOutputs;
+  }
+  try {
+    const remote = await fetchAllResources("structuredOutputs");
+    ctx.existingRemoteStructuredOutputs = remote as unknown as RemoteResource[];
+  } catch (err) {
+    console.warn(
+      `   ⚠️  Could not fetch dashboard structured outputs for dedup check: ${
+        err instanceof Error ? err.message : String(err)
+      }. Falling back to state-only dedup.`,
+    );
+    ctx.existingRemoteStructuredOutputs = [];
+  }
+  return ctx.existingRemoteStructuredOutputs;
 }
 
 async function ensureToolExists(
@@ -843,6 +907,73 @@ async function ensureToolExists(
   const tool = ctx.allTools.find((t) => t.resourceId === toolId);
   if (!tool) return;
 
+  // Gap #10 dedup — before creating, check if a state entry under a
+  // different key (bootstrap-generated like `end-call-<uuid8>`) or a
+  // live dashboard tool already represents this same logical tool.
+  // Adopt instead of mint a duplicate.
+  const remoteList = await getExistingRemoteTools(ctx);
+  const match = findExistingResourceByName({
+    localResourceId: toolId,
+    localPayload: tool.data as Record<string, unknown>,
+    stateSection: ctx.state.tools,
+    remoteList,
+  });
+  if (match) {
+    if (match.ambiguous) {
+      const payload = tool.data as Record<string, unknown>;
+      const fn = payload.function as Record<string, unknown> | undefined;
+      const displayName =
+        (typeof fn?.name === "string" && fn.name) ||
+        (typeof payload.name === "string" && payload.name) ||
+        toolId;
+      console.warn(
+        `  ⚠️  Multiple dashboard tools share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${VAPI_ENV}\` to prune duplicates.`,
+      );
+    }
+    console.log(
+      `  🔁 Reusing existing tool: ${toolId} → ${match.uuid} (matched via ${match.source})`,
+    );
+
+    // Re-key state to point at the adopted UUID under the local resourceId.
+    // No hash yet — applyTool below will PATCH with the local payload and
+    // record the post-PATCH hash, exercising the standard drift-check flow.
+    upsertState(ctx.state.tools, tool.resourceId, { uuid: match.uuid });
+
+    // Orphan-deletion guard — drop other state keys pointing at the SAME uuid
+    // so a subsequent full push doesn't see them as "tracked but no local file"
+    // and DELETE the dashboard resource we just adopted. Mark them touched
+    // so mergeScoped (Stack J) flushes the deletion. Do NOT touch entries
+    // pointing at match.duplicateUuids — those are SEPARATE dashboard duplicates
+    // and `npm run cleanup` is the right tool for those.
+    for (const [staleKey, entry] of Object.entries(ctx.state.tools)) {
+      if (staleKey !== tool.resourceId && entry.uuid === match.uuid) {
+        delete ctx.state.tools[staleKey];
+        ctx.touched.tools.add(staleKey);
+      }
+    }
+
+    // Now PATCH the dashboard with the local payload. applyTool's
+    // upsertResourceWithStateRecovery branch picks PATCH because state.tools
+    // now has existingUuid set. Drift check fires (no-baseline → log + proceed
+    // when lastPulledHash is undefined; full check when it isn't).
+    try {
+      const uuid = await applyTool(tool, ctx.state);
+      ctx.autoApplied.add(`tools:${toolId}`);
+      if (!uuid) return;
+      upsertState(ctx.state.tools, tool.resourceId, {
+        uuid,
+        lastPushedHash: hashPayload(tool.data),
+      });
+      ctx.applied.tools++;
+      ctx.autoAppliedTools.push(tool);
+      ctx.touched.tools.add(tool.resourceId);
+    } catch (error) {
+      console.error(formatApiError(toolId, error));
+      throw error;
+    }
+    return;
+  }
+
   console.log(`  📦 Auto-applying dependency → tool: ${toolId}`);
   try {
     const uuid = await applyTool(tool, ctx.state);
@@ -854,6 +985,7 @@ async function ensureToolExists(
     });
     ctx.applied.tools++;
     ctx.autoAppliedTools.push(tool);
+    ctx.touched.tools.add(tool.resourceId);
   } catch (error) {
     console.error(formatApiError(toolId, error));
     throw error;
@@ -876,6 +1008,72 @@ async function ensureStructuredOutputExists(
   );
   if (!output) return;
 
+  // Gap #10 dedup — same as ensureToolExists but against the SO state
+  // section + dashboard SO list.
+  const remoteList = await getExistingRemoteStructuredOutputs(ctx);
+  const match = findExistingResourceByName({
+    localResourceId: outputId,
+    localPayload: output.data as Record<string, unknown>,
+    stateSection: ctx.state.structuredOutputs,
+    remoteList,
+  });
+  if (match) {
+    if (match.ambiguous) {
+      const payload = output.data as Record<string, unknown>;
+      const displayName =
+        (typeof payload.name === "string" && payload.name) || outputId;
+      console.warn(
+        `  ⚠️  Multiple dashboard structured outputs share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${VAPI_ENV}\` to prune duplicates.`,
+      );
+    }
+    console.log(
+      `  🔁 Reusing existing structured output: ${outputId} → ${match.uuid} (matched via ${match.source})`,
+    );
+
+    // Re-key state to point at the adopted UUID under the local resourceId.
+    // No hash yet — applyStructuredOutput below will PATCH with the local
+    // payload and record the post-PATCH hash, exercising the standard
+    // drift-check flow.
+    upsertState(ctx.state.structuredOutputs, output.resourceId, {
+      uuid: match.uuid,
+    });
+
+    // Orphan-deletion guard — drop other state keys pointing at the SAME uuid
+    // so a subsequent full push doesn't see them as "tracked but no local file"
+    // and DELETE the dashboard resource we just adopted. Mark them touched
+    // so mergeScoped (Stack J) flushes the deletion. Do NOT touch entries
+    // pointing at match.duplicateUuids — those are SEPARATE dashboard duplicates
+    // and `npm run cleanup` is the right tool for those.
+    for (const [staleKey, entry] of Object.entries(ctx.state.structuredOutputs)) {
+      if (staleKey !== output.resourceId && entry.uuid === match.uuid) {
+        delete ctx.state.structuredOutputs[staleKey];
+        ctx.touched.structuredOutputs.add(staleKey);
+      }
+    }
+
+    // Now PATCH the dashboard with the local payload. applyStructuredOutput's
+    // upsertResourceWithStateRecovery branch picks PATCH because
+    // state.structuredOutputs now has existingUuid set. Drift check fires
+    // (no-baseline → log + proceed when lastPulledHash is undefined; full
+    // check when it isn't).
+    try {
+      const uuid = await applyStructuredOutput(output, ctx.state);
+      ctx.autoApplied.add(`structuredOutputs:${outputId}`);
+      if (!uuid) return;
+      upsertState(ctx.state.structuredOutputs, output.resourceId, {
+        uuid,
+        lastPushedHash: hashPayload(output.data),
+      });
+      ctx.applied.structuredOutputs++;
+      ctx.autoAppliedStructuredOutputs.push(output);
+      ctx.touched.structuredOutputs.add(output.resourceId);
+    } catch (error) {
+      console.error(formatApiError(outputId, error));
+      throw error;
+    }
+    return;
+  }
+
   console.log(`  📦 Auto-applying dependency → structured output: ${outputId}`);
   try {
     const uuid = await applyStructuredOutput(output, ctx.state);
@@ -887,6 +1085,7 @@ async function ensureStructuredOutputExists(
     });
     ctx.applied.structuredOutputs++;
     ctx.autoAppliedStructuredOutputs.push(output);
+    ctx.touched.structuredOutputs.add(output.resourceId);
   } catch (error) {
     console.error(formatApiError(outputId, error));
     throw error;
@@ -1178,6 +1377,7 @@ async function main(): Promise<void> {
     autoApplied,
     autoAppliedTools,
     autoAppliedStructuredOutputs,
+    touched,
   };
 
   // Determine which types to check for orphaned deletions
