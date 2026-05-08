@@ -95,3 +95,75 @@ If a customer changes the provider on the dashboard and your local YAML still ha
 ## Adding a new provider
 
 If you find yourself reaching for a provider not in the table above, append a row here in the same PR. The cheat-sheet only stays useful if it grows with the platform.
+
+---
+
+## Pronunciation dictionary support: per-provider field shapes
+
+Pronunciation dictionaries do not share a field shape across voice providers. Same conceptual feature, three different surfaces.
+
+> **Public-docs note:** As of 2026-05-08 the public Vapi docs state pronunciation dictionaries are "exclusive to ElevenLabs voices." This is out of date — Cartesia has been confirmed in production deployments and Vapi-voice schema-level support is in active rollout (PRISM-474). Treat this wiki as the more current source.
+
+### Cartesia
+
+- **Field**: `voice.pronunciationDictId` — single string ID on the voice config.
+- **Model requirement**: `model: sonic-3` only. Other Cartesia models silently ignore the field.
+- **Upstream resource shape**: the Cartesia dictionary resource exposes a `name` field.
+- **Full config example**: see [assistants.md → Pronunciation dictionaries (TTS-level)](assistants.md#pronunciation-dictionaries-tts-level).
+
+### ElevenLabs
+
+- **Field**: `voice.pronunciationDictionaryLocators` — array of `{ pronunciationDictionaryId, versionId? }`.
+- **Model requirement**: alias rules work on all ElevenLabs models. **Phoneme rules are silently no-op'd** on `eleven_turbo_v2_5` (Vapi's default), `eleven_flash_v2_5`, `eleven_multilingual_v2`, and `eleven_v3`. See [ElevenLabs phoneme rule model compatibility](#elevenlabs-phoneme-rule-model-compatibility) below for the full breakdown.
+- **Upstream resource shape**: the ElevenLabs dictionary resource exposes a `dictionaryName` field — **NOT `name`**. This trips up wrappers that fetch dictionaries via API and surface them in tools that also handle Cartesia.
+
+### Vapi voices
+
+- **Schema-level**: accepts pronunciation dictionary configs at the API.
+- **Dashboard UI surface**: in active rollout (PRISM-474, Q2 2026). Schema acceptance does **not** guarantee runtime TTS engine honors the dictionary.
+- **Recommendation**: verify runtime behavior with a call test before depending on it for production Vapi-voice deployments.
+
+### Field shape gotcha
+
+The three provider families do NOT use the same field name on the upstream pronunciation-dictionary resource:
+
+| Provider | Upstream display-name field |
+|---|---|
+| Cartesia | `name` |
+| ElevenLabs | `dictionaryName` |
+| Vapi voices | shape pending finalization |
+
+If you're authoring a wrapper or migration tool that handles all three, gracefully handle the divergence. A single `name`-only path will silently render ElevenLabs dictionaries with empty labels.
+
+### ElevenLabs phoneme rule model compatibility
+
+ElevenLabs splits pronunciation rules into two types:
+
+- **Alias rules** — word substitution ("MyBrand" → "my-brand"). **Work universally** on all ElevenLabs models.
+- **Phoneme rules** — exact pronunciation via IPA / CMU Arpabet. **Model-dependent.**
+
+**Confirmed unsupported (silent no-op):**
+- `eleven_turbo_v2_5` — Vapi's default ElevenLabs model
+- `eleven_flash_v2_5`
+- `eleven_multilingual_v2`
+- `eleven_v3`
+
+**Confirmed supported:**
+- `eleven_flash_v2`
+- Likely `eleven_monolingual_v1` (ElevenLabs docs disagree across pages on the exact set — verify before depending on it)
+
+**Silent-skip behavior:** when a phoneme rule is sent to an unsupported model, ElevenLabs does NOT error. It bypasses the rule and uses standard pronunciation. **Customer impact:** attaching a phoneme-only dict to the default voice gets zero benefit with no signal — the call sounds exactly like the no-dict baseline.
+
+**Workarounds:**
+1. **Author dict as alias rules** — they work everywhere. Trade phoneme precision for portability.
+2. **Pin to `eleven_flash_v2`** — explicit model lock if phoneme accuracy matters more than the latency profile of `eleven_turbo_v2_5` / `eleven_flash_v2_5`.
+
+```yaml
+# Phoneme-rule-dependent — pin the model
+voice:
+  provider: 11labs
+  model: eleven_flash_v2
+  voiceId: <your-voice-id>
+  pronunciationDictionaryLocators:
+    - pronunciationDictionaryId: <your-dict-id>
+```

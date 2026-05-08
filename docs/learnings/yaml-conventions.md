@@ -183,6 +183,29 @@ The blank line after `---` is conventional; the strict requirement is just that 
 
 ---
 
+## Working with `.vapi-ignore`
+
+`.vapi-ignore` lives at `resources/<org>/.vapi-ignore` and excludes specific resources from pull and push so the dashboard stays the source of truth for them. See `AGENTS.md` (line 13) for the basic gitignore-style syntax.
+
+The recovery flow when a sync surfaces "drift" you didn't expect — typically prompted by "was that not in the .vapi-ignore?":
+
+1. **Inspect first**, don't edit. Diff the file against `main` to see whether the path was already ignored:
+   ```bash
+   git diff origin/main -- resources/<org>/.vapi-ignore
+   ```
+2. **If a dashboard-only asset is genuinely missing from `.vapi-ignore`**, add the pattern. Otherwise stop here — the asset belongs in yaml.
+3. **Dry-run before applying** to confirm only the intended assets will change:
+   ```bash
+   npm run push -- <org> --dry-run
+   ```
+4. **Apply** once the dry-run is clean: `npm run push -- <org>`.
+
+**Cardinal rule:** don't edit `.vapi-ignore` without explicit user direction. The file encodes intentional dashboard-vs-yaml ownership splits the user (or an earlier customer-engagement decision) knows about. Removing a pattern silently re-claims an asset for gitops control, which can blow away dashboard-only edits on the next push.
+
+**Anti-pattern:** editing `.vapi-ignore` because a sync surfaced an unexpected diff is *removing the protection*, not fixing the cause. The cause is usually upstream: the asset was edited in both places, or a new asset that should be dashboard-owned was created via gitops. Resolve at the source, then leave `.vapi-ignore` alone.
+
+---
+
 ## Cross-references
 
 - `docs/learnings/assistants.md` — assistant-specific frontmatter authoring

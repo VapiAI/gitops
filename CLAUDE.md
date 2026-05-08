@@ -25,6 +25,7 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
    - Multilingual agents → `docs/learnings/multilingual.md`
    - WebSocket transport → `docs/learnings/websocket.md`
    - Call time limits / graceful ending → `docs/learnings/call-duration.md`
+   - YAML authoring conventions, .vapi-ignore lifecycle → `docs/learnings/yaml-conventions.md`
 
 ## Improvements log
 
