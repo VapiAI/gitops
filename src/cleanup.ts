@@ -111,8 +111,8 @@ async function main(): Promise<void> {
   }
 
   const state = loadState();
-  // Stack F: state values are ResourceState objects, not bare UUIDs. Extract
-  // each .uuid for the orphan-detection set.
+  // State values are ResourceState objects, not bare UUIDs. Extract each
+  // .uuid for the orphan-detection set.
   const stateIds = new Set([
     ...Object.values(state.assistants).map((e) => e.uuid),
     ...Object.values(state.tools).map((e) => e.uuid),

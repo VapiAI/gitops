@@ -16,9 +16,14 @@ import { summarizeFindings, validateResources } from "./validate.ts";
 import { checkDriftForUpdate } from "./drift.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
+import {
+  extractResourceName,
+  findExistingResourceByName,
+  type RemoteResource,
+} from "./dep-dedup.ts";
 
-// Map a resource label to its state-file key. Used for snapshotting (Stack H)
-// — snapshot directories are keyed by the same names the state file uses.
+// Map a resource label to its state-file key. Used for snapshotting —
+// snapshot directories are keyed by the same names the state file uses.
 const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   tool: "tools",
   "structured output": "structuredOutputs",
@@ -99,12 +104,12 @@ async function upsertResourceWithStateRecovery(options: {
     `  🔄 Updating ${resourceLabel}: ${resourceId} (${existingUuid})`,
   );
 
-  // Stack G — drift detection. Before PATCH, GET the current platform
-  // payload, hash it, and compare to lastPulledHash. Refuse to overwrite
-  // without --overwrite. Skipped in dry-run because the operator just
-  // wants to see what would happen, and skipped if no baseline hash.
-  // Stack H — when we successfully fetch the platform payload, snapshot
-  // it (and our outgoing payload) so `npm run rollback` has a target.
+  // Drift detection. Before PATCH, GET the current platform payload, hash
+  // it, and compare to lastPulledHash. Refuse to overwrite without
+  // --overwrite. Skipped in dry-run because the operator just wants to see
+  // what would happen, and skipped if no baseline hash.
+  // When we successfully fetch the platform payload, snapshot it (and our
+  // outgoing payload) so `npm run rollback` has a target.
   if (!DRY_RUN) {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {
@@ -778,11 +783,12 @@ function filterResourcesByPaths<T>(
   return resources.filter((r) => matchingIds.has(r.resourceId));
 }
 
-// Stack J — track which resourceIds were actually written during this apply.
-// On scoped push, the end-of-run save merges only these entries back into
-// the on-disk state, leaving untouched entries alone. Without this, a scoped
-// push (`npm run push -- <env> assistants/foo.md`) sweeps in any pre-existing
-// drift across the entire state file (improvements.md #15).
+// Track which resourceIds were actually written during this apply. On
+// scoped push, the end-of-run save merges only these entries back into
+// the on-disk state, leaving untouched entries alone. Without this, a
+// scoped push (`npm run push -- <env> assistants/foo.md`) would sweep
+// pre-existing drift across the entire state file into the commit-able
+// diff.
 interface TouchedSets {
   tools: Set<string>;
   structuredOutputs: Set<string>;
@@ -827,6 +833,96 @@ interface DependencyContext {
   autoApplied: Set<string>;
   autoAppliedTools: ResourceFile<Record<string, unknown>>[];
   autoAppliedStructuredOutputs: ResourceFile<Record<string, unknown>>[];
+  // Lazy-fetched dashboard inventories — populated at most once per push,
+  // only when an auto-apply path needs to verify an existing dashboard
+  // resource isn't being shadowed by a renamed/state-only key.
+  // `undefined` = not yet fetched; `[]` = fetched but dashboard returned 0
+  // (or the fetch failed and we degraded to state-only dedup).
+  //
+  // Simulations / personalities / scenarios / simulation suites are not
+  // listed here because they're not auto-applied as dependencies anywhere
+  // in the engine (they're top-level resources only). If we ever add a
+  // dependency-resolution path for them, mirror this pattern.
+  existingRemoteTools?: RemoteResource[];
+  existingRemoteStructuredOutputs?: RemoteResource[];
+  existingRemoteAssistants?: RemoteResource[];
+  // Track which resourceIds we mutated so the scoped state-merge on save
+  // can flush only the touched section, leaving untouched on-disk state
+  // alone. Required for adoption: without it, a scoped push would lose
+  // the adopted UUID at end-of-run save.
+  touched: TouchedSets;
+}
+
+// Lazy-fetch the live dashboard inventory for a given resource type. Used by
+// the auto-apply path to detect existing dashboard resources before minting
+// a duplicate POST. Honors dry-run by skipping the API call entirely
+// (empty list → state-only dedup).
+async function getExistingRemoteTools(
+  ctx: DependencyContext,
+): Promise<RemoteResource[]> {
+  if (ctx.existingRemoteTools !== undefined) return ctx.existingRemoteTools;
+  if (DRY_RUN) {
+    ctx.existingRemoteTools = [];
+    return ctx.existingRemoteTools;
+  }
+  try {
+    const remote = await fetchAllResources("tools");
+    ctx.existingRemoteTools = remote as unknown as RemoteResource[];
+  } catch (err) {
+    console.warn(
+      `   ⚠️  Could not fetch dashboard tools for dedup check: ${
+        err instanceof Error ? err.message : String(err)
+      }. Falling back to state-only dedup.`,
+    );
+    ctx.existingRemoteTools = [];
+  }
+  return ctx.existingRemoteTools;
+}
+
+async function getExistingRemoteStructuredOutputs(
+  ctx: DependencyContext,
+): Promise<RemoteResource[]> {
+  if (ctx.existingRemoteStructuredOutputs !== undefined)
+    return ctx.existingRemoteStructuredOutputs;
+  if (DRY_RUN) {
+    ctx.existingRemoteStructuredOutputs = [];
+    return ctx.existingRemoteStructuredOutputs;
+  }
+  try {
+    const remote = await fetchAllResources("structuredOutputs");
+    ctx.existingRemoteStructuredOutputs = remote as unknown as RemoteResource[];
+  } catch (err) {
+    console.warn(
+      `   ⚠️  Could not fetch dashboard structured outputs for dedup check: ${
+        err instanceof Error ? err.message : String(err)
+      }. Falling back to state-only dedup.`,
+    );
+    ctx.existingRemoteStructuredOutputs = [];
+  }
+  return ctx.existingRemoteStructuredOutputs;
+}
+
+async function getExistingRemoteAssistants(
+  ctx: DependencyContext,
+): Promise<RemoteResource[]> {
+  if (ctx.existingRemoteAssistants !== undefined)
+    return ctx.existingRemoteAssistants;
+  if (DRY_RUN) {
+    ctx.existingRemoteAssistants = [];
+    return ctx.existingRemoteAssistants;
+  }
+  try {
+    const remote = await fetchAllResources("assistants");
+    ctx.existingRemoteAssistants = remote as unknown as RemoteResource[];
+  } catch (err) {
+    console.warn(
+      `   ⚠️  Could not fetch dashboard assistants for dedup check: ${
+        err instanceof Error ? err.message : String(err)
+      }. Falling back to state-only dedup.`,
+    );
+    ctx.existingRemoteAssistants = [];
+  }
+  return ctx.existingRemoteAssistants;
 }
 
 async function ensureToolExists(
@@ -843,6 +939,69 @@ async function ensureToolExists(
   const tool = ctx.allTools.find((t) => t.resourceId === toolId);
   if (!tool) return;
 
+  // Before creating, check whether an existing state entry (under a
+  // different key — e.g., bootstrap-generated `end-call-<uuid8>`) or a
+  // live dashboard tool already represents this same logical tool. Adopt
+  // instead of minting a duplicate.
+  const remoteList = await getExistingRemoteTools(ctx);
+  const match = findExistingResourceByName({
+    localResourceId: toolId,
+    localPayload: tool.data,
+    stateSection: ctx.state.tools,
+    remoteList,
+  });
+  if (match) {
+    if (match.ambiguous) {
+      const displayName = extractResourceName(tool.data) ?? toolId;
+      console.warn(
+        `  ⚠️  Multiple dashboard tools share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${VAPI_ENV}\` to prune duplicates.`,
+      );
+    }
+    console.log(
+      `  🔁 Reusing existing tool: ${toolId} → ${match.uuid} (matched via ${match.source})`,
+    );
+
+    // Re-key state to point at the adopted UUID under the local resourceId.
+    // No hash yet — applyTool below will PATCH with the local payload and
+    // record the post-PATCH hash, exercising the standard drift-check flow.
+    upsertState(ctx.state.tools, tool.resourceId, { uuid: match.uuid });
+
+    // Orphan-deletion guard — drop other state keys pointing at the SAME
+    // uuid so a subsequent full push doesn't see them as "tracked but no
+    // local file" and DELETE the dashboard resource we just adopted. Mark
+    // them touched so the scoped state-merge on save flushes the deletion.
+    // Entries pointing at `match.duplicateUuids` are SEPARATE dashboard
+    // duplicates — leave them alone; `npm run cleanup` handles those.
+    for (const [staleKey, entry] of Object.entries(ctx.state.tools)) {
+      if (staleKey !== tool.resourceId && entry.uuid === match.uuid) {
+        delete ctx.state.tools[staleKey];
+        ctx.touched.tools.add(staleKey);
+      }
+    }
+
+    // PATCH the dashboard with the local payload. `applyTool`'s
+    // `upsertResourceWithStateRecovery` branch picks PATCH because
+    // `state.tools` now has `existingUuid` set. Drift check fires
+    // (no-baseline → log + proceed when `lastPulledHash` is undefined;
+    // full check when it isn't).
+    try {
+      const uuid = await applyTool(tool, ctx.state);
+      ctx.autoApplied.add(`tools:${toolId}`);
+      if (!uuid) return;
+      upsertState(ctx.state.tools, tool.resourceId, {
+        uuid,
+        lastPushedHash: hashPayload(tool.data),
+      });
+      ctx.applied.tools++;
+      ctx.autoAppliedTools.push(tool);
+      ctx.touched.tools.add(tool.resourceId);
+    } catch (error) {
+      console.error(formatApiError(toolId, error));
+      throw error;
+    }
+    return;
+  }
+
   console.log(`  📦 Auto-applying dependency → tool: ${toolId}`);
   try {
     const uuid = await applyTool(tool, ctx.state);
@@ -854,6 +1013,7 @@ async function ensureToolExists(
     });
     ctx.applied.tools++;
     ctx.autoAppliedTools.push(tool);
+    ctx.touched.tools.add(tool.resourceId);
   } catch (error) {
     console.error(formatApiError(toolId, error));
     throw error;
@@ -876,6 +1036,65 @@ async function ensureStructuredOutputExists(
   );
   if (!output) return;
 
+  // Same dedup pattern as `ensureToolExists`, against the SO state section
+  // and live dashboard SO list.
+  const remoteList = await getExistingRemoteStructuredOutputs(ctx);
+  const match = findExistingResourceByName({
+    localResourceId: outputId,
+    localPayload: output.data,
+    stateSection: ctx.state.structuredOutputs,
+    remoteList,
+  });
+  if (match) {
+    if (match.ambiguous) {
+      const displayName = extractResourceName(output.data) ?? outputId;
+      console.warn(
+        `  ⚠️  Multiple dashboard structured outputs share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${VAPI_ENV}\` to prune duplicates.`,
+      );
+    }
+    console.log(
+      `  🔁 Reusing existing structured output: ${outputId} → ${match.uuid} (matched via ${match.source})`,
+    );
+
+    // Re-key state to point at the adopted UUID under the local resourceId.
+    // No hash yet — applyStructuredOutput below will PATCH with the local
+    // payload and record the post-PATCH hash, exercising the standard
+    // drift-check flow.
+    upsertState(ctx.state.structuredOutputs, output.resourceId, {
+      uuid: match.uuid,
+    });
+
+    // Orphan-deletion guard — drop other state keys pointing at the SAME
+    // uuid so a subsequent full push doesn't see them as "tracked but no
+    // local file" and DELETE the dashboard resource we just adopted. Mark
+    // them touched so the scoped state-merge on save flushes the deletion.
+    for (const [staleKey, entry] of Object.entries(ctx.state.structuredOutputs)) {
+      if (staleKey !== output.resourceId && entry.uuid === match.uuid) {
+        delete ctx.state.structuredOutputs[staleKey];
+        ctx.touched.structuredOutputs.add(staleKey);
+      }
+    }
+
+    // PATCH via the standard apply path so drift detection fires and any
+    // local edits land on the dashboard.
+    try {
+      const uuid = await applyStructuredOutput(output, ctx.state);
+      ctx.autoApplied.add(`structuredOutputs:${outputId}`);
+      if (!uuid) return;
+      upsertState(ctx.state.structuredOutputs, output.resourceId, {
+        uuid,
+        lastPushedHash: hashPayload(output.data),
+      });
+      ctx.applied.structuredOutputs++;
+      ctx.autoAppliedStructuredOutputs.push(output);
+      ctx.touched.structuredOutputs.add(output.resourceId);
+    } catch (error) {
+      console.error(formatApiError(outputId, error));
+      throw error;
+    }
+    return;
+  }
+
   console.log(`  📦 Auto-applying dependency → structured output: ${outputId}`);
   try {
     const uuid = await applyStructuredOutput(output, ctx.state);
@@ -887,6 +1106,7 @@ async function ensureStructuredOutputExists(
     });
     ctx.applied.structuredOutputs++;
     ctx.autoAppliedStructuredOutputs.push(output);
+    ctx.touched.structuredOutputs.add(output.resourceId);
   } catch (error) {
     console.error(formatApiError(outputId, error));
     throw error;
@@ -951,6 +1171,62 @@ async function ensureAssistantExists(
   const assistant = ctx.allAssistants.find((a) => a.resourceId === assistantId);
   if (!assistant) return;
 
+  // Same dedup pattern as `ensureToolExists` / `ensureStructuredOutputExists`,
+  // against the assistant state section and live dashboard list. Catches the
+  // case where bootstrap pull stored the same dashboard assistant under a
+  // `<name-slug>-<uuid8>` key and the squad references it by the original
+  // local key.
+  const remoteList = await getExistingRemoteAssistants(ctx);
+  const match = findExistingResourceByName({
+    localResourceId: assistantId,
+    localPayload: assistant.data,
+    stateSection: ctx.state.assistants,
+    remoteList,
+  });
+  if (match) {
+    if (match.ambiguous) {
+      const displayName = extractResourceName(assistant.data) ?? assistantId;
+      console.warn(
+        `  ⚠️  Multiple dashboard assistants share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${VAPI_ENV}\` to prune duplicates.`,
+      );
+    }
+    console.log(
+      `  🔁 Reusing existing assistant: ${assistantId} → ${match.uuid} (matched via ${match.source})`,
+    );
+
+    upsertState(ctx.state.assistants, assistant.resourceId, {
+      uuid: match.uuid,
+    });
+
+    // Orphan-deletion guard — drop other state keys pointing at the SAME
+    // uuid so a subsequent full push doesn't see them as "tracked but no
+    // local file" and DELETE the dashboard resource we just adopted.
+    for (const [staleKey, entry] of Object.entries(ctx.state.assistants)) {
+      if (staleKey !== assistant.resourceId && entry.uuid === match.uuid) {
+        delete ctx.state.assistants[staleKey];
+        ctx.touched.assistants.add(staleKey);
+      }
+    }
+
+    // PATCH via the standard apply path so drift detection fires and any
+    // local edits land on the dashboard.
+    try {
+      const uuid = await applyAssistant(assistant, ctx.state);
+      ctx.autoApplied.add(`assistants:${assistantId}`);
+      if (!uuid) return;
+      upsertState(ctx.state.assistants, assistant.resourceId, {
+        uuid,
+        lastPushedHash: hashPayload(assistant.data),
+      });
+      ctx.applied.assistants++;
+      ctx.touched.assistants.add(assistant.resourceId);
+    } catch (error) {
+      console.error(formatApiError(assistantId, error));
+      throw error;
+    }
+    return;
+  }
+
   console.log(`  📦 Auto-applying dependency → assistant: ${assistantId}`);
   try {
     const uuid = await applyAssistant(assistant, ctx.state);
@@ -964,6 +1240,7 @@ async function ensureAssistantExists(
     });
     ctx.applied.assistants++;
     ctx.autoApplied.add(`assistants:${assistantId}`);
+    ctx.touched.assistants.add(assistant.resourceId);
   } catch (error) {
     console.error(formatApiError(assistantId, error));
     throw error;
@@ -1001,8 +1278,8 @@ async function main(): Promise<void> {
   // Load current state (needed for reference resolution even in partial apply)
   let state = loadState();
 
-  // Stack J — track which resourceIds we actually mutate so the end-of-run
-  // save can merge into existing on-disk state instead of rewriting wholesale.
+  // Track which resourceIds we actually mutate so the end-of-run save can
+  // merge into existing on-disk state instead of rewriting wholesale.
   const touched: TouchedSets = emptyTouchedSets();
 
   // Track what was applied for summary
@@ -1178,6 +1455,7 @@ async function main(): Promise<void> {
     autoApplied,
     autoAppliedTools,
     autoAppliedStructuredOutputs,
+    touched,
   };
 
   // Determine which types to check for orphaned deletions
@@ -1503,9 +1781,9 @@ async function main(): Promise<void> {
       );
     } else {
       try {
-        // Stack J — for scoped pushes, only persist entries we actually
-        // mutated. Re-load disk state and merge our touched entries on top
-        // so unrelated drift in untouched entries is left alone. A bare
+        // For scoped pushes, only persist entries we actually mutated.
+        // Re-load disk state and merge our touched entries on top so
+        // unrelated drift in untouched entries is left alone. A bare
         // (non-partial) push falls through to the wholesale save.
         const stateToWrite = partial
           ? mergeScoped(loadState(), state, touched)

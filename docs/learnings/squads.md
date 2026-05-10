@@ -107,7 +107,7 @@ For sim suites grading the destination's first-turn behavior, see [simulations.m
 
 ## Passing data between assistants
 
-Cross-reference: [docs.vapi.ai/squads/passing-data-between-assistants](https://docs.vapi.ai/squads/passing-data-between-assistants). The trust-tier framing came out of Mudflap progressive-auth work (PRISM-528).
+Cross-reference: [docs.vapi.ai/squads/passing-data-between-assistants](https://docs.vapi.ai/squads/passing-data-between-assistants). The trust-tier framing came out of progressive caller-ID auth work on a customer rollout.
 
 When a squad hands off mid-call, three approaches exist for getting data from one assistant to the next. They differ on trust level, latency, and determinism.
 

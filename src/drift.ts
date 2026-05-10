@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Drift detection — Stack G
+// Drift detection
 //
 // Before each PATCH, GET the current platform payload, hash it, and compare
 // to the `lastPulledHash` recorded in state. If the hashes differ, the
 // dashboard has drifted away from the version we last pulled — refuse to
-// push without `--overwrite` (improvements.md #1, #2, #7).
+// push without `--overwrite`.
 //
 // Behavior matrix:
-//   - No `lastPulledHash` (e.g., legacy state, first push after Stack F):
-//     log "drift unknown — proceeding" and continue. Don't block.
+//   - No `lastPulledHash` (e.g., legacy state, first push after schema
+//     migration): log "drift unknown — proceeding" and continue. Don't block.
 //   - Hashes match:           continue silently.
 //   - Hashes differ + no --overwrite: refuse the push, return false.
 //   - Hashes differ + --overwrite:    log "overwriting drift" and continue.

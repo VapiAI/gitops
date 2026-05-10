@@ -61,7 +61,7 @@ you which stack PR closes the row.**
 | 7   | Voice edits drop pronunciation-dictionary attachments    | Silent regression on Cartesia + 11labs voice edits | #4         | RESOLVED 2026-04-30 (Stack G)     |
 | 8   | Dashboard prompt edits can in-place duplicate the prompt | Two stacked prompt versions = stitched output      | None       | Partial — Stack D heuristic       |
 | 9   | Provider-specific voice schema mismatch (push 400)       | `voice.speed` vs `voice.generationConfig.speed`    | None       | RESOLVED 2026-04-30 (Stack D + A) |
-| 10  | Targeted assistant push mints duplicate tools            | Re-pushing assistant duplicates `end-call-*` tools | #4         | Partial                           |
+| 10  | Targeted assistant push mints duplicate tools            | Re-pushing assistant duplicates `end-call-*` tools | #4         | RESOLVED 2026-05-06 (#23)         |
 | 11  | Bidirectional SO ↔ assistant lockstep has no validation  | One-sided edits silently inconsistent              | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 12  | State file accumulates UUIDs without source files        | Silent gitops drift                                | None       | Partial                           |
 | 13  | `.agent/` and `.claude/handoffs/` not gitignored         | `git add -A` sweeps PII handoff scratch            | None       | RESOLVED 2026-04-30 (Stack A)     |
@@ -533,6 +533,13 @@ cheat-sheet in `docs/learnings/voice-providers.md` (Stack A).
 
 ## 10. Targeted assistant pushes can auto-create duplicate tool dependencies
 
+**[RESOLVED 2026-05-06] (#23)** — `ensureToolExists` /
+`ensureStructuredOutputExists` now run a name-based dedup check (state-side
+via `extractBaseSlug` + dashboard-side via lazy `/tool` list) between the
+exact-key short-circuit and the create path. Adoption re-keys state to the
+canonical UUID, drops stale duplicate state keys (orphan-deletion guard),
+and routes through `applyTool` for the standard PATCH + drift-check flow.
+
 **Discovered:** customer-fork log (Amazon3p #10, 2026-04-29)
 
 ### Problem
@@ -578,9 +585,15 @@ Before re-pushing an assistant with local tool dependencies, inspect
 
 ### Status
 
-**Partial.** `ensureToolExists()` blocks the most common path; the
-state-renaming case remains. **Stack C dry-run** surfaces auto-apply
-intent before mutation.
+**Resolved 2026-05-06 (#23).** Name-based dedup check (state-side +
+dashboard-side) added between the exact-key short-circuit and the create
+path. Adoption re-keys state to the canonical UUID, removes stale duplicate
+state keys (touched-marked so `mergeScoped` flushes the deletion), and
+routes through `applyTool` so a PATCH + drift check fires with the local
+payload (no fake `lastPushedHash` recorded). Dashboard-side dedup honors
+dry-run by skipping the API call. Prior partial mitigation
+(`ensureToolExists` exact-key check) remains as the fast path; the new
+dedup is the second layer for the bootstrap-renamed case.
 
 ---
 

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Snapshot-on-push — Stack H
+// Snapshot-on-push
 //
 // Before each PATCH, write the *outgoing* (local) payload AND the *current
 // platform* payload to a per-push directory:
@@ -10,7 +10,7 @@
 // `platform` payload as a PATCH, restoring the dashboard to its state at
 // the moment of the snapshot.
 //
-// Reuses Stack G's drift-fetch path: when drift detection ran for this
+// Reuses the drift-detection fetch path: when drift detection ran for this
 // PATCH, the GET'd platform payload is passed in here so we don't pay a
 // second GET. Snapshots are local-operator state and are gitignored.
 // ─────────────────────────────────────────────────────────────────────────────

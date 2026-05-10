@@ -8,8 +8,8 @@ import type { VapiResponse } from "./types.ts";
 // counted instead of executed. The end-of-run summary in push.ts reads
 // `getDryRunCounts()` to print "would create N, would update M, would delete K."
 //
-// GETs always run — drift detection (Stack G) and dry-run preview both need
-// to fetch current platform state.
+// GETs always run — drift detection and dry-run preview both need to fetch
+// current platform state.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DRY_RUN_COUNTS = { POST: 0, PATCH: 0, DELETE: 0 };

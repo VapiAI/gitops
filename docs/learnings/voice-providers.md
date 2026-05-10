@@ -102,7 +102,7 @@ If you find yourself reaching for a provider not in the table above, append a ro
 
 Pronunciation dictionaries do not share a field shape across voice providers. Same conceptual feature, three different surfaces.
 
-> **Public-docs note:** As of 2026-05-08 the public Vapi docs state pronunciation dictionaries are "exclusive to ElevenLabs voices." This is out of date — Cartesia has been confirmed in production deployments and Vapi-voice schema-level support is in active rollout (PRISM-474). Treat this wiki as the more current source.
+> **Public-docs note:** As of 2026-05-08 the public Vapi docs state pronunciation dictionaries are "exclusive to ElevenLabs voices." This is out of date — Cartesia has been confirmed in production deployments and Vapi-voice schema-level support is in active rollout. Treat this wiki as the more current source.
 
 ### Cartesia
 
@@ -120,7 +120,7 @@ Pronunciation dictionaries do not share a field shape across voice providers. Sa
 ### Vapi voices
 
 - **Schema-level**: accepts pronunciation dictionary configs at the API.
-- **Dashboard UI surface**: in active rollout (PRISM-474, Q2 2026). Schema acceptance does **not** guarantee runtime TTS engine honors the dictionary.
+- **Dashboard UI surface**: in active rollout. Schema acceptance does **not** guarantee runtime TTS engine honors the dictionary.
 - **Recommendation**: verify runtime behavior with a call test before depending on it for production Vapi-voice deployments.
 
 ### Field shape gotcha
