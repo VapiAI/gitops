@@ -1,13 +1,13 @@
-// Gap #10 — dependency deduplication helpers.
+// Dependency deduplication helpers for the push pipeline.
 //
 // On a targeted assistant push, `ensureToolExists` / `ensureStructuredOutputExists`
 // previously skipped auto-create only when (a) the dep id was UUID-shaped,
 // (b) `state.tools[depId]` was an exact key match, or (c) we'd already
-// auto-applied this id in the current run. Bootstrap pull (pull.ts:269-273)
-// stores resources under `<slug>-<uuid8>` keys (e.g. `end-call-67aea057`),
-// so a local file referencing `b2b-invoice-end-call` would miss the exact-key
-// check and POST a duplicate dashboard tool. Repeated targeted pushes
-// accumulated orphans on the dashboard.
+// auto-applied this id in the current run. Bootstrap pull stores resources
+// under `<slug>-<uuid8>` keys (e.g. `end-call-67aea057`), so a local file
+// referencing `b2b-invoice-end-call` would miss the exact-key check and
+// POST a duplicate dashboard tool. Repeated targeted pushes accumulated
+// orphans on the dashboard.
 //
 // This module's helpers detect those collisions BEFORE create:
 //   - `findExistingResourceByName` — match local payload's canonical name
@@ -18,10 +18,10 @@
 //     the loser UUIDs so a follow-up `npm run cleanup` can prune them).
 //
 // NOTE on duplication: `slugify` and `extractBaseSlug` here mirror the
-// definitions in `src/pull.ts` (lines ~253-278). pull.ts imports config.ts,
-// which calls `parseEnvironment()` at module load and `process.exit(1)`s
-// without a CLI env arg — making it impossible to import in a unit test.
-// This module imports ONLY from `./types.ts` so it stays testable in
+// definitions in `src/pull.ts`. pull.ts imports config.ts, which calls
+// `parseEnvironment()` at module load and `process.exit(1)`s without a
+// CLI env arg — making it impossible to import in a unit test. This
+// module imports ONLY from `./types.ts` so it stays testable in
 // isolation. Five lines duplicated is the right tradeoff; do not "DRY"
 // these back into pull.ts.
 

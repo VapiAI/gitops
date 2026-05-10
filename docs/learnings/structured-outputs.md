@@ -32,6 +32,10 @@ evaluations.5.structuredOutput.Name must be between 1 and 40 characters
 
 Long, descriptive evaluator names like `assistant_left_voicemail_and_ended_call_promptly` (48 chars) or `assistant_detected_hostile_recording_and_ended_call` (51 chars) will silently exceed the limit until you POST. Keep names compact (`assistant_ended_call_after_message`, `assistant_handled_hostile_recording`) and put the descriptive nuance in the `description` field, which has no length cap. The constraint applies to the field on every structured output type — both standalone resources and inline evaluations within scenarios.
 
+### Renaming a structured-output file is safe — the engine dedups by `name`
+
+Same dedup behavior as for tools: if you rename a structured-output file but keep its `name` field stable, the push pipeline detects the existing dashboard resource (by slugified `name` against state and the live dashboard list) and adopts its UUID instead of creating a duplicate. You'll see `🔁 Reusing existing structured output: <localKey> → <uuid>` in the push log. See [tools.md → "Renaming a tool file is safe"](tools.md#renaming-a-tool-file-is-safe--the-engine-dedups-by-functionname) for the full mechanism, ambiguity warning semantics, and `npm run cleanup` workflow — they're identical for SOs.
+
 ---
 
 ## assistant_ids Must Be UUIDs

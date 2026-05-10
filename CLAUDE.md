@@ -13,7 +13,7 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
 2. Then read this file (`CLAUDE.md`) for additional policy constraints.
 3. When configuring or debugging any resource, load only the relevant learnings file — not the whole folder:
    - Assistants → `docs/learnings/assistants.md`
-   - Tools → `docs/learnings/tools.md`
+   - Tools → `docs/learnings/tools.md` (also covers tool/SO dedup behavior on push)
    - Squads → `docs/learnings/squads.md`
    - Transfers not working → `docs/learnings/transfers.md`
    - Structured outputs → `docs/learnings/structured-outputs.md`
@@ -24,8 +24,18 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
    - Azure OpenAI BYOK → `docs/learnings/azure-openai-fallback.md`
    - Multilingual agents → `docs/learnings/multilingual.md`
    - WebSocket transport → `docs/learnings/websocket.md`
+   - Outbound calling agents → `docs/learnings/outbound-agents.md`
+   - Outbound Call Campaigns (CSV bulk-dial) → `docs/learnings/outbound-campaigns.md`
+   - Voicemail detection → `docs/learnings/voicemail-detection.md`
    - Call time limits / graceful ending → `docs/learnings/call-duration.md`
+   - Voice provider field cheat-sheet → `docs/learnings/voice-providers.md`
    - YAML authoring conventions, .vapi-ignore lifecycle → `docs/learnings/yaml-conventions.md`
+
+This list mirrors the "Learnings & recipes" table in `AGENTS.md`. Keep both in sync — if you add a new learnings file, update both files plus `docs/learnings/README.md`.
+
+## Where new knowledge goes
+
+Per-resource tips/recipes/troubleshooting → `docs/learnings/<topic>.md`. Engine-friction log (push/pull/state/cleanup pain points + their fixes) → `improvements.md`. Code-level rationale → comments only when the *why* is non-obvious; never reference PR/issue numbers in code comments (they rot). One-time onboarding/install → `README.md`. When unsure, default to `docs/learnings/`. The full convention table lives in `AGENTS.md` under "Where new knowledge goes" — read it once, then this reminder is enough.
 
 ## Improvements log
 

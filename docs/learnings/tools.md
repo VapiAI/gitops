@@ -39,6 +39,26 @@ Vapi enforces a hard **1000-character maximum** on `function.description` across
 
 Tool names are validated against this regex by Vapi. Spaces, dots, slashes, parentheses, or unicode characters cause a 400 at push time. Use snake_case or camelCase (e.g. `end_call_vapi_testing`, `handoffToiFormSales`). The name is what the LLM emits in its function call, so keep it stable across config changes — renaming a tool invalidates any prompt rule that mentions the old name.
 
+### Renaming a tool file is safe — the engine dedups by `function.name`
+
+The push pipeline includes a name-based dedup safety net that prevents minting duplicate dashboard tools when:
+
+- You renamed the local file (e.g. `end-call.yml` → `b2b-invoice-end-call.yml`) but kept `function.name` the same.
+- Bootstrap pull stored the dashboard tool under a slug-suffixed state key (e.g. `end-call-67aea057`) and your assistant references the original local key.
+- The tool exists on the dashboard but isn't yet in your local state file (e.g. fresh clone, partial pull).
+
+In all three cases the engine looks up the tool by slugified `function.name` against both state entries and the live dashboard tool list, then **adopts** the existing UUID instead of creating a new one. You'll see this log line:
+
+```
+🔁 Reusing existing tool: <localKey> → <uuid> (matched via state|dashboard|both)
+```
+
+Adoption then routes through the standard PATCH path, so any local edits to the tool's payload are pushed normally with drift detection. Your old state-key entries are dropped automatically so the next full push doesn't orphan-delete the just-adopted dashboard tool.
+
+**When you see `⚠️ Multiple dashboard tools share the name "<n>" — adopting <uuid> (lex-smallest)`**, real duplicate dashboard resources exist (typically from before the dedup was added). Run `npm run cleanup -- <org>` to inspect and prune; the engine adopts the lex-smallest UUID deterministically so subsequent pushes stay stable.
+
+**What this does NOT do:** if you rename `function.name` (not just the file), that's a new logical tool — the engine creates a new dashboard resource. Function-name renames need an explicit `npm run cleanup` of the old one.
+
 ---
 
 ## apiRequest Tools

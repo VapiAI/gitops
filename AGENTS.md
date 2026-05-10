@@ -29,10 +29,22 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Multilingual agents (English/Spanish) | `docs/learnings/multilingual.md` |
 | WebSocket audio streaming | `docs/learnings/websocket.md` |
 | Building outbound calling agents | `docs/learnings/outbound-agents.md` |
+| Bulk-dialing from a CSV (Outbound Call Campaigns) | `docs/learnings/outbound-campaigns.md` |
 | Voicemail detection / VM vs human classification | `docs/learnings/voicemail-detection.md` |
 | Enforcing call time limits / graceful call ending | `docs/learnings/call-duration.md` |
 | Voice provider field cheat-sheet (Cartesia vs 11labs vs OpenAI etc.) | `docs/learnings/voice-providers.md` |
 | YAML authoring conventions, .vapi-ignore lifecycle | `docs/learnings/yaml-conventions.md` |
+
+**Where new knowledge goes:**
+
+| Kind of knowledge | Home | Convention |
+|---|---|---|
+| Per-resource gotchas, recipes, troubleshooting | `docs/learnings/<topic>.md` | One file per resource type or topic. Add a row to this table AND to `docs/learnings/README.md` when you add a new file. `CLAUDE.md` mirrors this list — keep both in sync. |
+| Engine-friction log (push/pull/state/cleanup pain points + fixes) | `improvements.md` | Format: Problem → Current behavior → Risk → Current mitigation → Possible fix → Status. Mark `[RESOLVED YYYY-MM-DD] (#<PR>)` when fixed; never delete. |
+| Code-level rationale (why a function works the way it does) | Code comments | Only when the WHY is non-obvious — not what the code does. Don't reference PR/issue numbers; they rot. |
+| Setup, install, repo orientation | `README.md` | One-time onboarding only. Don't put runtime gotchas here. |
+
+If you're unsure where something goes, default to `docs/learnings/`. The README and engine-friction log are deliberately narrow.
 
 ---
 
@@ -65,7 +77,7 @@ docs/
 ├── changelog.md                               # Template for tracking per-customer config changes
 └── learnings/                                 # Gotchas, recipes, and troubleshooting
     ├── README.md                              # Task-routed index — start here
-    ├── tools.md                               # Tool configuration gotchas
+    ├── tools.md                               # Tool configuration gotchas (incl. dedup behavior)
     ├── assistants.md                          # Assistant configuration gotchas
     ├── squads.md                              # Squad and multi-agent gotchas
     ├── structured-outputs.md                  # Structured output gotchas + KPI patterns
@@ -78,7 +90,11 @@ docs/
     ├── multilingual.md                        # Multilingual agent architecture guide
     ├── websocket.md                           # WebSocket transport rules
     ├── outbound-agents.md                     # Outbound agent design & IVR navigation
-    └── voicemail-detection.md                 # Voicemail vs human classification
+    ├── outbound-campaigns.md                  # Bulk-dial CSV campaigns + dynamic variables
+    ├── voicemail-detection.md                 # Voicemail vs human classification
+    ├── call-duration.md                       # Call time limits and graceful end-of-call
+    ├── voice-providers.md                     # Per-provider voice block field cheat-sheet
+    └── yaml-conventions.md                    # YAML authoring conventions, .vapi-ignore lifecycle
 
 resources/
 ├── <org>/                   # Org-scoped resources (npm run push -- <org> reads here)
