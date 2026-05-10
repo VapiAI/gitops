@@ -2,14 +2,14 @@
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Per-resource state metadata. Stack F architectural pivot: state values
-// changed from bare `string` (UUID) to a structured ResourceState carrying
-// content hashes, timestamps, and (Stack I) optional platform version IDs.
+// Per-resource state metadata. State values are a structured ResourceState
+// carrying content hashes, timestamps, and an optional platform version ID
+// for ETag-based optimistic concurrency.
 //
 // Backwards compatibility: legacy state files loaded with bare string values
 // are migrated at load time in `loadState()` — each string becomes
 // { uuid: <string> } with no other fields. The first push or pull after
-// migration populates the hash fields. Until then, drift detection (Stack G)
+// migration populates the hash fields. Until then, drift detection
 // short-circuits cleanly because `lastPulledHash` is undefined.
 //
 // Why preserve backwards-compat instead of doing a flag-day migration:
@@ -21,8 +21,8 @@
 export interface ResourceState {
   uuid: string;
   // sha256 of the canonicalized platform payload at last pull. Set by
-  // `pull.ts` after `cleanResource()` + canonical sort. Used by Stack G
-  // drift detection.
+  // `pull.ts` after `cleanResource()` + canonical sort. Used by drift
+  // detection.
   lastPulledHash?: string;
   // ISO-8601 timestamp of the last pull. Useful for triage when investigating
   // "when did this drift?".
@@ -30,14 +30,14 @@ export interface ResourceState {
   // sha256 of the canonicalized payload that was last sent on PATCH/POST.
   // Distinct from `lastPulledHash` because we may push without pulling.
   lastPushedHash?: string;
-  // Platform-provided ETag / version identifier (Stack I). Engine populates
-  // it from response headers when the platform exposes one.
+  // Platform-provided ETag / version identifier for optimistic concurrency.
+  // Engine populates it from response headers when the platform exposes one.
   platformVersionId?: string;
 }
 
-// `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. After
-// Stack F it carries `Record<string, ResourceState>` per section instead of
-// bare strings. `loadState()` migrates legacy data automatically.
+// `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. Each section
+// carries `Record<string, ResourceState>` instead of bare strings.
+// `loadState()` migrates legacy data automatically.
 export interface StateFile {
   credentials: Record<string, ResourceState>;
   assistants: Record<string, ResourceState>;

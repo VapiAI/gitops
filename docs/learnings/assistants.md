@@ -656,7 +656,7 @@ They are merged, not mutually exclusive. But be aware of potential duplicates.
 
 ## Liquid Variable Bag and Trust Tiers
 
-Cross-reference: [docs.vapi.ai/assistants/dynamic-variables](https://docs.vapi.ai/assistants/dynamic-variables). The trust-tier framing came out of Mudflap progressive-auth work (PRISM-528).
+Cross-reference: [docs.vapi.ai/assistants/dynamic-variables](https://docs.vapi.ai/assistants/dynamic-variables). The trust-tier framing came out of progressive caller-ID auth work on a customer rollout.
 
 Vapi exposes a Liquid templating layer in prompts, tool config, and overrides — `{{ customer.number }}`, `{{ now }}`, etc. The variables in scope at runtime fall into three trust tiers based on where they originate. This matters because anything you place in a security-sensitive field (tool static `parameters`, message templates that go to a backend) is only as trustworthy as the source of the variable.
 

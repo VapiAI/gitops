@@ -29,8 +29,8 @@ export function sortedKeysReplacer(_key: string, value: unknown): unknown {
 // Canonicalize a value: sort object keys at every level, drop null/undefined
 // leaves recursively, leave array order intact. Produces a stable shape
 // regardless of insertion order or transient nullish leaves the API may
-// emit. Used by Stack F (content hashes) and Stack G (drift detection) —
-// kept here so the helpers stay co-located.
+// emit. Used by content hashing and drift detection — kept here so the
+// helpers stay co-located.
 export function canonicalize(value: unknown): unknown {
   if (value === null || value === undefined) return undefined;
   if (Array.isArray(value)) {
@@ -51,7 +51,8 @@ export function canonicalize(value: unknown): unknown {
 }
 
 // Stable sha256 of a payload after canonicalization. Used for content drift
-// detection (this stack populates the hashes; Stack G consumes them).
+// detection — this helper populates the hashes; the drift detection layer
+// consumes them.
 export function hashPayload(payload: unknown): string {
   const canonical = canonicalize(payload);
   return createHash("sha256")
@@ -90,9 +91,9 @@ export function upsertState(
   };
 }
 
-// Pronunciation-dictionary drop check (improvements.md #7). Detects when a
-// dictionary attachment disappears from the platform between pulls. Two
-// shapes are supported because Vapi exposes a different field per provider:
+// Pronunciation-dictionary drop check. Detects when a dictionary attachment
+// disappears from the platform between pulls. Two shapes are supported
+// because Vapi exposes a different field per provider:
 //
 //   - 11labs (documented at
 //     https://docs.vapi.ai/assistants/pronunciation-dictionaries):

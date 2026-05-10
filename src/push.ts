@@ -22,8 +22,8 @@ import {
   type RemoteResource,
 } from "./dep-dedup.ts";
 
-// Map a resource label to its state-file key. Used for snapshotting (Stack H)
-// — snapshot directories are keyed by the same names the state file uses.
+// Map a resource label to its state-file key. Used for snapshotting —
+// snapshot directories are keyed by the same names the state file uses.
 const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   tool: "tools",
   "structured output": "structuredOutputs",
@@ -104,12 +104,12 @@ async function upsertResourceWithStateRecovery(options: {
     `  🔄 Updating ${resourceLabel}: ${resourceId} (${existingUuid})`,
   );
 
-  // Stack G — drift detection. Before PATCH, GET the current platform
-  // payload, hash it, and compare to lastPulledHash. Refuse to overwrite
-  // without --overwrite. Skipped in dry-run because the operator just
-  // wants to see what would happen, and skipped if no baseline hash.
-  // Stack H — when we successfully fetch the platform payload, snapshot
-  // it (and our outgoing payload) so `npm run rollback` has a target.
+  // Drift detection. Before PATCH, GET the current platform payload, hash
+  // it, and compare to lastPulledHash. Refuse to overwrite without
+  // --overwrite. Skipped in dry-run because the operator just wants to see
+  // what would happen, and skipped if no baseline hash.
+  // When we successfully fetch the platform payload, snapshot it (and our
+  // outgoing payload) so `npm run rollback` has a target.
   if (!DRY_RUN) {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {

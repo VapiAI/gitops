@@ -830,10 +830,10 @@ export async function pullResourceType(
     if (isNew) created++;
     else updated++;
 
-    // Update state with new content hash + timestamp (Stack F).
+    // Update state with new content hash + timestamp.
     // Hashing the resolved-with-credentials payload (the form we will save
     // to disk) keeps `lastPulledHash` aligned with the source-of-truth diff
-    // basis used by drift detection in Stack G.
+    // basis used by drift detection.
     upsertState(newStateSection, resourceId, {
       uuid: resource.id,
       lastPulledHash: hashPayload(withCredNames),

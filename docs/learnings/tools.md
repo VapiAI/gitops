@@ -37,13 +37,13 @@ Vapi enforces a hard **1000-character maximum** on `function.description` across
 
 ### `function.name` matches `^[A-Za-z0-9_-]+$`
 
-Tool names are validated against this regex by Vapi. Spaces, dots, slashes, parentheses, or unicode characters cause a 400 at push time. Use snake_case or camelCase (e.g. `end_call_vapi_testing`, `handoffToiFormSales`). The name is what the LLM emits in its function call, so keep it stable across config changes — renaming a tool invalidates any prompt rule that mentions the old name.
+Tool names are validated against this regex by Vapi. Spaces, dots, slashes, parentheses, or unicode characters cause a 400 at push time. Use snake_case or camelCase (e.g. `end_call_vapi_testing`, `handoffToAcmeSales`). The name is what the LLM emits in its function call, so keep it stable across config changes — renaming a tool invalidates any prompt rule that mentions the old name.
 
 ### Renaming a tool file is safe — the engine dedups by `function.name`
 
 The push pipeline includes a name-based dedup safety net that prevents minting duplicate dashboard tools when:
 
-- You renamed the local file (e.g. `end-call.yml` → `b2b-invoice-end-call.yml`) but kept `function.name` the same.
+- You renamed the local file (e.g. `end-call.yml` → `intake-end-call.yml`) but kept `function.name` the same.
 - Bootstrap pull stored the dashboard tool under a slug-suffixed state key (e.g. `end-call-67aea057`) and your assistant references the original local key.
 - The tool exists on the dashboard but isn't yet in your local state file (e.g. fresh clone, partial pull).
 
@@ -355,7 +355,7 @@ Only `function` tools support `strict` mode.
 
 ## Tool Security and Data Visibility
 
-Cross-reference: [docs.vapi.ai/tools/static-variables-and-aliases](https://docs.vapi.ai/tools/static-variables-and-aliases) and [docs.vapi.ai/tools/custom-tools](https://docs.vapi.ai/tools/custom-tools). The full data-flow / threat-model writeup that motivates this section came out of Mudflap progressive-auth work (PRISM-528).
+Cross-reference: [docs.vapi.ai/tools/static-variables-and-aliases](https://docs.vapi.ai/tools/static-variables-and-aliases) and [docs.vapi.ai/tools/custom-tools](https://docs.vapi.ai/tools/custom-tools). The full data-flow / threat-model writeup that motivates this section came out of progressive caller-ID auth work on a customer rollout.
 
 ### Every tool result is in conversation history
 
@@ -394,7 +394,7 @@ The dashboard renders these as "Parameters" (JSON schema editor) and "Static Bod
 | Legacy `assistant.model.functions[]` (deprecated) | ❌ — converter zeroes it out |
 | `code`, `handoff`, `transferCall`, `endCall`, others | ❌ |
 
-#### Mudflap progressive caller-ID auth pattern (worked example)
+#### Progressive caller-ID auth pattern (worked example)
 
 ```yaml
 type: apiRequest

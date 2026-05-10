@@ -11,9 +11,9 @@ function isUUID(value: string): boolean {
   return UUID_REGEX.test(value);
 }
 
-// Check if a UUID is tracked in a state section (reverse lookup). After
-// Stack F, sections store ResourceState entries — extract `.uuid` for the
-// reverse-lookup membership check.
+// Check if a UUID is tracked in a state section (reverse lookup). Sections
+// store ResourceState entries — extract `.uuid` for the reverse-lookup
+// membership check.
 function isKnownUUID(uuid: string, stateSection: Record<string, ResourceState>): boolean {
   for (const entry of Object.values(stateSection)) {
     if (entry.uuid === uuid) return true;

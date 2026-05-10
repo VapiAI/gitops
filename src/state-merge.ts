@@ -1,4 +1,4 @@
-// Stack J — scoped state writes.
+// Scoped state writes.
 //
 // On a scoped push (`npm run push -- <env> assistants/foo.md`), the engine
 // previously rewrote the entire state file even when only one assistant

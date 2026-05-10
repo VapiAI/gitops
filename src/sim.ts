@@ -95,16 +95,16 @@ export function loadStateFile(env: string): StateFile {
     );
   }
   const state = JSON.parse(readFileSync(stateFile, "utf-8")) as StateFile;
-  // Forward-compat: if a future state schema (Stack F) wraps strings as
-  // {uuid: string}, surface the .uuid field; otherwise treat values as the
-  // legacy bare string. The local function below handles both shapes.
+  // Forward-compat: if the state schema wraps strings as {uuid: string},
+  // surface the .uuid field; otherwise treat values as the legacy bare
+  // string. The local function below handles both shapes.
   return state;
 }
 
-// Resolve a local resource name → platform UUID. Stack F migrates state
-// values to ResourceState, so this helper accepts both shapes (string OR
-// {uuid: string}) and returns just the UUID. Until F lands, it short-circuits
-// on the string case.
+// Resolve a local resource name → platform UUID. The state schema may store
+// values as either bare string UUIDs (legacy) or ResourceState objects
+// ({uuid: string, ...}); this helper accepts both shapes and returns just
+// the UUID.
 function stateValueToUuid(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (

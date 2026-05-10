@@ -5,9 +5,9 @@
 // (b) `state.tools[depId]` was an exact key match, or (c) we'd already
 // auto-applied this id in the current run. Bootstrap pull stores resources
 // under `<slug>-<uuid8>` keys (e.g. `end-call-67aea057`), so a local file
-// referencing `b2b-invoice-end-call` would miss the exact-key check and
-// POST a duplicate dashboard tool. Repeated targeted pushes accumulated
-// orphans on the dashboard.
+// referencing `my-end-call` would miss the exact-key check and POST a
+// duplicate dashboard tool. Repeated targeted pushes accumulated orphans
+// on the dashboard.
 //
 // This module's helpers detect those collisions BEFORE create:
 //   - `findExistingResourceByName` — match local payload's canonical name
