@@ -127,7 +127,26 @@ voice:
 
 ---
 
+## Choosing the right pronunciation layer
+
+Pronunciation problems live in two unrelated layers — picking the wrong one wastes a debugging cycle. Reproduce the failure first, then map symptom to layer.
+
+| Symptom | Fix on | How |
+|---|---|---|
+| Word **misheard** by the agent (e.g. STT decodes "VAT" as "that") | Transcriber (input side) | `customVocabulary` (Soniox), `keyterm` (Deepgram). See [Transcriber Configuration](#transcriber-configuration) for syntax. |
+| Word **mispronounced** by the agent (e.g. TTS reads "VAT" as "vee-ay-tee") | Voice / TTS (output side) | `pronunciationDictId` (Cartesia), `pronunciationDictionaryLocators` (ElevenLabs). See [Pronunciation dictionaries (TTS-level)](#pronunciation-dictionaries-tts-level) for the per-provider config. |
+
+**Diagnostic question:** Did the transcript record what the user actually said?
+- **No** — the STT got it wrong. Fix on the transcriber.
+- **Yes, but the agent then said it wrong** — the TTS is mispronouncing. Fix on the voice.
+
+Don't try both layers at once. They shape independent halves of the call and the wrong layer adds config noise without addressing the failure. For per-provider voice-side field shapes (Cartesia vs ElevenLabs vs Vapi), see [voice-providers.md → Pronunciation dictionary support](voice-providers.md#pronunciation-dictionary-support-per-provider-field-shapes).
+
+---
+
 ## Transcriber Configuration
+
+> **If a word is being misheard by the agent**, this is the right layer to fix it (input side). If a word is being mispronounced by the agent, fix the voice/TTS layer instead — see [Choosing the right pronunciation layer](#choosing-the-right-pronunciation-layer).
 
 ### Provider recommendations by language
 
@@ -282,12 +301,14 @@ startSpeakingPlan:
 
 ### Pronunciation dictionaries (TTS-level)
 
+> **If a word is being mispronounced by the agent**, this is the right layer to fix it (output side). If a word is being misheard, fix the transcriber instead — see [Choosing the right pronunciation layer](#choosing-the-right-pronunciation-layer). For per-provider voice-side field shapes, see [voice-providers.md → Pronunciation dictionary support](voice-providers.md#pronunciation-dictionary-support-per-provider-field-shapes).
+
 Pronunciation dictionaries control how TTS voices say specific words. They are **provider-specific**:
 
 | Provider | Support | Config field | Model requirement |
 |----------|---------|-------------|-------------------|
 | **Cartesia** | Full IPA + sounds-like across all languages | `pronunciationDictId` on voice config | `sonic-3` only |
-| **ElevenLabs** | Phoneme rules (IPA/CMU, English only) + alias rules (all languages) | `pronunciationDictionaryLocators` on voice config | Phoneme: `eleven_turbo_v2`, `eleven_flash_v2`. Alias: all models |
+| **ElevenLabs** | Phoneme rules (IPA/CMU, English only) + alias rules (all languages) | `pronunciationDictionaryLocators` on voice config | Alias: all models. Phoneme: model-dependent and silently no-op'd on most current models — see [voice-providers.md → ElevenLabs phoneme rule model compatibility](voice-providers.md#elevenlabs-phoneme-rule-model-compatibility). |
 | **Vapi built-in** | None | N/A | N/A |
 
 **Pronunciation dictionaries** are created via the Vapi API, then referenced by ID in the voice config. This is the same pattern as `credentialId` — the provider resource lives outside gitops, the reference is gitops-managed.
@@ -425,6 +446,19 @@ If a hook references a `toolId` that doesn't exist, Vapi logs a warning and cont
 
 `customer.speech.timeout` (hook) and `silenceTimeoutSeconds` (assistant) are separate mechanisms. The hook fires an action; the timeout ends the call. Configure them independently.
 
+### Assistant top-level `name` is limited to 1-40 characters
+
+The Vapi API enforces a hard 40-character maximum on the top-level `name` field of an assistant resource. Push-time error:
+
+```
+PATCH /assistant/<id> → 400
+name must be shorter than or equal to 40 characters
+```
+
+This is **a separate field from `structuredOutput.name`** — both share the 40-char cap, but the enforcement sites are independent (see [structured-outputs.md](structured-outputs.md#structuredoutputname-is-limited-to-1-40-characters)). The constraint is not surfaced in the public schema reference; it's only enforced server-side at PATCH/POST time.
+
+**Recommendation:** when generating descriptive assistant names from templates ("Triage Classifier — Multilingual Classic Variant" = 51 chars), trim before push or use shorter abbreviations. Put descriptive nuance in a comment in the YAML or in the system prompt body, not the `name` field.
+
 ### `silenceTimeoutSeconds` minimum is 10
 
 The Vapi API enforces a hard minimum of **10 seconds** on `silenceTimeoutSeconds`. Setting this field to anything less than 10 (e.g., `5` or `8`) will fail at push time with:
@@ -445,6 +479,30 @@ The minimum is not documented in the gitops engine README and is only surfaced w
 - `model.response.timeout` — model hasn't responded
 - `assistant.transcriber.endpointedSpeechLowConfidence` — low-confidence transcript
 - `call.timeElapsed` — N seconds since call start
+
+---
+
+## PATCH /assistant/:id semantics: shallow replacement at the top-level field
+
+`PATCH /assistant/:id` is partial-update at the **top level only** — fields not in the request body stay untouched. But within each field you DO send, replacement is **wholesale, NOT deep-merged**. `PATCH { hooks: [oneNewHook] }` leaves the assistant with exactly one hook even if it had three before.
+
+The same shallow-replace rule applies to: `model.messages`, `analysisPlan`, `voice`, `transcriber`, `messagePlan`, `serverMessages`, and any other object or array field. Whatever subtree you send overwrites the entire subtree on the resource.
+
+**Safe-append pattern** — GET → mutate the returned array/object → PATCH the full structure back:
+
+```yaml
+# 1. GET /assistant/:id, capture existing.hooks
+# 2. Append your new hook locally
+# 3. PATCH with the full hooks array (existing + new)
+hooks:
+  - { ...existing hook 1 }
+  - { ...existing hook 2 }
+  - { ...new hook you wanted to add }
+```
+
+**Important distinction:** this is the REST API PATCH semantic. It is **different** from `assistantOverrides` in squad configs, which **deep-merges** partial nested objects per [multilingual.md → What Can Be Overridden](multilingual.md#what-can-be-overridden). When working through `assistantOverrides`, partial subtrees compose with the base assistant's config; when working through PATCH, partial subtrees replace.
+
+See also: [fallbacks.md](fallbacks.md#phone-number-fallback-hook) for the same gotcha applied to phone-number hooks.
 
 ---
 

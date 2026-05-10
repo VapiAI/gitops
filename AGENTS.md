@@ -32,6 +32,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Voicemail detection / VM vs human classification | `docs/learnings/voicemail-detection.md` |
 | Enforcing call time limits / graceful call ending | `docs/learnings/call-duration.md` |
 | Voice provider field cheat-sheet (Cartesia vs 11labs vs OpenAI etc.) | `docs/learnings/voice-providers.md` |
+| YAML authoring conventions, .vapi-ignore lifecycle | `docs/learnings/yaml-conventions.md` |
 
 ---
 
