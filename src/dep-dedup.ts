@@ -56,16 +56,30 @@ export function extractBaseSlug(resourceId: string): string {
   return match?.[1] ?? resourceId;
 }
 
+// Minimal payload shape this module needs. Local resource files are loaded
+// as `Record<string, unknown>`, so the only fields we know exist are `name`
+// (top-level, used by SOs / assistants / squads) and a nested `function.name`
+// (used by tools). Everything else stays opaque — we narrow at use.
+export type NameablePayload = { name?: unknown; function?: unknown };
+
 // Pulls the canonical name from a tool / SO / assistant payload.
-// For tools: `function.name` is the canonical name (per pull.ts:261-267).
+// For tools: `function.name` is the canonical name.
 // For SOs / assistants / etc.: top-level `name`. Top-level wins when both
 // are present.
 export function extractResourceName(
-  payload: Record<string, unknown>,
+  payload: NameablePayload,
 ): string | undefined {
   if (typeof payload.name === "string" && payload.name) return payload.name;
-  const fn = payload.function as Record<string, unknown> | undefined;
-  if (fn && typeof fn.name === "string" && fn.name) return fn.name;
+  const fn = payload.function;
+  if (
+    fn !== null &&
+    typeof fn === "object" &&
+    "name" in fn &&
+    typeof fn.name === "string" &&
+    fn.name
+  ) {
+    return fn.name;
+  }
   return undefined;
 }
 
@@ -85,7 +99,7 @@ export function extractResourceName(
 // the loser UUIDs in `duplicateUuids` so the caller can warn.
 export function findExistingResourceByName(args: {
   localResourceId: string;
-  localPayload: Record<string, unknown>;
+  localPayload: NameablePayload;
   stateSection: Record<string, ResourceState>;
   remoteList?: RemoteResource[];
 }): DedupMatch | undefined {

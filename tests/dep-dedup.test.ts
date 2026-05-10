@@ -7,9 +7,9 @@ import {
   extractResourceName,
 } from "../src/dep-dedup.ts";
 
-// Gap #10 — dedup helper coverage. Verifies that bootstrap-renamed state
-// entries and live dashboard duplicates are detected before the auto-apply
-// path POSTs a fresh duplicate tool / SO.
+// Dedup helper coverage. Verifies that bootstrap-renamed state entries and
+// live dashboard duplicates are detected before the auto-apply path POSTs
+// a fresh duplicate tool / SO / assistant.
 
 test("slugify lowercases and dashes", () => {
   assert.equal(slugify("End Call Tool"), "end-call-tool");
@@ -41,6 +41,26 @@ test("extractResourceName: top-level name wins over function.name", () => {
     extractResourceName({ name: "outer", function: { name: "inner" } }),
     "outer",
   );
+});
+
+test("findExistingResourceByName: assistant payload (top-level name only)", () => {
+  // Assistants use top-level `name` and have no nested `function`. The
+  // squad → assistant auto-apply path hits this shape via
+  // ensureAssistantExists. Bootstrap may store the same dashboard assistant
+  // under `<slug>-<uuid8>` (e.g., `support-bot-1234abcd`); a squad
+  // referencing the original local key (`support-bot`) must adopt rather
+  // than mint a duplicate.
+  const m = findExistingResourceByName({
+    localResourceId: "support-bot",
+    localPayload: { name: "support-bot" },
+    stateSection: {
+      "support-bot-1234abcd": { uuid: "uuid-asst-aaa" },
+    },
+    remoteList: [{ id: "uuid-asst-aaa", name: "support-bot" }],
+  });
+  assert.equal(m?.uuid, "uuid-asst-aaa");
+  assert.equal(m?.source, "both");
+  assert.equal(m?.ambiguous, false);
 });
 
 test("findExistingResourceByName: state-only match", () => {
