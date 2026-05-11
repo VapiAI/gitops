@@ -68,16 +68,19 @@ Every command works in two modes:
 - **Interactive** — run without arguments, get prompted for org and resources
 - **Direct** — pass an org slug and flags for scripting / CI
 
-| Command | Interactive | Direct | Description |
+| Command | Interactive | Direct | One-liner |
 | --- | --- | --- | --- |
-| `npm run setup` | ✅ | — | First-time org setup wizard |
-| `npm run pull` | ✅ | `npm run pull -- <org> [flags]` | Pull remote resources locally |
-| `npm run push` | ✅ | `npm run push -- <org> [flags]` | Push local resources to Vapi |
-| `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | Pull → Merge → Push in one shot |
-| `npm run call` | ✅ | `npm run call -- <org> -a <name>` | Start a WebSocket call |
-| `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Delete orphaned remote resources (destructive run requires `--confirm <org>`) |
-| `npm run build` | — | — | Type-check the codebase |
-| `npm test` | — | — | Run regression tests (`node:test`) |
+| `npm run setup` | ✅ | — | First-time org wizard — creates `.env.<org>` and `resources/<org>/`. |
+| `npm run validate` | — | `npm run validate -- <org>` | Schema-check local YAML/MD with no network call. **Run before every `apply`.** |
+| `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | **Default deploy verb.** Pull → merge → push in one safe pass; resilient against dashboard drift. |
+| `npm run pull` | ✅ | `npm run pull -- <org> [flags]` | Fetch remote state into local files / state file. Local-first by default — won't clobber local edits. |
+| `npm run push` | ✅ | `npm run push -- <org> [flags]` | Raw push without a pre-pull. **Skip unless you just ran `pull` and are certain state is fresh** — otherwise prefer `apply`. |
+| `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Inspect (default) or delete orphaned remote resources. Destructive run requires `--confirm <org>`. |
+| `npm run rollback` | — | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore from a snapshot in `.vapi-state.<org>.snapshots/` (one is written before every push/apply). |
+| `npm run call` | ✅ | `npm run call -- <org> -a <name>` or `-s <squad>` | Start an interactive WebSocket call against an assistant or squad. |
+| `npm run sim` | — | `npm run sim -- <org> --suite <name> --target <name>` | Run a simulation suite (or specific simulations) against a deployed assistant/squad. |
+| `npm run build` | — | — | Type-check the codebase (`tsc --noEmit`). |
+| `npm test` | — | — | Run regression tests (`node:test`). |
 
 ### Interactive Mode
 
@@ -142,6 +145,117 @@ npm run call -- my-org -a my-assistant
 # Call a squad
 npm run call -- my-org -s my-squad
 ```
+
+---
+
+## Suggested Workflows
+
+Recipes for common situations. Each one is the safe path — there are faster shortcuts, but use them only when you understand the trade-offs. The single most important habit: **prefer `apply` over `push`**, because `apply` refreshes platform state before mutating, protecting you against dashboard edits made between your last pull and your push.
+
+### Daily edit-and-deploy
+
+```bash
+# 1. Schema-check locally first — fails fast on YAML shape errors, no network needed.
+npm run validate -- <org>
+
+# 2. Deploy via apply: pulls latest platform state, merges with your local
+#    changes, then pushes the merged result. Safe against drift.
+npm run apply -- <org>
+```
+
+### Iterating on a single file
+
+```bash
+npm run validate -- <org>
+npm run apply -- <org> resources/<org>/assistants/my-agent.md
+```
+
+`apply` accepts the same path-scoping as `push`, so you get safety + targeted scope in one command.
+
+### First push into a fresh org
+
+```bash
+# Interactive wizard — pick "no resources" if you'll author from scratch.
+npm run setup
+
+# Drop your YAML/MD files into resources/<org>/, then:
+npm run validate -- <org>
+npm run apply -- <org>
+```
+
+On a fresh org, `apply`'s pull phase bootstraps `.vapi-state.<org>.json` from the empty dashboard before pushing your local creates.
+
+### Pulling without losing local work
+
+```bash
+# Local-first by default — won't overwrite locally modified files.
+npm run pull -- <org>
+
+# State-only refresh — re-sync UUID mappings without writing resource files locally.
+npm run pull -- <org> --bootstrap
+
+# Pull a single known remote resource by UUID.
+npm run pull -- <org> --type assistants --id <uuid>
+```
+
+### Live testing what you just deployed
+
+```bash
+# Interactive WebSocket call — speak/listen from the terminal.
+npm run call -- <org> -a <assistant-name>
+npm run call -- <org> -s <squad-name>
+
+# Automated simulation suite against the deployed resource.
+npm run sim -- <org> --suite <suite-name> --target <assistant-name>
+```
+
+### Recovering from a bad deploy
+
+```bash
+# Every push/apply writes a snapshot first. List them:
+npm run rollback -- <org> --list
+
+# Re-apply a specific snapshot to undo a deploy:
+npm run rollback -- <org> --to <ISO-timestamp>
+```
+
+### Cleaning up orphaned dashboard resources
+
+```bash
+# Dry-run by default — shows what would be deleted, makes no changes.
+npm run cleanup -- <org>
+
+# Destructive run — requires explicit confirmation:
+npm run cleanup -- <org> --force --confirm <org>
+```
+
+**Surgical alternative when the orphan set includes Vapi-default fixtures** (e.g. the seven undeletable stock simulation personalities — see `docs/learnings/simulations.md`): delete individual resources via direct API call, then refresh state:
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $VAPI_TOKEN" \
+  https://api.vapi.ai/assistant/<orphan-uuid>
+npm run pull -- <org> --bootstrap
+```
+
+This avoids `--force` halting on the first immortal-default 404.
+
+### When to use raw `push` instead of `apply`
+
+Almost never. The only honest case: you just ran `pull`, nothing else has touched the dashboard since, and you need to skip the merge pass for speed. In any multi-developer environment, default to `apply`.
+
+If you do use `push`, dry-run it first:
+
+```bash
+npm run push -- <org> --dry-run
+```
+
+### Pre-flight checklist before any deploy
+
+1. `git status` — uncommitted changes are intentional?
+2. `npm run validate -- <org>` — schema clean?
+3. `npm run apply -- <org>` (or `apply -- <org> <path>` for single-file)
+4. After: verify with `npm run call -- <org> -a <name>` or a `npm run sim` suite
+5. If something looks wrong: `npm run rollback -- <org> --list`
 
 ---
 
