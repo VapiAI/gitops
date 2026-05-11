@@ -121,6 +121,7 @@ Pronunciation dictionaries do not share a field shape across voice providers. Sa
 
 - **Schema-level**: accepts pronunciation dictionary configs at the API.
 - **Dashboard UI surface**: in active rollout. Schema acceptance does **not** guarantee runtime TTS engine honors the dictionary.
+- **Phoneme rules don't work with Vapi proprietary voices.** The Vapi voice pipeline doesn't run on `eleven_flash_v2` (the only ElevenLabs model that honors phoneme rules — see [ElevenLabs phoneme rule model compatibility](#elevenlabs-phoneme-rule-model-compatibility) below), so any phoneme entries in your dictionary are silently ignored at runtime. **Use alias rules only when targeting Vapi proprietary voices.**
 - **Recommendation**: verify runtime behavior with a call test before depending on it for production Vapi-voice deployments.
 
 ### Field shape gotcha
@@ -167,3 +168,5 @@ voice:
   pronunciationDictionaryLocators:
     - pronunciationDictionaryId: <your-dict-id>
 ```
+
+**Language constraint:** phoneme rules (both IPA and CMU Arpabet) **only apply to English text**. For non-English text in a multilingual deployment, ElevenLabs silently bypasses phoneme rules regardless of model — even on `eleven_flash_v2`. Use **alias rules** instead — they're language-agnostic at the substitution layer (the substituted text is then synthesized by the model in whatever language it's configured for). This makes alias rules the only viable pronunciation-dictionary path for non-English deployments.
