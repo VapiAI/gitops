@@ -1,8 +1,8 @@
 // Simulation runner — wraps `POST /eval/simulation/run`.
 //
 // Designed to be importable from `sim-cmd.ts` and from tests without
-// triggering the CLI argument parser in `config.ts`. Mirrors the env-loading
-// pattern used by `eval.ts` (lines 100-130) for the same reason.
+// triggering the CLI argument parser in `config.ts`. Env-loading is inlined
+// here (rather than importing from `config.ts`) for the same reason.
 
 import { existsSync, readFileSync } from "fs";
 import { join, dirname } from "path";
