@@ -183,9 +183,7 @@ async function selectOrg(action: string): Promise<string> {
 
   if (orgs.length === 0) {
     console.error(
-      c.red(
-        '\n  No configured orgs found. Run "npm run setup" to add one.\n',
-      ),
+      c.red('\n  No configured orgs found. Run "npm run setup" to add one.\n'),
     );
     process.exit(1);
   }
@@ -227,9 +225,7 @@ async function apiGet(
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(
-      `API GET ${endpoint} failed (${response.status}): ${text}`,
-    );
+    throw new Error(`API GET ${endpoint} failed (${response.status}): ${text}`);
   }
   return response.json();
 }
@@ -283,9 +279,7 @@ function quickExtractName(filePath: string): string | null {
       return val;
     }
     // For tools: function.name
-    const fnMatch = content.match(
-      /^function:\s*\n\s+name:\s*(.+)/m,
-    );
+    const fnMatch = content.match(/^function:\s*\n\s+name:\s*(.+)/m);
     if (fnMatch?.[1]) {
       return fnMatch[1].trim().replace(/^['"]|['"]$/g, "");
     }
@@ -459,15 +453,11 @@ interface ResourceSnapshot {
 export async function runInteractivePull(): Promise<void> {
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  Vapi GitOps — Interactive Pull"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
 
@@ -493,38 +483,44 @@ export async function runInteractivePull(): Promise<void> {
 
         let fetchFailed = false;
         snapshots = await Promise.all(
-          RESOURCE_TYPES.map(
-            async (type): Promise<ResourceSnapshot> => {
-              try {
-                const data = await apiGet(token, baseUrl, type.endpoint);
-                return {
-                  key: type.key,
-                  label: type.label,
-                  resources: normaliseList(data),
-                };
-              } catch (error) {
-                const msg = error instanceof Error ? error.message : String(error);
-                if (msg.includes("401") || msg.includes("403") || msg.includes("authentication") || msg.includes("unauthorized")) {
-                  fetchFailed = true;
-                }
-                console.log(c.red(`  ✗ Failed to fetch ${type.label}: ${msg}`));
-                return { key: type.key, label: type.label, resources: [] };
+          RESOURCE_TYPES.map(async (type): Promise<ResourceSnapshot> => {
+            try {
+              const data = await apiGet(token, baseUrl, type.endpoint);
+              return {
+                key: type.key,
+                label: type.label,
+                resources: normaliseList(data),
+              };
+            } catch (error) {
+              const msg =
+                error instanceof Error ? error.message : String(error);
+              if (
+                msg.includes("401") ||
+                msg.includes("403") ||
+                msg.includes("authentication") ||
+                msg.includes("unauthorized")
+              ) {
+                fetchFailed = true;
               }
-            },
-          ),
+              console.log(c.red(`  ✗ Failed to fetch ${type.label}: ${msg}`));
+              return { key: type.key, label: type.label, resources: [] };
+            }
+          }),
         );
 
         if (fetchFailed) {
-          console.log(c.red("\n  ⚠ API authentication failed. Check your VAPI_TOKEN in .env." + slug));
-          console.log(c.red("  Run \"npm run setup\" to reconfigure.\n"));
+          console.log(
+            c.red(
+              "\n  ⚠ API authentication failed. Check your VAPI_TOKEN in .env." +
+                slug,
+            ),
+          );
+          console.log(c.red('  Run "npm run setup" to reconfigure.\n'));
           return;
         }
 
         nonEmpty = snapshots.filter((s) => s.resources.length > 0);
-        totalCount = nonEmpty.reduce(
-          (n, s) => n + s.resources.length,
-          0,
-        );
+        totalCount = nonEmpty.reduce((n, s) => n + s.resources.length, 0);
 
         if (nonEmpty.length === 0) {
           console.log(c.yellow("  No remote resources found.\n"));
@@ -579,8 +575,7 @@ export async function runInteractivePull(): Promise<void> {
         const localCount = nonEmpty.reduce(
           (n, s) =>
             n +
-            s.resources.filter((r) => knownUuids.has(r.id as string))
-              .length,
+            s.resources.filter((r) => knownUuids.has(r.id as string)).length,
           0,
         );
         if (localCount > 0) {
@@ -702,15 +697,11 @@ export async function runInteractivePull(): Promise<void> {
 export async function runInteractivePush(): Promise<void> {
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  Vapi GitOps — Interactive Push"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
 
@@ -880,15 +871,11 @@ export async function runInteractivePush(): Promise<void> {
 export async function runInteractiveApply(): Promise<void> {
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  Vapi GitOps — Interactive Apply (Pull → Push)"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
 
@@ -915,15 +902,11 @@ export async function runInteractiveApply(): Promise<void> {
 export async function runInteractiveCall(): Promise<void> {
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  Vapi GitOps — Interactive Call"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
 
@@ -953,9 +936,7 @@ export async function runInteractiveCall(): Promise<void> {
 
   if (assistantNames.length === 0 && squadNames.length === 0) {
     console.log(
-      c.yellow(
-        "\n  No assistants or squads found in state. Run pull first.\n",
-      ),
+      c.yellow("\n  No assistants or squads found in state. Run pull first.\n"),
     );
     return;
   }
@@ -990,15 +971,11 @@ export async function runInteractiveCall(): Promise<void> {
 export async function runInteractiveCleanup(): Promise<void> {
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  Vapi GitOps — Interactive Cleanup"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
 

@@ -16,7 +16,7 @@ import type {
 
 export function findOrphanedResources(
   loadedResourceIds: string[],
-  stateResourceIds: Record<string, ResourceState>
+  stateResourceIds: Record<string, ResourceState>,
 ): OrphanedResource[] {
   const orphaned: OrphanedResource[] = [];
 
@@ -33,7 +33,13 @@ export function findOrphanedResources(
 // Reference Checking - Find resources that reference a given resource
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ReferenceableType = "tools" | "structuredOutputs" | "assistants" | "personalities" | "scenarios" | "simulations";
+type ReferenceableType =
+  | "tools"
+  | "structuredOutputs"
+  | "assistants"
+  | "personalities"
+  | "scenarios"
+  | "simulations";
 
 export interface ResourceReference {
   resourceId: string;
@@ -43,7 +49,7 @@ export interface ResourceReference {
 export function findReferencingResources(
   targetId: string,
   targetType: ReferenceableType,
-  allResources: LoadedResources
+  allResources: LoadedResources,
 ): ResourceReference[] {
   const referencingResources: ResourceReference[] = [];
 
@@ -51,22 +57,46 @@ export function findReferencingResources(
     const refs = extractReferencedIds(resource.data as Record<string, unknown>);
 
     if (targetType === "tools" && refs.tools.includes(targetId)) {
-      referencingResources.push({ resourceId: resource.resourceId, resourceType });
+      referencingResources.push({
+        resourceId: resource.resourceId,
+        resourceType,
+      });
     }
-    if (targetType === "structuredOutputs" && refs.structuredOutputs.includes(targetId)) {
-      referencingResources.push({ resourceId: resource.resourceId, resourceType });
+    if (
+      targetType === "structuredOutputs" &&
+      refs.structuredOutputs.includes(targetId)
+    ) {
+      referencingResources.push({
+        resourceId: resource.resourceId,
+        resourceType,
+      });
     }
     if (targetType === "assistants" && refs.assistants.includes(targetId)) {
-      referencingResources.push({ resourceId: resource.resourceId, resourceType });
+      referencingResources.push({
+        resourceId: resource.resourceId,
+        resourceType,
+      });
     }
-    if (targetType === "personalities" && refs.personalities.includes(targetId)) {
-      referencingResources.push({ resourceId: resource.resourceId, resourceType });
+    if (
+      targetType === "personalities" &&
+      refs.personalities.includes(targetId)
+    ) {
+      referencingResources.push({
+        resourceId: resource.resourceId,
+        resourceType,
+      });
     }
     if (targetType === "scenarios" && refs.scenarios.includes(targetId)) {
-      referencingResources.push({ resourceId: resource.resourceId, resourceType });
+      referencingResources.push({
+        resourceId: resource.resourceId,
+        resourceType,
+      });
     }
     if (targetType === "simulations" && refs.simulations.includes(targetId)) {
-      referencingResources.push({ resourceId: resource.resourceId, resourceType });
+      referencingResources.push({
+        resourceId: resource.resourceId,
+        resourceType,
+      });
     }
   };
 
@@ -109,65 +139,128 @@ const DELETE_ENDPOINT_MAP: Record<ResourceType, string> = {
 
 // Map display type back to ReferenceableType for reference checking
 const REFERENCEABLE_TYPE_MAP: Record<string, ReferenceableType | null> = {
-  "tool": "tools",
+  tool: "tools",
   "structured output": "structuredOutputs",
-  "assistant": "assistants",
-  "personality": "personalities",
-  "scenario": "scenarios",
-  "simulation": "simulations",
+  assistant: "assistants",
+  personality: "personalities",
+  scenario: "scenarios",
+  simulation: "simulations",
   "simulation suite": null, // not referenceable by others
-  "squad": null,            // not referenceable by others
-  "eval": null,             // not referenceable by others
+  squad: null, // not referenceable by others
+  eval: null, // not referenceable by others
 };
 
 export async function deleteOrphanedResources(
   loadedResources: LoadedResources,
   state: StateFile,
-  typesToDelete?: ResourceType[]
+  typesToDelete?: ResourceType[],
 ): Promise<void> {
   const shouldCheck = (type: ResourceType) =>
     !typesToDelete || typesToDelete.includes(type);
 
   // Find orphaned resources (only for applicable types)
   const orphanedTools = shouldCheck("tools")
-    ? findOrphanedResources(loadedResources.tools.map((t) => t.resourceId), state.tools)
+    ? findOrphanedResources(
+        loadedResources.tools.map((t) => t.resourceId),
+        state.tools,
+      )
     : [];
   const orphanedOutputs = shouldCheck("structuredOutputs")
-    ? findOrphanedResources(loadedResources.structuredOutputs.map((o) => o.resourceId), state.structuredOutputs)
+    ? findOrphanedResources(
+        loadedResources.structuredOutputs.map((o) => o.resourceId),
+        state.structuredOutputs,
+      )
     : [];
   const orphanedAssistants = shouldCheck("assistants")
-    ? findOrphanedResources(loadedResources.assistants.map((a) => a.resourceId), state.assistants)
+    ? findOrphanedResources(
+        loadedResources.assistants.map((a) => a.resourceId),
+        state.assistants,
+      )
     : [];
   const orphanedSquads = shouldCheck("squads")
-    ? findOrphanedResources(loadedResources.squads.map((s) => s.resourceId), state.squads)
+    ? findOrphanedResources(
+        loadedResources.squads.map((s) => s.resourceId),
+        state.squads,
+      )
     : [];
   const orphanedPersonalities = shouldCheck("personalities")
-    ? findOrphanedResources(loadedResources.personalities.map((p) => p.resourceId), state.personalities)
+    ? findOrphanedResources(
+        loadedResources.personalities.map((p) => p.resourceId),
+        state.personalities,
+      )
     : [];
   const orphanedScenarios = shouldCheck("scenarios")
-    ? findOrphanedResources(loadedResources.scenarios.map((s) => s.resourceId), state.scenarios)
+    ? findOrphanedResources(
+        loadedResources.scenarios.map((s) => s.resourceId),
+        state.scenarios,
+      )
     : [];
   const orphanedSimulations = shouldCheck("simulations")
-    ? findOrphanedResources(loadedResources.simulations.map((s) => s.resourceId), state.simulations)
+    ? findOrphanedResources(
+        loadedResources.simulations.map((s) => s.resourceId),
+        state.simulations,
+      )
     : [];
   const orphanedSimulationSuites = shouldCheck("simulationSuites")
-    ? findOrphanedResources(loadedResources.simulationSuites.map((s) => s.resourceId), state.simulationSuites)
+    ? findOrphanedResources(
+        loadedResources.simulationSuites.map((s) => s.resourceId),
+        state.simulationSuites,
+      )
     : [];
   const orphanedEvals = shouldCheck("evals")
-    ? findOrphanedResources(loadedResources.evals.map((e) => e.resourceId), state.evals)
+    ? findOrphanedResources(
+        loadedResources.evals.map((e) => e.resourceId),
+        state.evals,
+      )
     : [];
 
   // Collect all orphaned resources (in reverse dependency order for deletion)
   const allOrphaned = [
-    ...orphanedEvals.map((r) => ({ ...r, type: "eval" as const, stateKey: "evals" as ResourceType })),
-    ...orphanedSimulationSuites.map((r) => ({ ...r, type: "simulation suite" as const, stateKey: "simulationSuites" as ResourceType })),
-    ...orphanedSimulations.map((r) => ({ ...r, type: "simulation" as const, stateKey: "simulations" as ResourceType })),
-    ...orphanedScenarios.map((r) => ({ ...r, type: "scenario" as const, stateKey: "scenarios" as ResourceType })),
-    ...orphanedPersonalities.map((r) => ({ ...r, type: "personality" as const, stateKey: "personalities" as ResourceType })),
-    ...orphanedSquads.map((r) => ({ ...r, type: "squad" as const, stateKey: "squads" as ResourceType })),
-    ...orphanedAssistants.map((r) => ({ ...r, type: "assistant" as const, stateKey: "assistants" as ResourceType })),
-    ...orphanedOutputs.map((r) => ({ ...r, type: "structured output" as const, stateKey: "structuredOutputs" as ResourceType })),
-    ...orphanedTools.map((r) => ({ ...r, type: "tool" as const, stateKey: "tools" as ResourceType })),
+    ...orphanedEvals.map((r) => ({
+      ...r,
+      type: "eval" as const,
+      stateKey: "evals" as ResourceType,
+    })),
+    ...orphanedSimulationSuites.map((r) => ({
+      ...r,
+      type: "simulation suite" as const,
+      stateKey: "simulationSuites" as ResourceType,
+    })),
+    ...orphanedSimulations.map((r) => ({
+      ...r,
+      type: "simulation" as const,
+      stateKey: "simulations" as ResourceType,
+    })),
+    ...orphanedScenarios.map((r) => ({
+      ...r,
+      type: "scenario" as const,
+      stateKey: "scenarios" as ResourceType,
+    })),
+    ...orphanedPersonalities.map((r) => ({
+      ...r,
+      type: "personality" as const,
+      stateKey: "personalities" as ResourceType,
+    })),
+    ...orphanedSquads.map((r) => ({
+      ...r,
+      type: "squad" as const,
+      stateKey: "squads" as ResourceType,
+    })),
+    ...orphanedAssistants.map((r) => ({
+      ...r,
+      type: "assistant" as const,
+      stateKey: "assistants" as ResourceType,
+    })),
+    ...orphanedOutputs.map((r) => ({
+      ...r,
+      type: "structured output" as const,
+      stateKey: "structuredOutputs" as ResourceType,
+    })),
+    ...orphanedTools.map((r) => ({
+      ...r,
+      type: "tool" as const,
+      stateKey: "tools" as ResourceType,
+    })),
   ];
 
   // No orphaned resources - nothing to do
@@ -177,13 +270,23 @@ export async function deleteOrphanedResources(
   }
 
   // Check references for each orphaned resource - partition into safe and blocked
-  const blocked: { resourceId: string; uuid: string; type: string; stateKey: ResourceType; refs: ResourceReference[] }[] = [];
+  const blocked: {
+    resourceId: string;
+    uuid: string;
+    type: string;
+    stateKey: ResourceType;
+    refs: ResourceReference[];
+  }[] = [];
   const safeToDelete: typeof allOrphaned = [];
 
   for (const orphan of allOrphaned) {
     const refType = REFERENCEABLE_TYPE_MAP[orphan.type];
     if (refType) {
-      const refs = findReferencingResources(orphan.resourceId, refType, loadedResources);
+      const refs = findReferencingResources(
+        orphan.resourceId,
+        refType,
+        loadedResources,
+      );
       if (refs.length > 0) {
         blocked.push({ ...orphan, refs });
         continue;
@@ -198,10 +301,14 @@ export async function deleteOrphanedResources(
     for (const { resourceId, type, refs } of blocked) {
       console.log(`     ${type}: ${resourceId}`);
       for (const ref of refs) {
-        console.log(`       ↳ referenced by ${ref.resourceType}: ${ref.resourceId}`);
+        console.log(
+          `       ↳ referenced by ${ref.resourceType}: ${ref.resourceId}`,
+        );
       }
     }
-    console.log("\n  ℹ️  Remove the references above before these resources can be deleted.\n");
+    console.log(
+      "\n  ℹ️  Remove the references above before these resources can be deleted.\n",
+    );
   }
 
   // Nothing safe to delete
@@ -215,11 +322,17 @@ export async function deleteOrphanedResources(
     for (const { resourceId, uuid, type } of safeToDelete) {
       console.log(`     🗑️  ${type}: ${resourceId} (${uuid})`);
     }
-    console.log(`\n  📋 Total: ${safeToDelete.length} resource(s) pending deletion`);
+    console.log(
+      `\n  📋 Total: ${safeToDelete.length} resource(s) pending deletion`,
+    );
     if (blocked.length > 0) {
-      console.log(`  ⛔ Skipped: ${blocked.length} resource(s) still referenced`);
+      console.log(
+        `  ⛔ Skipped: ${blocked.length} resource(s) still referenced`,
+      );
     }
-    console.log("  ℹ️  These resources exist in Vapi but not in your local files.");
+    console.log(
+      "  ℹ️  These resources exist in Vapi but not in your local files.",
+    );
     console.log("  ℹ️  To delete them, run with --force flag:");
     console.log("     npm run push -- <org> --force\n");
     return;
@@ -236,7 +349,12 @@ export async function deleteOrphanedResources(
       delete state[stateKey][resourceId];
       deleted++;
     } catch (error) {
-      const msg = error instanceof VapiApiError ? error.apiMessage : (error instanceof Error ? error.message : String(error));
+      const msg =
+        error instanceof VapiApiError
+          ? error.apiMessage
+          : error instanceof Error
+            ? error.message
+            : String(error);
       console.error(`  ❌ Failed to delete ${type} ${resourceId}: ${msg}`);
       throw error;
     }

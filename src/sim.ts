@@ -20,8 +20,8 @@ export interface SimEnv {
 
 export interface SimTarget {
   type: "assistant" | "squad";
-  id: string;             // platform UUID
-  resourceName: string;   // local-name resolved from state
+  id: string; // platform UUID
+  resourceName: string; // local-name resolved from state
 }
 
 export interface SimSelection {
@@ -76,9 +76,7 @@ export function loadEnvFile(env: string): SimEnv {
   }
   const token = process.env.VAPI_TOKEN || envVars.VAPI_TOKEN;
   const baseUrl =
-    process.env.VAPI_BASE_URL ||
-    envVars.VAPI_BASE_URL ||
-    "https://api.vapi.ai";
+    process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
   if (!token) {
     throw new Error(
       `VAPI_TOKEN not found. Create .env.${env} with VAPI_TOKEN=your-token`,
@@ -125,7 +123,9 @@ export function resolveTarget(
     throw new Error("Specify --target as an assistant OR a squad, not both");
   }
   if (args.assistant) {
-    const id = stateValueToUuid((state.assistants as Record<string, unknown>)[args.assistant]);
+    const id = stateValueToUuid(
+      (state.assistants as Record<string, unknown>)[args.assistant],
+    );
     if (!id) {
       throw new Error(
         `Assistant "${args.assistant}" not found in state. Run 'npm run pull -- ${"<env>"}' or check the resource name.`,
@@ -134,7 +134,9 @@ export function resolveTarget(
     return { type: "assistant", id, resourceName: args.assistant };
   }
   if (args.squad) {
-    const id = stateValueToUuid((state.squads as Record<string, unknown>)[args.squad]);
+    const id = stateValueToUuid(
+      (state.squads as Record<string, unknown>)[args.squad],
+    );
     if (!id) {
       throw new Error(
         `Squad "${args.squad}" not found in state. Run 'npm run pull -- ${"<env>"}' or check the resource name.`,
@@ -167,9 +169,14 @@ export function resolveSelection(
     };
   }
   if (args.simulations) {
-    const names = args.simulations.split(",").map((s) => s.trim()).filter(Boolean);
+    const names = args.simulations
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (names.length === 0) {
-      throw new Error("--simulations requires at least one comma-separated simulation name");
+      throw new Error(
+        "--simulations requires at least one comma-separated simulation name",
+      );
     }
     const entries: SimSelection["entries"] = [];
     for (const name of names) {
@@ -235,9 +242,10 @@ export async function runSimulation(
 ): Promise<SimRunSummary> {
   const body: Record<string, unknown> = {
     simulations: selection.entries,
-    target: target.type === "assistant"
-      ? { type: "assistant", assistantId: target.id }
-      : { type: "squad", squadId: target.id },
+    target:
+      target.type === "assistant"
+        ? { type: "assistant", assistantId: target.id }
+        : { type: "squad", squadId: target.id },
     transport: {
       provider:
         options.transport === "chat" ? "vapi.webchat" : "vapi.websocket",
@@ -287,8 +295,12 @@ export async function runSimulation(
   }
 
   const results = Array.isArray(last.results) ? last.results : [];
-  const pass = results.filter((r) => r.status === "pass" && !r.isSkipped).length;
-  const fail = results.filter((r) => r.status !== "pass" && !r.isSkipped).length;
+  const pass = results.filter(
+    (r) => r.status === "pass" && !r.isSkipped,
+  ).length;
+  const fail = results.filter(
+    (r) => r.status !== "pass" && !r.isSkipped,
+  ).length;
   const skipped = results.filter((r) => r.isSkipped === true).length;
 
   return {

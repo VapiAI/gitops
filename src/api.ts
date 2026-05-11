@@ -14,7 +14,11 @@ import type { VapiResponse } from "./types.ts";
 
 const DRY_RUN_COUNTS = { POST: 0, PATCH: 0, DELETE: 0 };
 
-export function getDryRunCounts(): { POST: number; PATCH: number; DELETE: number } {
+export function getDryRunCounts(): {
+  POST: number;
+  PATCH: number;
+  DELETE: number;
+} {
   return { ...DRY_RUN_COUNTS };
 }
 
@@ -54,7 +58,9 @@ function parseApiMessage(body: string): string {
     const parsed = JSON.parse(body);
     if (typeof parsed.message === "string") return parsed.message;
     if (Array.isArray(parsed.message)) return parsed.message.join("; ");
-  } catch { /* not JSON, use raw body */ }
+  } catch {
+    /* not JSON, use raw body */
+  }
   return body;
 }
 
@@ -87,7 +93,7 @@ function shouldRetry(status: number): boolean {
 export async function vapiRequest<T = VapiResponse>(
   method: "POST" | "PATCH",
   endpoint: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<T> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
@@ -122,14 +128,25 @@ export async function vapiRequest<T = VapiResponse>(
 
     if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
-      const reason = response.status === 429 ? "Rate limited" : `Server error ${response.status}`;
-      console.log(`  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      const reason =
+        response.status === 429
+          ? "Rate limited"
+          : `Server error ${response.status}`;
+      console.log(
+        `  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`,
+      );
       await sleep(delay);
       continue;
     }
 
     const errorText = await response.text();
-    throw new VapiApiError(method, endpoint, response.status, parseApiMessage(errorText), errorText);
+    throw new VapiApiError(
+      method,
+      endpoint,
+      response.status,
+      parseApiMessage(errorText),
+      errorText,
+    );
   }
 
   throw new VapiApiError(method, endpoint, 429, "max retries exceeded", "");
@@ -159,16 +176,26 @@ export async function vapiDelete(endpoint: string): Promise<void> {
 
     if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
       const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
-      const reason = response.status === 429 ? "Rate limited" : `Server error ${response.status}`;
-      console.log(`  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      const reason =
+        response.status === 429
+          ? "Rate limited"
+          : `Server error ${response.status}`;
+      console.log(
+        `  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`,
+      );
       await sleep(delay);
       continue;
     }
 
     const errorText = await response.text();
-    throw new VapiApiError("DELETE", endpoint, response.status, parseApiMessage(errorText), errorText);
+    throw new VapiApiError(
+      "DELETE",
+      endpoint,
+      response.status,
+      parseApiMessage(errorText),
+      errorText,
+    );
   }
 
   throw new VapiApiError("DELETE", endpoint, 429, "max retries exceeded", "");
 }
-

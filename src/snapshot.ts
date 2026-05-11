@@ -57,7 +57,10 @@ export async function writeSnapshot(options: {
   resourceId: string;
   payload: SnapshotPayload;
 }): Promise<string> {
-  const dir = join(getRunSnapshotDir(options.baseDir, options.env), options.resourceType);
+  const dir = join(
+    getRunSnapshotDir(options.baseDir, options.env),
+    options.resourceType,
+  );
   await mkdir(dir, { recursive: true });
   const fileName = `${options.resourceId.replace(/\//g, "__")}.json`;
   const filePath = join(dir, fileName);

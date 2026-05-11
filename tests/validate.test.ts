@@ -267,9 +267,7 @@ test("max-tokens-floor: assistant with high maxTokens silent", () => {
 
 test("max-tokens-floor: assistant without tools is silent", () => {
   const r = emptyResources();
-  r.assistants.push(
-    makeAssistant("toolless", { model: { maxTokens: 1 } }),
-  );
+  r.assistants.push(makeAssistant("toolless", { model: { maxTokens: 1 } }));
 
   const findings = validateResources(r).filter(
     (f) => f.rule === "max-tokens-floor",

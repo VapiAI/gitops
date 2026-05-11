@@ -127,8 +127,14 @@ test(
     assert.equal(out.analysisPlan.provider, "anthropic");
 
     // credentialId values, on the other hand, MUST be swapped.
-    assert.equal(out.model.credentialId, "00000000-0000-4000-a000-000000000001");
-    assert.equal(out.voice.credentialId, "00000000-0000-4000-a000-000000000002");
+    assert.equal(
+      out.model.credentialId,
+      "00000000-0000-4000-a000-000000000001",
+    );
+    assert.equal(
+      out.voice.credentialId,
+      "00000000-0000-4000-a000-000000000002",
+    );
     assert.equal(
       out.transcriber.credentialId,
       "00000000-0000-4000-a000-000000000005",
@@ -163,7 +169,9 @@ test("replaceCredentialRefs is symmetric: reverse map restores original names", 
 });
 
 test("replaceCredentialRefs walks deeply nested structures", () => {
-  const state = makeState({ "deep-cred": "deadbeef-dead-beef-dead-beefdeadbeef" });
+  const state = makeState({
+    "deep-cred": "deadbeef-dead-beef-dead-beefdeadbeef",
+  });
   const input = {
     members: [
       {
@@ -201,7 +209,11 @@ test("replaceCredentialRefs preserves non-plain-object values (Date, Buffer)", (
   };
   const out = replaceCredentialRefs(input, forwardMap(state)) as typeof input;
   assert.equal(out.credentialId, "yyy");
-  assert.equal(out.createdAt, date, "Date instance must pass through unchanged");
+  assert.equal(
+    out.createdAt,
+    date,
+    "Date instance must pass through unchanged",
+  );
   assert.ok(
     Buffer.isBuffer(out.payload),
     "Buffer instance must pass through unchanged",

@@ -52,7 +52,10 @@ test("upsertState: preserves prior fields not being patched", () => {
       lastPulledAt: "2026-04-29T00:00:00Z",
     },
   };
-  upsertState(section, "agent-a", { uuid: "u1", lastPushedHash: "new-push-hash" });
+  upsertState(section, "agent-a", {
+    uuid: "u1",
+    lastPushedHash: "new-push-hash",
+  });
   assert.deepEqual(section["agent-a"], {
     uuid: "u1",
     lastPulledHash: "old-hash",

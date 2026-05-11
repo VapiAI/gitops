@@ -29,7 +29,7 @@ export async function runApply(): Promise<void> {
   const allArgs = process.argv.slice(3);
   const hasForce = allArgs.includes("--force");
 
-  const pullArgs = allArgs.filter(a => a !== "--force").join(" ");
+  const pullArgs = allArgs.filter((a) => a !== "--force").join(" ");
   const pushArgs = allArgs.join(" ");
 
   if (!env || !SLUG_RE.test(env)) {
@@ -40,18 +40,24 @@ export async function runApply(): Promise<void> {
     console.error("  Pulls latest platform state (preserving local changes),");
     console.error("  then pushes the result back to the platform.");
     console.error("");
-    console.error("  --force   Enable deletions: resources you deleted locally");
+    console.error(
+      "  --force   Enable deletions: resources you deleted locally",
+    );
     console.error("            will also be deleted from the platform.");
     process.exit(1);
   }
 
-  console.log("═══════════════════════════════════════════════════════════════");
+  console.log(
+    "═══════════════════════════════════════════════════════════════",
+  );
   console.log(`🔄 Vapi GitOps Apply - Environment: ${env}`);
   console.log("   Pull → Merge → Push");
   if (hasForce) {
     console.log("   ⚠️  Deletions enabled (--force)");
   }
-  console.log("═══════════════════════════════════════════════════════════════\n");
+  console.log(
+    "═══════════════════════════════════════════════════════════════\n",
+  );
 
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
   const pullExit = runPassthrough(pullCmd);
@@ -68,9 +74,13 @@ export async function runApply(): Promise<void> {
     process.exit(1);
   }
 
-  console.log("\n═══════════════════════════════════════════════════════════════");
+  console.log(
+    "\n═══════════════════════════════════════════════════════════════",
+  );
   console.log("✅ Apply complete! (Pull → Merge → Push)");
-  console.log("═══════════════════════════════════════════════════════════════\n");
+  console.log(
+    "═══════════════════════════════════════════════════════════════\n",
+  );
 }
 
 // Run when executed directly

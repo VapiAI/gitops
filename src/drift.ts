@@ -32,9 +32,7 @@ export interface DriftCheckResult {
   platformHash?: string;
 }
 
-async function fetchPlatformPayload(
-  endpoint: string,
-): Promise<unknown | null> {
+async function fetchPlatformPayload(endpoint: string): Promise<unknown | null> {
   // GET against the same path the PATCH would target. 404 means the resource
   // was deleted on the dashboard — let the upsert path handle it (the existing
   // 404 → "stale mapping, drop and skip" recovery in
@@ -76,9 +74,9 @@ function stripServerFields(payload: unknown): unknown {
 }
 
 export async function checkDriftForUpdate(options: {
-  endpoint: string;       // e.g. "/assistant/<uuid>"
-  resourceLabel: string;  // for log lines
-  resourceId: string;     // local resource id
+  endpoint: string; // e.g. "/assistant/<uuid>"
+  resourceLabel: string; // for log lines
+  resourceId: string; // local resource id
   state: ResourceState;
   overwrite: boolean;
 }): Promise<DriftCheckResult> {

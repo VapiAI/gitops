@@ -98,13 +98,19 @@ export function loadState(): StateFile {
   return {
     credentials: migrateSection(merged.credentials as Record<string, unknown>),
     assistants: migrateSection(merged.assistants as Record<string, unknown>),
-    structuredOutputs: migrateSection(merged.structuredOutputs as Record<string, unknown>),
+    structuredOutputs: migrateSection(
+      merged.structuredOutputs as Record<string, unknown>,
+    ),
     tools: migrateSection(merged.tools as Record<string, unknown>),
     squads: migrateSection(merged.squads as Record<string, unknown>),
-    personalities: migrateSection(merged.personalities as Record<string, unknown>),
+    personalities: migrateSection(
+      merged.personalities as Record<string, unknown>,
+    ),
     scenarios: migrateSection(merged.scenarios as Record<string, unknown>),
     simulations: migrateSection(merged.simulations as Record<string, unknown>),
-    simulationSuites: migrateSection(merged.simulationSuites as Record<string, unknown>),
+    simulationSuites: migrateSection(
+      merged.simulationSuites as Record<string, unknown>,
+    ),
     evals: migrateSection(merged.evals as Record<string, unknown>),
   };
 }
@@ -115,10 +121,7 @@ export async function saveState(state: StateFile): Promise<void> {
   // truncating it. A truncated state file would silently wipe all UUID
   // mappings on the next load.
   const tmpPath = `${STATE_FILE_PATH}.tmp`;
-  await writeFile(
-    tmpPath,
-    JSON.stringify(state, sortedKeysReplacer, 2) + "\n",
-  );
+  await writeFile(tmpPath, JSON.stringify(state, sortedKeysReplacer, 2) + "\n");
   await rename(tmpPath, STATE_FILE_PATH);
   console.log(`💾 Saved state file: ${STATE_FILE_PATH}`);
 }

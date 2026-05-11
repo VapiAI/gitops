@@ -11,10 +11,7 @@
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import {
-  listSnapshotTimestamps,
-  loadSnapshot,
-} from "./snapshot.ts";
+import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -52,11 +49,11 @@ function loadEnvFile(env: string): RollbackEnv {
   }
   const token = process.env.VAPI_TOKEN || envVars.VAPI_TOKEN;
   const baseUrl =
-    process.env.VAPI_BASE_URL ||
-    envVars.VAPI_BASE_URL ||
-    "https://api.vapi.ai";
+    process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
   if (!token) {
-    console.error(`❌ VAPI_TOKEN not found. Create .env.${env} with VAPI_TOKEN=your-token`);
+    console.error(
+      `❌ VAPI_TOKEN not found. Create .env.${env} with VAPI_TOKEN=your-token`,
+    );
     process.exit(1);
   }
   return { env, token, baseUrl };
@@ -167,7 +164,9 @@ async function main(): Promise<void> {
   for (const entry of entries) {
     const endpoint = ENDPOINT_MAP[entry.resourceType];
     if (!endpoint) {
-      console.warn(`   ⚠️  Unknown resource type: ${entry.resourceType}, skipping`);
+      console.warn(
+        `   ⚠️  Unknown resource type: ${entry.resourceType}, skipping`,
+      );
       skipped++;
       continue;
     }
@@ -180,7 +179,9 @@ async function main(): Promise<void> {
       skipped++;
       continue;
     }
-    process.stdout.write(`   🔁 ${entry.resourceType}/${entry.resourceId} ... `);
+    process.stdout.write(
+      `   🔁 ${entry.resourceType}/${entry.resourceId} ... `,
+    );
     const response = await fetch(`${cfg.baseUrl}${endpoint}/${uuid}`, {
       method: "PATCH",
       headers: {
@@ -207,6 +208,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error("\n❌ Rollback failed:", error instanceof Error ? error.message : error);
+  console.error(
+    "\n❌ Rollback failed:",
+    error instanceof Error ? error.message : error,
+  );
   process.exit(1);
 });

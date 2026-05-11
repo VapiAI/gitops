@@ -84,9 +84,7 @@ async function apiGet(token: string, endpoint: string): Promise<unknown> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(
-      `API GET ${endpoint} failed (${response.status}): ${text}`,
-    );
+    throw new Error(`API GET ${endpoint} failed (${response.status}): ${text}`);
   }
 
   return response.json();
@@ -357,15 +355,11 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  Vapi GitOps — Setup Wizard"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
 
@@ -553,9 +547,7 @@ async function main(): Promise<void> {
     const missing = detectMissingDependencies(snapshots, selectedIds);
     if (missing.size === 0) break;
 
-    console.log(
-      c.yellow("  ⚠ Selected resources reference additional items:"),
-    );
+    console.log(c.yellow("  ⚠ Selected resources reference additional items:"));
     for (const [type, uuids] of missing) {
       const def = RESOURCE_TYPES.find((t) => t.key === type);
       console.log(`    • ${uuids.size} ${def?.label ?? type}`);
@@ -608,15 +600,11 @@ async function main(): Promise<void> {
 function printSummary(slug: string): void {
   console.log("");
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log(c.bold("  ✅ Setup Complete!"));
   console.log(
-    c.bold(
-      "═══════════════════════════════════════════════════════════════",
-    ),
+    c.bold("═══════════════════════════════════════════════════════════════"),
   );
   console.log("");
   console.log(`  📁 Resources:   resources/${slug}/`);

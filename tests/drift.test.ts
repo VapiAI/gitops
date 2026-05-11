@@ -9,7 +9,9 @@ import { checkPronunciationDictDrop } from "../src/state-serialize.ts";
 // pronunciation-dict-drop detector, which is pure-data.
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {
-  const prior = { voice: { provider: "cartesia", pronunciationDictId: "pdict_X" } };
+  const prior = {
+    voice: { provider: "cartesia", pronunciationDictId: "pdict_X" },
+  };
   const current = { voice: { provider: "cartesia" } };
   const msg = checkPronunciationDictDrop("agent-foo", prior, current);
   assert.ok(msg, "expected a warning message");
@@ -45,11 +47,16 @@ test("checkPronunciationDictDrop: warns when 11labs locator array clears (1 → 
     voice: {
       provider: "11labs",
       pronunciationDictionaryLocators: [
-        { pronunciationDictionaryId: "rjshI10OgN6KxqtJBqO4", versionId: "xJl0ImZzi3cYp61T0UQG" },
+        {
+          pronunciationDictionaryId: "rjshI10OgN6KxqtJBqO4",
+          versionId: "xJl0ImZzi3cYp61T0UQG",
+        },
       ],
     },
   };
-  const current = { voice: { provider: "11labs", pronunciationDictionaryLocators: [] } };
+  const current = {
+    voice: { provider: "11labs", pronunciationDictionaryLocators: [] },
+  };
   const msg = checkPronunciationDictDrop("eleven-agent", prior, current);
   assert.ok(msg, "expected a warning message");
   assert.match(msg!, /pronunciationDictionaryLocators/);
@@ -99,13 +106,18 @@ test("checkPronunciationDictDrop: silent when 11labs locator array is unchanged"
   const locators = [{ pronunciationDictionaryId: "id_a", versionId: "v_a" }];
   const prior = { voice: { pronunciationDictionaryLocators: locators } };
   const current = { voice: { pronunciationDictionaryLocators: [...locators] } };
-  assert.equal(checkPronunciationDictDrop("eleven-agent", prior, current), null);
+  assert.equal(
+    checkPronunciationDictDrop("eleven-agent", prior, current),
+    null,
+  );
 });
 
 test("checkPronunciationDictDrop: silent when 11labs locator array grows (additive)", () => {
   const prior = {
     voice: {
-      pronunciationDictionaryLocators: [{ pronunciationDictionaryId: "id_a", versionId: "v_a" }],
+      pronunciationDictionaryLocators: [
+        { pronunciationDictionaryId: "id_a", versionId: "v_a" },
+      ],
     },
   };
   const current = {
@@ -116,7 +128,10 @@ test("checkPronunciationDictDrop: silent when 11labs locator array grows (additi
       ],
     },
   };
-  assert.equal(checkPronunciationDictDrop("eleven-agent", prior, current), null);
+  assert.equal(
+    checkPronunciationDictDrop("eleven-agent", prior, current),
+    null,
+  );
 });
 
 test("checkPronunciationDictDrop: detects either shape when prior has both somehow (Cartesia wins; 11labs check still runs)", () => {
@@ -127,7 +142,9 @@ test("checkPronunciationDictDrop: detects either shape when prior has both someh
   const prior = {
     voice: {
       pronunciationDictId: "pdict_X",
-      pronunciationDictionaryLocators: [{ pronunciationDictionaryId: "id_a", versionId: "v_a" }],
+      pronunciationDictionaryLocators: [
+        { pronunciationDictionaryId: "id_a", versionId: "v_a" },
+      ],
     },
   };
   const current = {

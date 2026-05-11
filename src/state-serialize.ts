@@ -55,9 +55,7 @@ export function canonicalize(value: unknown): unknown {
 // consumes them.
 export function hashPayload(payload: unknown): string {
   const canonical = canonicalize(payload);
-  return createHash("sha256")
-    .update(JSON.stringify(canonical))
-    .digest("hex");
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 // Wrap a legacy state value (bare string UUID) as a ResourceState. Returns
@@ -141,9 +139,13 @@ export function checkPronunciationDictDrop(
   // 11labs locator-array form. Catches array clears (N → 0) and shrinks
   // (N → M, M < N). A drop from 0 → 0 (or undefined → undefined) is a
   // no-op and rightly returns null.
-  const priorLocators = locatorsArray(priorVoice?.pronunciationDictionaryLocators);
+  const priorLocators = locatorsArray(
+    priorVoice?.pronunciationDictionaryLocators,
+  );
   if (priorLocators.length > 0) {
-    const newLocators = locatorsArray(newVoice?.pronunciationDictionaryLocators);
+    const newLocators = locatorsArray(
+      newVoice?.pronunciationDictionaryLocators,
+    );
     if (newLocators.length < priorLocators.length) {
       return (
         `   ⚠️  ${resourceId}: voice.pronunciationDictionaryLocators dropped from ` +
