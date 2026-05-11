@@ -60,12 +60,57 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 | Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
 | Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
 | Promote resources across orgs       | Copy files between `resources/<org-a>/` and `resources/<org-b>/`                  |
-| Push changes to Vapi                | `npm run push -- <org>`                                                           |
+| Deploy local changes (default)      | `npm run apply -- <org>` — pull → merge → push, safe against dashboard drift       |
+| Pre-flight schema check (no network) | `npm run validate -- <org>` — run before every `apply`                            |
 | Pull latest from Vapi               | `npm run pull -- <org>`, `--force`, or `--bootstrap`                              |
 | Pull one known remote resource      | `npm run pull -- <org> --type assistants --id <uuid>`                             |
-| Push only one file                  | `npm run push -- <org> resources/<org>/assistants/my-agent.md`                    |
-| Push multiple specific files        | `npm run push -- <org> <path1> <path2>` (one state-file rewrite at the end)       |
-| Test a call                         | `npm run call -- <org> -a <assistant-name>`                                       |
+| Deploy a single file                | `npm run apply -- <org> resources/<org>/assistants/my-agent.md`                   |
+| Recover from a bad deploy           | `npm run rollback -- <org> --list` then `--to <ISO-timestamp>`                    |
+| Raw push (no pre-pull)              | `npm run push -- <org>` — see safety hierarchy below; rarely the right call        |
+| Test a call                         | `npm run call -- <org> -a <assistant-name>` or `-s <squad-name>`                  |
+| Run a simulation suite              | `npm run sim -- <org> --suite <name> --target <assistant-name>`                   |
+
+---
+
+## Choosing a sync command (safety hierarchy)
+
+Three commands deploy changes to the Vapi platform. Pick the safest one that fits the task. **`apply` is the default.**
+
+### `npm run apply -- <org>` — DEFAULT deploy verb
+
+Pulls the platform's current state, merges with your local files, then pushes the merged result. This protects you from racing dashboard edits made between your last pull and your push. Use this for ~99% of deployments.
+
+```bash
+npm run validate -- <org>             # schema check first, no network call
+npm run apply -- <org>                # full-org apply
+npm run apply -- <org> <path-to-file> # single-file apply (same safety, scoped diff)
+```
+
+### `npm run validate -- <org>` — pre-flight schema check
+
+Runs the engine's local validators against every YAML/MD file in the org without any network call. Catches shape errors (missing required fields, wrong types, stale tool references) before they burn a deploy. **Run before every `apply`.**
+
+### `npm run push -- <org>` — raw push, no pre-pull
+
+Skips the merge pass. Only use when (a) you literally just ran `pull` and (b) you're certain no one has touched the dashboard since. In a multi-developer environment or when dashboard editors are in play, default to `apply` instead. Stale local state can clobber recent dashboard edits or PATCH against UUIDs that no longer exist.
+
+If you do use `push`, dry-run first: `npm run push -- <org> --dry-run`.
+
+### After-the-fact safety
+
+- **`npm run rollback -- <org> --list`** — every push/apply writes a state snapshot to `.vapi-state.<org>.snapshots/` before mutating. `--to <ISO-timestamp>` re-applies a specific snapshot, effectively undoing the deploy.
+- **`npm run cleanup -- <org>`** (no `--force`) — enumerate orphaned dashboard resources without deleting. Destructive run is double-gated: requires `--force --confirm <org>`.
+- **Surgical alternative to `--force` cleanup:** when the orphan set includes Vapi-default fixtures (see `docs/learnings/simulations.md` — the seven immortal stock personalities), delete individual resources via `curl -X DELETE` against the API, then `npm run pull -- <org> --bootstrap` to refresh state. `--force` halts on the first immortal-default 404 and exits non-zero.
+
+### Pre-flight checklist (memorize this loop)
+
+1. `git status` — uncommitted changes are intentional?
+2. `npm run validate -- <org>` — schema clean?
+3. `npm run apply -- <org>` (or `apply -- <org> <path>` for single-file)
+4. Verify with `npm run call -- <org> -a <name>` and/or `npm run sim -- <org> --suite <name> --target <name>`
+5. If something looks wrong: `npm run rollback -- <org> --list` → `--to <timestamp>`
+
+**Why this matters:** the gitops engine tracks resource UUIDs in `.vapi-state.<org>.json`. Bare `push` trusts that file is current. If the dashboard has changed since your last pull — someone edited an assistant in the UI, a teammate ran a different push, a structured output got linked via another path — your local state can be stale by minutes. `apply` refreshes state before mutating, eliminating that entire class of race.
 
 ---
 
