@@ -1,17 +1,17 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtempSync,
-  writeFileSync,
-  rmSync,
   cpSync,
-  symlinkSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 // Stack C — push --dry-run regression coverage.

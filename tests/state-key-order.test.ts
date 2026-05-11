@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { sortedKeysReplacer } from "../src/state-serialize.ts";
 
 // Stack B regression test — pin deterministic key ordering on state file

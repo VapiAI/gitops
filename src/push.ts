@@ -1,26 +1,31 @@
 import { resolve } from "path";
 import { fileURLToPath } from "url";
-import { vapiRequest, VapiApiError, getDryRunCounts } from "./api.ts";
+import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import {
-  VAPI_ENV,
-  VAPI_BASE_URL,
-  FORCE_DELETE,
-  DRY_RUN,
-  STRICT_VALIDATION,
-  OVERWRITE_DRIFT,
   APPLY_FILTER,
   BASE_DIR,
+  DRY_RUN,
+  FORCE_DELETE,
+  loadIgnorePatterns,
+  OVERWRITE_DRIFT,
   removeExcludedKeys,
+  STRICT_VALIDATION,
+  VAPI_BASE_URL,
+  VAPI_ENV,
 } from "./config.ts";
-import { summarizeFindings, validateResources } from "./validate.ts";
-import { checkDriftForUpdate } from "./drift.ts";
-import { writeSnapshot } from "./snapshot.ts";
-import { mergeScoped } from "./state-merge.ts";
 import {
   extractResourceName,
   findExistingResourceByName,
   type RemoteResource,
 } from "./dep-dedup.ts";
+import { checkDriftForUpdate } from "./drift.ts";
+import { writeSnapshot } from "./snapshot.ts";
+import { mergeScoped } from "./state-merge.ts";
+import {
+  summarizeFindings,
+  validateNoIgnoredReferences,
+  validateResources,
+} from "./validate.ts";
 
 // Map a resource label to its state-file key. Used for snapshotting —
 // snapshot directories are keyed by the same names the state file uses.
@@ -34,22 +39,23 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   simulation: "simulations",
   "simulation suite": "simulationSuites",
 };
-import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
-import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
-import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
-import {
-  resolveReferences,
-  resolveAssistantIds,
-  extractReferencedIds,
-} from "./resolver.ts";
+
 import { credentialForwardMap, replaceCredentialRefs } from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
+import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
+import {
+  extractReferencedIds,
+  resolveAssistantIds,
+  resolveReferences,
+} from "./resolver.ts";
+import { FOLDER_MAP, loadResources, loadSingleResource } from "./resources.ts";
+import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type {
-  ResourceFile,
-  StateFile,
-  ResourceType,
-  ResourceState,
   LoadedResources,
+  ResourceFile,
+  ResourceState,
+  ResourceType,
+  StateFile,
 } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1297,23 +1303,52 @@ async function main(): Promise<void> {
   // have been created on the remote, we still need their UUIDs recorded locally
   // — otherwise the next run creates duplicates.
   try {
-    // Load all resources (we need them for reference resolution and filtering)
+    // Load all resources (we need them for reference resolution and filtering).
+    // `.vapi-ignore` is symmetric with pull: matched ids are filtered out
+    // before validation, drift check, and apply. `--force` bypasses the
+    // load-filter (so deliberate overrides flow through); the orphan-protect
+    // pass inside `deleteOrphanedResources` ALWAYS honors the ignore list so
+    // a `--force` push can't silently delete a dashboard resource the repo
+    // has explicitly opted out of managing. Bootstrap-pull paths read their
+    // own patterns directly and are unaffected by this constant.
     console.log("\n📂 Loading resources...\n");
-    const allToolsRaw = await loadResources<Record<string, unknown>>("tools");
-    const allStructuredOutputsRaw =
-      await loadResources<Record<string, unknown>>("structuredOutputs");
-    const allAssistantsRaw =
-      await loadResources<Record<string, unknown>>("assistants");
-    const allSquadsRaw = await loadResources<Record<string, unknown>>("squads");
-    const allPersonalitiesRaw =
-      await loadResources<Record<string, unknown>>("personalities");
-    const allScenariosRaw =
-      await loadResources<Record<string, unknown>>("scenarios");
-    const allSimulationsRaw =
-      await loadResources<Record<string, unknown>>("simulations");
-    const allSimulationSuitesRaw =
-      await loadResources<Record<string, unknown>>("simulationSuites");
-    const allEvalsRaw = await loadResources<Record<string, unknown>>("evals");
+    const ignorePatterns = FORCE_DELETE ? [] : loadIgnorePatterns();
+    const loadOpts = { ignorePatterns };
+    const allToolsRaw = await loadResources<Record<string, unknown>>(
+      "tools",
+      loadOpts,
+    );
+    const allStructuredOutputsRaw = await loadResources<
+      Record<string, unknown>
+    >("structuredOutputs", loadOpts);
+    const allAssistantsRaw = await loadResources<Record<string, unknown>>(
+      "assistants",
+      loadOpts,
+    );
+    const allSquadsRaw = await loadResources<Record<string, unknown>>(
+      "squads",
+      loadOpts,
+    );
+    const allPersonalitiesRaw = await loadResources<Record<string, unknown>>(
+      "personalities",
+      loadOpts,
+    );
+    const allScenariosRaw = await loadResources<Record<string, unknown>>(
+      "scenarios",
+      loadOpts,
+    );
+    const allSimulationsRaw = await loadResources<Record<string, unknown>>(
+      "simulations",
+      loadOpts,
+    );
+    const allSimulationSuitesRaw = await loadResources<Record<string, unknown>>(
+      "simulationSuites",
+      loadOpts,
+    );
+    const allEvalsRaw = await loadResources<Record<string, unknown>>(
+      "evals",
+      loadOpts,
+    );
 
     const loadedResources: LoadedResources = {
       tools: allToolsRaw,
@@ -1334,7 +1369,14 @@ async function main(): Promise<void> {
     // an otherwise-good push. With --strict, any error-severity finding aborts
     // before any API call.
     console.log("\n🔎 Running validators...");
-    const findings = validateResources(loadedResources);
+    const findings = [
+      ...validateResources(loadedResources),
+      // Cross-ignore reference check uses the user-facing ignore list (NOT
+      // the FORCE_DELETE-shadowed `ignorePatterns`) — even under `--force`,
+      // a config that references an ignored resource is a contradiction the
+      // operator should see.
+      ...validateNoIgnoredReferences(loadedResources, loadIgnorePatterns()),
+    ];
     if (findings.length > 0) {
       console.log(summarizeFindings(findings));
     } else {

@@ -1,6 +1,15 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { validateResources } from "../src/validate.ts";
+import test from "node:test";
+
+// validate.ts now imports from config.ts (matchesIgnore) for the
+// reference-to-ignored validator; config.ts asserts argv[2] / VAPI_TOKEN at
+// module load. Set both before importing — same trick used in
+// tests/path-matching.test.ts and tests/vapi-ignore-push.test.ts.
+process.argv = ["node", "test", "test-fixture-org"];
+process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
+
+const { validateResources } = await import("../src/validate.ts");
+
 import type { LoadedResources, ResourceFile } from "../src/types.ts";
 
 // Stack D — validator regression coverage. Each spec exercises one rule

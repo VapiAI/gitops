@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "fs";
-import { join, basename, dirname, resolve, relative } from "path";
+import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import type { Environment, ResourceType } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";

@@ -1,13 +1,14 @@
-import { vapiDelete, VapiApiError } from "./api.ts";
-import { FORCE_DELETE } from "./config.ts";
+import { VapiApiError, vapiDelete } from "./api.ts";
+import { FORCE_DELETE, loadIgnorePatterns, matchesIgnore } from "./config.ts";
 import { extractReferencedIds } from "./resolver.ts";
+import { FOLDER_MAP } from "./resources.ts";
 import type {
-  ResourceFile,
-  ResourceState,
-  StateFile,
   LoadedResources,
   OrphanedResource,
+  ResourceFile,
+  ResourceState,
   ResourceType,
+  StateFile,
 } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,16 +18,43 @@ import type {
 export function findOrphanedResources(
   loadedResourceIds: string[],
   stateResourceIds: Record<string, ResourceState>,
+  ignoredIds?: Set<string>,
 ): OrphanedResource[] {
   const orphaned: OrphanedResource[] = [];
 
   for (const [resourceId, entry] of Object.entries(stateResourceIds)) {
-    if (!loadedResourceIds.includes(resourceId)) {
-      orphaned.push({ resourceId, uuid: entry.uuid });
-    }
+    if (loadedResourceIds.includes(resourceId)) continue;
+    // Data-safety: an id absent from local files BUT listed in .vapi-ignore
+    // is an opt-out, not an orphan. Excluding here prevents `--force` push
+    // from silently DELETE'ing dashboard resources the repo has explicitly
+    // declined to manage.
+    if (ignoredIds?.has(resourceId)) continue;
+    orphaned.push({ resourceId, uuid: entry.uuid });
   }
 
   return orphaned;
+}
+
+// Compute the set of state-tracked ids that match the current .vapi-ignore
+// for a given resource type. Used by `deleteOrphanedResources` to wire
+// orphan-protect and to emit the "retained" log lines.
+function computeIgnoredIds(
+  type: ResourceType,
+  stateSection: Record<string, ResourceState>,
+  patterns: string[],
+): { ignored: Set<string>; matched: Array<{ id: string; pattern: string }> } {
+  const ignored = new Set<string>();
+  const matched: Array<{ id: string; pattern: string }> = [];
+  if (patterns.length === 0) return { ignored, matched };
+  const folder = FOLDER_MAP[type];
+  for (const resourceId of Object.keys(stateSection)) {
+    const pattern = matchesIgnore(folder, resourceId, patterns);
+    if (pattern) {
+      ignored.add(resourceId);
+      matched.push({ id: resourceId, pattern });
+    }
+  }
+  return { ignored, matched };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,61 +186,121 @@ export async function deleteOrphanedResources(
   const shouldCheck = (type: ResourceType) =>
     !typesToDelete || typesToDelete.includes(type);
 
+  // Orphan-protect: always honor .vapi-ignore here, even under `--force`,
+  // so an opt-out can't be silently DELETEd.
+  const patterns = loadIgnorePatterns();
+  const ignoredByType: Record<
+    ResourceType,
+    { ignored: Set<string>; matched: Array<{ id: string; pattern: string }> }
+  > = {
+    tools: computeIgnoredIds("tools", state.tools, patterns),
+    structuredOutputs: computeIgnoredIds(
+      "structuredOutputs",
+      state.structuredOutputs,
+      patterns,
+    ),
+    assistants: computeIgnoredIds("assistants", state.assistants, patterns),
+    squads: computeIgnoredIds("squads", state.squads, patterns),
+    personalities: computeIgnoredIds(
+      "personalities",
+      state.personalities,
+      patterns,
+    ),
+    scenarios: computeIgnoredIds("scenarios", state.scenarios, patterns),
+    simulations: computeIgnoredIds("simulations", state.simulations, patterns),
+    simulationSuites: computeIgnoredIds(
+      "simulationSuites",
+      state.simulationSuites,
+      patterns,
+    ),
+    evals: computeIgnoredIds("evals", state.evals, patterns),
+  };
+
+  const retainedLogLines: string[] = [];
+  for (const [type, { matched }] of Object.entries(ignoredByType) as Array<
+    [ResourceType, (typeof ignoredByType)[ResourceType]]
+  >) {
+    for (const { id } of matched) {
+      // Only emit the retained line when the id WOULD have been an orphan
+      // (i.e., not present in the loaded set). A still-loaded id is not at
+      // risk of orphan deletion and logging it would be noise.
+      const loadedIds = loadedResources[type].map((r) => r.resourceId);
+      if (!loadedIds.includes(id)) {
+        retainedLogLines.push(
+          `  🚫 ${type}/${id} retained (matched .vapi-ignore — orphan-protected)`,
+        );
+      }
+    }
+  }
+
   // Find orphaned resources (only for applicable types)
   const orphanedTools = shouldCheck("tools")
     ? findOrphanedResources(
         loadedResources.tools.map((t) => t.resourceId),
         state.tools,
+        ignoredByType.tools.ignored,
       )
     : [];
   const orphanedOutputs = shouldCheck("structuredOutputs")
     ? findOrphanedResources(
         loadedResources.structuredOutputs.map((o) => o.resourceId),
         state.structuredOutputs,
+        ignoredByType.structuredOutputs.ignored,
       )
     : [];
   const orphanedAssistants = shouldCheck("assistants")
     ? findOrphanedResources(
         loadedResources.assistants.map((a) => a.resourceId),
         state.assistants,
+        ignoredByType.assistants.ignored,
       )
     : [];
   const orphanedSquads = shouldCheck("squads")
     ? findOrphanedResources(
         loadedResources.squads.map((s) => s.resourceId),
         state.squads,
+        ignoredByType.squads.ignored,
       )
     : [];
   const orphanedPersonalities = shouldCheck("personalities")
     ? findOrphanedResources(
         loadedResources.personalities.map((p) => p.resourceId),
         state.personalities,
+        ignoredByType.personalities.ignored,
       )
     : [];
   const orphanedScenarios = shouldCheck("scenarios")
     ? findOrphanedResources(
         loadedResources.scenarios.map((s) => s.resourceId),
         state.scenarios,
+        ignoredByType.scenarios.ignored,
       )
     : [];
   const orphanedSimulations = shouldCheck("simulations")
     ? findOrphanedResources(
         loadedResources.simulations.map((s) => s.resourceId),
         state.simulations,
+        ignoredByType.simulations.ignored,
       )
     : [];
   const orphanedSimulationSuites = shouldCheck("simulationSuites")
     ? findOrphanedResources(
         loadedResources.simulationSuites.map((s) => s.resourceId),
         state.simulationSuites,
+        ignoredByType.simulationSuites.ignored,
       )
     : [];
   const orphanedEvals = shouldCheck("evals")
     ? findOrphanedResources(
         loadedResources.evals.map((e) => e.resourceId),
         state.evals,
+        ignoredByType.evals.ignored,
       )
     : [];
+
+  if (retainedLogLines.length > 0) {
+    for (const line of retainedLogLines) console.log(line);
+  }
 
   // Collect all orphaned resources (in reverse dependency order for deletion)
   const allOrphaned = [

@@ -14,6 +14,9 @@
 //   - Per-provider voice schema                → improvements #9
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { matchesIgnore } from "./config.ts";
+import { extractReferencedIds } from "./resolver.ts";
+import { FOLDER_MAP } from "./resources.ts";
 import type { LoadedResources, ResourceFile, ResourceType } from "./types.ts";
 
 export type ValidationSeverity = "warn" | "error";
@@ -413,6 +416,84 @@ function checkVoiceSchemas(resources: LoadedResources): ValidationFinding[] {
     }
   }
 
+  return findings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 6: References to ignored resources
+//
+// A config that references a resource matched by `.vapi-ignore` is internally
+// inconsistent — at push time the reference cannot be resolved (the ignored
+// resource was filtered out before resolver ran) and the silent-drop pattern
+// in resolver.ts (`.filter(id => id !== null)`) used to mask the problem.
+// Promote it to a blocking validation finding.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REF_TYPE_KEYS: Array<{
+  refKey: keyof ReturnType<typeof extractReferencedIds>;
+  refType: ResourceType;
+}> = [
+  { refKey: "tools", refType: "tools" },
+  { refKey: "structuredOutputs", refType: "structuredOutputs" },
+  { refKey: "assistants", refType: "assistants" },
+  { refKey: "personalities", refType: "personalities" },
+  { refKey: "scenarios", refType: "scenarios" },
+  { refKey: "simulations", refType: "simulations" },
+];
+
+const RESOURCE_TYPES_WITH_REFS: ResourceType[] = [
+  "tools",
+  "structuredOutputs",
+  "assistants",
+  "squads",
+  "personalities",
+  "scenarios",
+  "simulations",
+  "simulationSuites",
+  "evals",
+];
+
+function checkResourceRefs(
+  resource: ResourceFile,
+  type: ResourceType,
+  ignorePatterns: string[],
+): ValidationFinding[] {
+  const findings: ValidationFinding[] = [];
+  const refs = extractReferencedIds(resource.data as Record<string, unknown>);
+
+  for (const { refKey, refType } of REF_TYPE_KEYS) {
+    const folder = FOLDER_MAP[refType];
+    for (const refId of refs[refKey]) {
+      if (!refId) continue;
+      const matched = matchesIgnore(folder, refId, ignorePatterns);
+      if (!matched) continue;
+      findings.push({
+        severity: "error",
+        type,
+        resourceId: resource.resourceId,
+        rule: "reference-to-ignored",
+        message:
+          `❌ ${type}/${resource.resourceId} references ${refType}/${refId}, ` +
+          `which is in .vapi-ignore (pattern: ${matched})`,
+      });
+    }
+  }
+
+  return findings;
+}
+
+export function validateNoIgnoredReferences(
+  loaded: LoadedResources,
+  ignorePatterns: string[],
+): ValidationFinding[] {
+  if (ignorePatterns.length === 0) return [];
+
+  const findings: ValidationFinding[] = [];
+  for (const type of RESOURCE_TYPES_WITH_REFS) {
+    for (const resource of loaded[type]) {
+      findings.push(...checkResourceRefs(resource, type, ignorePatterns));
+    }
+  }
   return findings;
 }
 

@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { fileURLToPath } from "url";
-import { VAPI_ENV, VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
+import { VAPI_BASE_URL, VAPI_ENV, VAPI_TOKEN } from "./config.ts";
 import { loadState } from "./state.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────

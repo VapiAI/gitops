@@ -1,9 +1,18 @@
-import { parse as parseYaml } from "yaml";
-import { readdir, readFile, stat } from "fs/promises";
-import { join, extname, relative, resolve, dirname } from "path";
 import { existsSync } from "fs";
-import { RESOURCES_DIR, BASE_DIR } from "./config.ts";
+import { readdir, readFile, stat } from "fs/promises";
+import { dirname, extname, join, relative, resolve } from "path";
+import { parse as parseYaml } from "yaml";
+import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import type { ResourceFile, ResourceType } from "./types.ts";
+
+// Options bag for the load functions. `ignorePatterns` is the symmetric
+// counterpart to pull's filter: when present, ids matching any pattern are
+// dropped from the returned array (with a skip-log) before any caller sees
+// them. Push wires this from `loadIgnorePatterns()`; pass `[]` (or omit) to
+// preserve the pre-change behavior.
+export interface LoadOptions {
+  ignorePatterns?: string[];
+}
 
 // Map resource types to their folder paths (relative to resources/)
 export const FOLDER_MAP: Record<ResourceType, string> = {
@@ -108,9 +117,11 @@ async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
 
 export async function loadResources<T>(
   type: ResourceType,
+  options: LoadOptions = {},
 ): Promise<ResourceFile<T>[]> {
   const folderPath = FOLDER_MAP[type];
   const resourceDir = join(RESOURCES_DIR, folderPath);
+  const ignorePatterns = options.ignorePatterns ?? [];
 
   if (!existsSync(resourceDir)) {
     console.log(`📁 No ${type} directory found, skipping...`);
@@ -129,6 +140,17 @@ export async function loadResources<T>(
     // e.g., /resources/<org>/assistants/inbound-support.yml → inbound-support
     const relativePath = relative(resourceDir, filePath);
     const resourceId = relativePath.slice(0, -ext.length);
+
+    // Symmetric ignore: drop matched ids before duplicate-detection and
+    // parsing so the rest of the pipeline never sees the file. Caller passes
+    // `[]` (or omits) to opt out — preserves the pre-change behavior.
+    if (ignorePatterns.length > 0) {
+      const matched = matchesIgnore(folderPath, resourceId, ignorePatterns);
+      if (matched) {
+        console.log(`  🚫 ${resourceId} (matched .vapi-ignore: ${matched})`);
+        continue;
+      }
+    }
 
     // Check for duplicate resourceIds (e.g., foo.yml and foo.yaml in same directory)
     if (seenIds.has(resourceId)) {
@@ -242,6 +264,7 @@ export function getResourceTypeFromPath(filePath: string): ResourceType | null {
  */
 export async function loadSingleResource(
   filePath: string,
+  options: LoadOptions = {},
 ): Promise<{ type: ResourceType; resource: ResourceFile } | null> {
   // Resolve path (could be relative to cwd or absolute)
   const absolutePath = resolve(filePath);
@@ -263,6 +286,15 @@ export async function loadSingleResource(
   const ext = extname(absolutePath);
   const relativePath = relative(resourceDir, absolutePath);
   const resourceId = relativePath.slice(0, -ext.length);
+
+  const ignorePatterns = options.ignorePatterns ?? [];
+  if (ignorePatterns.length > 0) {
+    const matched = matchesIgnore(folderPath, resourceId, ignorePatterns);
+    if (matched) {
+      console.log(`  🚫 ${resourceId} (matched .vapi-ignore: ${matched})`);
+      return null;
+    }
+  }
 
   let data: Record<string, unknown>;
 

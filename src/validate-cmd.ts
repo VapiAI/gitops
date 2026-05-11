@@ -7,10 +7,10 @@
 
 import { resolve } from "path";
 import { fileURLToPath } from "url";
-import { VAPI_ENV, VAPI_BASE_URL } from "./config.ts";
+import { VAPI_BASE_URL, VAPI_ENV } from "./config.ts";
 import { loadResources } from "./resources.ts";
-import { summarizeFindings, validateResources } from "./validate.ts";
 import type { LoadedResources } from "./types.ts";
+import { summarizeFindings, validateResources } from "./validate.ts";
 
 async function main(): Promise<void> {
   console.log(
