@@ -75,10 +75,7 @@ test("cleanResource preserves nested structures verbatim", () => {
       voiceId: "abc-123",
       generationConfig: { speed: 1.0 },
     },
-    members: [
-      { assistantId: "child-1" },
-      { assistantId: "child-2" },
-    ],
+    members: [{ assistantId: "child-1" }, { assistantId: "child-2" }],
   });
   assert.deepEqual(out.voice, {
     provider: "cartesia",

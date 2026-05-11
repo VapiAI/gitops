@@ -5,7 +5,8 @@ import type { ResourceState, StateFile } from "./types.ts";
 // ─────────────────────────────────────────────────────────────────────────────
 
 // UUID regex pattern - matches standard UUID format
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUUID(value: string): boolean {
   return UUID_REGEX.test(value);
@@ -14,26 +15,26 @@ function isUUID(value: string): boolean {
 // Check if a UUID is tracked in a state section (reverse lookup). Sections
 // store ResourceState entries — extract `.uuid` for the reverse-lookup
 // membership check.
-function isKnownUUID(uuid: string, stateSection: Record<string, ResourceState>): boolean {
+function isKnownUUID(
+  uuid: string,
+  stateSection: Record<string, ResourceState>,
+): boolean {
   for (const entry of Object.values(stateSection)) {
     if (entry.uuid === uuid) return true;
   }
   return false;
 }
 
-export function resolveToolId(
-  toolId: string,
-  state: StateFile
-): string | null {
+export function resolveToolId(toolId: string, state: StateFile): string | null {
   const cleanId = toolId.split("##")[0]?.trim() ?? "";
-  
+
   if (isUUID(cleanId)) {
     if (!isKnownUUID(cleanId, state.tools)) {
       console.warn(`  ⚠️  Untracked tool UUID (possibly deleted): ${cleanId}`);
     }
     return cleanId;
   }
-  
+
   const uuid = state.tools[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Tool reference not found: ${cleanId}`);
@@ -50,19 +51,21 @@ export function resolveToolIds(toolIds: string[], state: StateFile): string[] {
 
 export function resolveStructuredOutputIds(
   outputIds: string[],
-  state: StateFile
+  state: StateFile,
 ): string[] {
   return outputIds
     .map((refId: string) => {
       const cleanId = refId.split("##")[0]?.trim() ?? "";
-      
+
       if (isUUID(cleanId)) {
         if (!isKnownUUID(cleanId, state.structuredOutputs)) {
-          console.warn(`  ⚠️  Untracked structured output UUID (possibly deleted): ${cleanId}`);
+          console.warn(
+            `  ⚠️  Untracked structured output UUID (possibly deleted): ${cleanId}`,
+          );
         }
         return cleanId;
       }
-      
+
       const uuid = state.structuredOutputs[cleanId]?.uuid;
       if (!uuid) {
         console.warn(`  ⚠️  Structured output reference not found: ${cleanId}`);
@@ -75,18 +78,20 @@ export function resolveStructuredOutputIds(
 
 export function resolveAssistantId(
   assistantId: string,
-  state: StateFile
+  state: StateFile,
 ): string | null {
   const cleanId = assistantId.split("##")[0]?.trim() ?? "";
-  
+
   if (isUUID(cleanId)) {
     if (!isKnownUUID(cleanId, state.assistants)) {
-      console.warn(`  ⚠️  Untracked assistant UUID (possibly deleted): ${cleanId}`);
+      console.warn(
+        `  ⚠️  Untracked assistant UUID (possibly deleted): ${cleanId}`,
+      );
       return null;
     }
     return cleanId;
   }
-  
+
   const uuid = state.assistants[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Assistant reference not found: ${cleanId}`);
@@ -97,7 +102,7 @@ export function resolveAssistantId(
 
 export function resolveAssistantIds(
   assistantIds: string[],
-  state: StateFile
+  state: StateFile,
 ): string[] {
   return assistantIds
     .map((refId: string) => resolveAssistantId(refId, state))
@@ -106,15 +111,15 @@ export function resolveAssistantIds(
 
 export function resolvePersonalityId(
   personalityId: string,
-  state: StateFile
+  state: StateFile,
 ): string | null {
   const cleanId = personalityId.split("##")[0]?.trim() ?? "";
-  
+
   // If already a UUID, return it directly
   if (isUUID(cleanId)) {
     return cleanId;
   }
-  
+
   const uuid = state.personalities[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Personality reference not found: ${cleanId}`);
@@ -125,15 +130,15 @@ export function resolvePersonalityId(
 
 export function resolveScenarioId(
   scenarioId: string,
-  state: StateFile
+  state: StateFile,
 ): string | null {
   const cleanId = scenarioId.split("##")[0]?.trim() ?? "";
-  
+
   // If already a UUID, return it directly
   if (isUUID(cleanId)) {
     return cleanId;
   }
-  
+
   const uuid = state.scenarios[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Scenario reference not found: ${cleanId}`);
@@ -144,15 +149,15 @@ export function resolveScenarioId(
 
 export function resolveSimulationId(
   simulationId: string,
-  state: StateFile
+  state: StateFile,
 ): string | null {
   const cleanId = simulationId.split("##")[0]?.trim() ?? "";
-  
+
   // If already a UUID, return it directly
   if (isUUID(cleanId)) {
     return cleanId;
   }
-  
+
   const uuid = state.simulations[cleanId]?.uuid;
   if (!uuid) {
     console.warn(`  ⚠️  Simulation reference not found: ${cleanId}`);
@@ -163,7 +168,7 @@ export function resolveSimulationId(
 
 export function resolveSimulationIds(
   simulationIds: string[],
-  state: StateFile
+  state: StateFile,
 ): string[] {
   return simulationIds
     .map((refId: string) => resolveSimulationId(refId, state))
@@ -172,7 +177,7 @@ export function resolveSimulationIds(
 
 export function resolveReferences(
   data: Record<string, unknown>,
-  state: StateFile
+  state: StateFile,
 ): Record<string, unknown> {
   const resolved = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
 
@@ -194,13 +199,13 @@ export function resolveReferences(
     resolved.artifactPlan &&
     typeof resolved.artifactPlan === "object" &&
     Array.isArray(
-      (resolved.artifactPlan as Record<string, unknown>).structuredOutputIds
+      (resolved.artifactPlan as Record<string, unknown>).structuredOutputIds,
     )
   ) {
     const artifactPlan = resolved.artifactPlan as Record<string, unknown>;
     artifactPlan.structuredOutputIds = resolveStructuredOutputIds(
       artifactPlan.structuredOutputIds as string[],
-      state
+      state,
     );
   }
 
@@ -208,7 +213,7 @@ export function resolveReferences(
   if (Array.isArray(resolved.assistant_ids)) {
     resolved.assistantIds = resolveAssistantIds(
       resolved.assistant_ids as string[],
-      state
+      state,
     );
     delete resolved.assistant_ids; // Remove snake_case version
   }
@@ -237,7 +242,10 @@ export function resolveReferences(
 
   // Resolve assistantId in destinations[] (for handoff tools)
   if (Array.isArray(resolved.destinations)) {
-    for (const destination of resolved.destinations as Record<string, unknown>[]) {
+    for (const destination of resolved.destinations as Record<
+      string,
+      unknown
+    >[]) {
       if (typeof destination.assistantId === "string") {
         const resolvedId = resolveAssistantId(destination.assistantId, state);
         if (resolvedId) {
@@ -258,7 +266,10 @@ export function resolveReferences(
       }
       // Resolve assistantDestinations[].assistantId
       if (Array.isArray(member.assistantDestinations)) {
-        for (const dest of member.assistantDestinations as Record<string, unknown>[]) {
+        for (const dest of member.assistantDestinations as Record<
+          string,
+          unknown
+        >[]) {
           if (typeof dest.assistantId === "string") {
             const resolvedId = resolveAssistantId(dest.assistantId, state);
             if (resolvedId) {
@@ -290,16 +301,20 @@ export function resolveReferences(
   if (Array.isArray(resolved.simulationIds)) {
     resolved.simulationIds = resolveSimulationIds(
       resolved.simulationIds as string[],
-      state
+      state,
     );
   }
 
   // Resolve evaluations[].structuredOutputId in scenarios
   if (Array.isArray(resolved.evaluations)) {
-    for (const evaluation of resolved.evaluations as Record<string, unknown>[]) {
+    for (const evaluation of resolved.evaluations as Record<
+      string,
+      unknown
+    >[]) {
       if (typeof evaluation.structuredOutputId === "string") {
-        const cleanId = evaluation.structuredOutputId.split("##")[0]?.trim() ?? "";
-        
+        const cleanId =
+          evaluation.structuredOutputId.split("##")[0]?.trim() ?? "";
+
         // If already a UUID, keep it as-is
         if (isUUID(cleanId)) {
           evaluation.structuredOutputId = cleanId;
@@ -308,7 +323,9 @@ export function resolveReferences(
           if (uuid) {
             evaluation.structuredOutputId = uuid;
           } else {
-            console.warn(`  ⚠️  Structured output reference not found in evaluation: ${cleanId}`);
+            console.warn(
+              `  ⚠️  Structured output reference not found in evaluation: ${cleanId}`,
+            );
           }
         }
       }
@@ -331,7 +348,9 @@ export interface ExtractedReferences {
   simulations: string[];
 }
 
-export function extractReferencedIds(data: Record<string, unknown>): ExtractedReferences {
+export function extractReferencedIds(
+  data: Record<string, unknown>,
+): ExtractedReferences {
   const tools: string[] = [];
   const structuredOutputs: string[] = [];
   const assistants: string[] = [];
@@ -360,7 +379,7 @@ export function extractReferencedIds(data: Record<string, unknown>): ExtractedRe
     const artifactPlan = data.artifactPlan as Record<string, unknown>;
     if (Array.isArray(artifactPlan.structuredOutputIds)) {
       structuredOutputs.push(
-        ...(artifactPlan.structuredOutputIds as string[]).map(cleanId)
+        ...(artifactPlan.structuredOutputIds as string[]).map(cleanId),
       );
     }
   }
@@ -400,7 +419,10 @@ export function extractReferencedIds(data: Record<string, unknown>): ExtractedRe
       }
       // Check assistantDestinations[].assistantId
       if (Array.isArray(member.assistantDestinations)) {
-        for (const dest of member.assistantDestinations as Record<string, unknown>[]) {
+        for (const dest of member.assistantDestinations as Record<
+          string,
+          unknown
+        >[]) {
           if (typeof dest.assistantId === "string") {
             assistants.push(cleanId(dest.assistantId));
           }
@@ -424,6 +446,12 @@ export function extractReferencedIds(data: Record<string, unknown>): ExtractedRe
     simulations.push(...(data.simulationIds as string[]).map(cleanId));
   }
 
-  return { tools, structuredOutputs, assistants, personalities, scenarios, simulations };
+  return {
+    tools,
+    structuredOutputs,
+    assistants,
+    personalities,
+    scenarios,
+    simulations,
+  };
 }
-

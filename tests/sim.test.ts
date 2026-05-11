@@ -61,7 +61,9 @@ test("resolveTarget: rejects both assistant and squad simultaneously", () => {
 });
 
 test("resolveSelection: resolves suite by local name", () => {
-  const state = makeState({ simulationSuites: { "booking-tests": "uuid-s-1" } });
+  const state = makeState({
+    simulationSuites: { "booking-tests": "uuid-s-1" },
+  });
   const sel = resolveSelection(state, { suite: "booking-tests" });
   assert.equal(sel.entries.length, 1);
   assert.deepEqual(sel.entries[0], {

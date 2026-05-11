@@ -347,9 +347,7 @@ function removeUuidMappings(
 // Resource Processing
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function cleanResource(
-  resource: VapiResource,
-): Record<string, unknown> {
+export function cleanResource(resource: VapiResource): Record<string, unknown> {
   const cleaned: Record<string, unknown> = {};
 
   // Preserve `null` values: the API uses `null` to represent an intentionally
@@ -699,9 +697,7 @@ export async function pullResourceType(
     if (!bootstrap && !force) {
       const matched = matchesIgnore(folderPath, resourceId);
       if (matched) {
-        console.log(
-          `   🚫 ${resourceId} (matched .vapi-ignore: ${matched})`,
-        );
+        console.log(`   🚫 ${resourceId} (matched .vapi-ignore: ${matched})`);
         skipped++;
         continue;
       }

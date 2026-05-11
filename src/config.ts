@@ -346,7 +346,10 @@ export function loadIgnorePatterns(): string[] {
   cachedIgnorePatterns = raw
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#") && !line.startsWith("!"));
+    .filter(
+      (line) =>
+        line.length > 0 && !line.startsWith("#") && !line.startsWith("!"),
+    );
 
   return cachedIgnorePatterns;
 }

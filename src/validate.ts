@@ -33,9 +33,7 @@ const NAME_MAX_LEN = 40;
 // Check 1: Name length cap (40 chars)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function checkNameLengths(
-  resources: LoadedResources,
-): ValidationFinding[] {
+function checkNameLengths(resources: LoadedResources): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
   for (const assistant of resources.assistants) {
@@ -85,9 +83,7 @@ function checkNameLengths(
 // A one-sided declaration is a silent inconsistency.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getAssistantStructuredOutputIds(
-  assistant: ResourceFile,
-): string[] {
+function getAssistantStructuredOutputIds(assistant: ResourceFile): string[] {
   const ap = (assistant.data as { artifactPlan?: unknown }).artifactPlan;
   if (!ap || typeof ap !== "object") return [];
   const ids = (ap as { structuredOutputIds?: unknown }).structuredOutputIds;
@@ -96,9 +92,7 @@ function getAssistantStructuredOutputIds(
     : [];
 }
 
-function getStructuredOutputAssistantIds(
-  so: ResourceFile,
-): string[] {
+function getStructuredOutputAssistantIds(so: ResourceFile): string[] {
   const ids = (so.data as { assistant_ids?: unknown }).assistant_ids;
   return Array.isArray(ids)
     ? ids.filter((s): s is string => typeof s === "string")
@@ -184,10 +178,7 @@ function getSystemPrompt(assistant: ResourceFile): string | null {
   return sys?.content ?? null;
 }
 
-const RISKY_HEADINGS = [
-  "CONTINUITY ON ENTRY",
-  "CLOSEOUT FLOW STRUCTURE",
-];
+const RISKY_HEADINGS = ["CONTINUITY ON ENTRY", "CLOSEOUT FLOW STRUCTURE"];
 
 function checkPromptDuplications(
   resources: LoadedResources,
@@ -275,9 +266,7 @@ function getToolParametersSize(tool: ResourceFile): number {
   }
 }
 
-function checkMaxTokensFloor(
-  resources: LoadedResources,
-): ValidationFinding[] {
+function checkMaxTokensFloor(resources: LoadedResources): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
   const toolById = new Map(resources.tools.map((t) => [t.resourceId, t]));
 
@@ -378,9 +367,7 @@ function checkVoiceBlock(
   return findings;
 }
 
-function checkVoiceSchemas(
-  resources: LoadedResources,
-): ValidationFinding[] {
+function checkVoiceSchemas(resources: LoadedResources): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
 
   for (const assistant of resources.assistants) {
@@ -395,7 +382,8 @@ function checkVoiceSchemas(
   }
 
   for (const squad of resources.squads) {
-    const overrides = (squad.data as { membersOverrides?: unknown }).membersOverrides;
+    const overrides = (squad.data as { membersOverrides?: unknown })
+      .membersOverrides;
     if (overrides && typeof overrides === "object") {
       findings.push(
         ...checkVoiceBlock(
@@ -459,7 +447,9 @@ export function summarizeFindings(findings: ValidationFinding[]): string {
   const errors = findings.filter((f) => f.severity === "error");
   const warns = findings.filter((f) => f.severity === "warn");
   const lines: string[] = [];
-  lines.push(`📋 Validation: ${errors.length} error(s), ${warns.length} warning(s)`);
+  lines.push(
+    `📋 Validation: ${errors.length} error(s), ${warns.length} warning(s)`,
+  );
   for (const f of findings) lines.push(formatFinding(f));
   return lines.join("\n");
 }

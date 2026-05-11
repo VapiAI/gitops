@@ -40,7 +40,11 @@ function setupFixture(stateContent: object | null): Fixture {
   cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
   cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
   // node_modules is too big to copy; symlink it instead.
-  symlinkSync(join(REPO_ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+  symlinkSync(
+    join(REPO_ROOT, "node_modules"),
+    join(dir, "node_modules"),
+    "dir",
+  );
   writeFileSync(
     join(dir, ".env.test-cleanup-org"),
     "VAPI_TOKEN=fake-token-not-used\n",
@@ -100,67 +104,58 @@ function runCleanup(
   };
 }
 
-test(
-  "P0-4 regression: cleanup --force WITHOUT --confirm <slug> refuses to run",
-  () => {
-    const fx = setupFixture(nonEmptyState());
-    try {
-      const res = runCleanup(fx.dir, ["--force"]);
-      assert.notEqual(res.code, 0, `must exit non-zero, got ${res.code}`);
-      assert.match(
-        res.stderr,
-        /Refusing to run destructive cleanup without explicit confirmation/,
-      );
-      assert.doesNotMatch(
-        res.stdout,
-        /Deleting\.\.\./,
-        "must NOT begin deletion",
-      );
-    } finally {
-      fx.cleanup();
-    }
-  },
-);
+test("P0-4 regression: cleanup --force WITHOUT --confirm <slug> refuses to run", () => {
+  const fx = setupFixture(nonEmptyState());
+  try {
+    const res = runCleanup(fx.dir, ["--force"]);
+    assert.notEqual(res.code, 0, `must exit non-zero, got ${res.code}`);
+    assert.match(
+      res.stderr,
+      /Refusing to run destructive cleanup without explicit confirmation/,
+    );
+    assert.doesNotMatch(
+      res.stdout,
+      /Deleting\.\.\./,
+      "must NOT begin deletion",
+    );
+  } finally {
+    fx.cleanup();
+  }
+});
 
-test(
-  "P0-4 regression: cleanup --force --confirm <wrong-slug> refuses to run",
-  () => {
-    const fx = setupFixture(nonEmptyState());
-    try {
-      const res = runCleanup(fx.dir, ["--force", "--confirm", "different-org"]);
-      assert.notEqual(res.code, 0);
-      assert.match(
-        res.stderr,
-        /Refusing to run destructive cleanup without explicit confirmation/,
-      );
-    } finally {
-      fx.cleanup();
-    }
-  },
-);
+test("P0-4 regression: cleanup --force --confirm <wrong-slug> refuses to run", () => {
+  const fx = setupFixture(nonEmptyState());
+  try {
+    const res = runCleanup(fx.dir, ["--force", "--confirm", "different-org"]);
+    assert.notEqual(res.code, 0);
+    assert.match(
+      res.stderr,
+      /Refusing to run destructive cleanup without explicit confirmation/,
+    );
+  } finally {
+    fx.cleanup();
+  }
+});
 
-test(
-  "P0-4 regression: cleanup --force --confirm <slug> with EMPTY state refuses",
-  () => {
-    // Fresh-clone scenario: state file exists but is empty. Every remote
-    // resource would be treated as orphaned. Must refuse.
-    const fx = setupFixture(emptyState());
-    try {
-      const res = runCleanup(fx.dir, [
-        "--force",
-        "--confirm",
-        "test-cleanup-org",
-      ]);
-      assert.notEqual(res.code, 0);
-      assert.match(
-        res.stderr,
-        /Refusing to run destructive cleanup: state file has 0 tracked resources/,
-      );
-    } finally {
-      fx.cleanup();
-    }
-  },
-);
+test("P0-4 regression: cleanup --force --confirm <slug> with EMPTY state refuses", () => {
+  // Fresh-clone scenario: state file exists but is empty. Every remote
+  // resource would be treated as orphaned. Must refuse.
+  const fx = setupFixture(emptyState());
+  try {
+    const res = runCleanup(fx.dir, [
+      "--force",
+      "--confirm",
+      "test-cleanup-org",
+    ]);
+    assert.notEqual(res.code, 0);
+    assert.match(
+      res.stderr,
+      /Refusing to run destructive cleanup: state file has 0 tracked resources/,
+    );
+  } finally {
+    fx.cleanup();
+  }
+});
 
 test(
   "cleanup dry-run (default, no --force) is allowed without --confirm — it " +

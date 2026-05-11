@@ -323,9 +323,13 @@ export default createPrompt<string[], Config>((config, done) => {
   lines.push(`${prefix} ${esc.bold(config.message)}`);
 
   if (filter) {
-    lines.push(`  ${esc.dim("Search:")} ${filter}▏ ${esc.dim("(esc to clear)")}`);
+    lines.push(
+      `  ${esc.dim("Search:")} ${filter}▏ ${esc.dim("(esc to clear)")}`,
+    );
   } else {
-    lines.push(`  ${esc.dim("Type to search…  ←/→: collapse/expand  (esc to go back)")}`);
+    lines.push(
+      `  ${esc.dim("Type to search…  ←/→: collapse/expand  (esc to go back)")}`,
+    );
   }
   lines.push("");
 
@@ -359,7 +363,8 @@ export default createPrompt<string[], Config>((config, done) => {
     }
 
     const remaining = display.length - end;
-    if (remaining > 0) lines.push(`  ${esc.dim(`  ↓ ${remaining} more below`)}`);
+    if (remaining > 0)
+      lines.push(`  ${esc.dim(`  ↓ ${remaining} more below`)}`);
   }
 
   lines.push("");

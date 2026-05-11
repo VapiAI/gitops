@@ -34,12 +34,7 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   simulation: "simulations",
   "simulation suite": "simulationSuites",
 };
-import {
-  hashPayload,
-  loadState,
-  saveState,
-  upsertState,
-} from "./state.ts";
+import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import { loadResources, loadSingleResource, FOLDER_MAP } from "./resources.ts";
 import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
 import {
@@ -1068,7 +1063,9 @@ async function ensureStructuredOutputExists(
     // uuid so a subsequent full push doesn't see them as "tracked but no
     // local file" and DELETE the dashboard resource we just adopted. Mark
     // them touched so the scoped state-merge on save flushes the deletion.
-    for (const [staleKey, entry] of Object.entries(ctx.state.structuredOutputs)) {
+    for (const [staleKey, entry] of Object.entries(
+      ctx.state.structuredOutputs,
+    )) {
       if (staleKey !== output.resourceId && entry.uuid === match.uuid) {
         delete ctx.state.structuredOutputs[staleKey];
         ctx.touched.structuredOutputs.add(staleKey);
@@ -1300,193 +1297,25 @@ async function main(): Promise<void> {
   // have been created on the remote, we still need their UUIDs recorded locally
   // — otherwise the next run creates duplicates.
   try {
-  // Load all resources (we need them for reference resolution and filtering)
-  console.log("\n📂 Loading resources...\n");
-  const allToolsRaw = await loadResources<Record<string, unknown>>("tools");
-  const allStructuredOutputsRaw =
-    await loadResources<Record<string, unknown>>("structuredOutputs");
-  const allAssistantsRaw =
-    await loadResources<Record<string, unknown>>("assistants");
-  const allSquadsRaw = await loadResources<Record<string, unknown>>("squads");
-  const allPersonalitiesRaw =
-    await loadResources<Record<string, unknown>>("personalities");
-  const allScenariosRaw =
-    await loadResources<Record<string, unknown>>("scenarios");
-  const allSimulationsRaw =
-    await loadResources<Record<string, unknown>>("simulations");
-  const allSimulationSuitesRaw =
-    await loadResources<Record<string, unknown>>("simulationSuites");
-  const allEvalsRaw =
-    await loadResources<Record<string, unknown>>("evals");
+    // Load all resources (we need them for reference resolution and filtering)
+    console.log("\n📂 Loading resources...\n");
+    const allToolsRaw = await loadResources<Record<string, unknown>>("tools");
+    const allStructuredOutputsRaw =
+      await loadResources<Record<string, unknown>>("structuredOutputs");
+    const allAssistantsRaw =
+      await loadResources<Record<string, unknown>>("assistants");
+    const allSquadsRaw = await loadResources<Record<string, unknown>>("squads");
+    const allPersonalitiesRaw =
+      await loadResources<Record<string, unknown>>("personalities");
+    const allScenariosRaw =
+      await loadResources<Record<string, unknown>>("scenarios");
+    const allSimulationsRaw =
+      await loadResources<Record<string, unknown>>("simulations");
+    const allSimulationSuitesRaw =
+      await loadResources<Record<string, unknown>>("simulationSuites");
+    const allEvalsRaw = await loadResources<Record<string, unknown>>("evals");
 
-  const loadedResources: LoadedResources = {
-    tools: allToolsRaw,
-    structuredOutputs: allStructuredOutputsRaw,
-    assistants: allAssistantsRaw,
-    squads: allSquadsRaw,
-    personalities: allPersonalitiesRaw,
-    scenarios: allScenariosRaw,
-    simulations: allSimulationsRaw,
-    simulationSuites: allSimulationSuitesRaw,
-    evals: allEvalsRaw,
-  };
-
-  state = await maybeBootstrapState(loadedResources, state);
-
-  // Run client-side validators against the loaded resource set. In default
-  // mode, errors are surfaced as warnings so a single bad spec doesn't block
-  // an otherwise-good push. With --strict, any error-severity finding aborts
-  // before any API call.
-  console.log("\n🔎 Running validators...");
-  const findings = validateResources(loadedResources);
-  if (findings.length > 0) {
-    console.log(summarizeFindings(findings));
-  } else {
-    console.log("   ✅ No validation issues.");
-  }
-  const errorCount = findings.filter((f) => f.severity === "error").length;
-  if (errorCount > 0) {
-    if (STRICT_VALIDATION) {
-      console.error(
-        `\n❌ Validation failed (${errorCount} error(s)). --strict refuses to push. Fix the issues above or drop --strict.`,
-      );
-      process.exit(1);
-    }
-    console.warn(
-      `   ⚠️  ${errorCount} validation error(s) detected — push will continue (use --strict to abort on errors).`,
-    );
-  }
-
-  // Resolve credential names → UUIDs in all resource data before applying
-  const credMap = credentialForwardMap(state);
-  if (credMap.size > 0) {
-    console.log(`\n🔑 Resolving credentials (${credMap.size} mapped)...\n`);
-  } else {
-    console.log(
-      "\n🔑 No credentials in state — run pull first to populate credential mappings",
-    );
-  }
-
-  const resolveCredentials = <T>(
-    resources: ResourceFile<T>[],
-  ): ResourceFile<T>[] =>
-    resources.map((r) => {
-      const resolved = replaceCredentialRefs(r.data, credMap);
-      warnUnresolvedCredentials(
-        r.resourceId,
-        resolved as Record<string, unknown>,
-      );
-      return { ...r, data: resolved };
-    });
-
-  // Filter out platform defaults (read-only, cannot be updated via API)
-  const filterDefaults = <T extends Record<string, unknown>>(
-    resources: ResourceFile<T>[],
-  ) => {
-    const defaults = resources.filter(
-      (r) => (r.data as Record<string, unknown>)._platformDefault === true,
-    );
-    if (defaults.length > 0) {
-      for (const d of defaults) {
-        console.log(`  🔒 Skipping platform default: ${d.resourceId}`);
-      }
-    }
-    return resources.filter(
-      (r) => (r.data as Record<string, unknown>)._platformDefault !== true,
-    );
-  };
-
-  const allTools = resolveCredentials(filterDefaults(allToolsRaw));
-  const allStructuredOutputs = resolveCredentials(
-    filterDefaults(allStructuredOutputsRaw),
-  );
-  const allAssistants = resolveCredentials(filterDefaults(allAssistantsRaw));
-  const allSquads = resolveCredentials(filterDefaults(allSquadsRaw));
-  const allPersonalities = resolveCredentials(
-    filterDefaults(allPersonalitiesRaw),
-  );
-  const allScenarios = resolveCredentials(filterDefaults(allScenariosRaw));
-  const allSimulations = resolveCredentials(filterDefaults(allSimulationsRaw));
-  const allSimulationSuites = resolveCredentials(
-    filterDefaults(allSimulationSuitesRaw),
-  );
-  const allEvals = resolveCredentials(filterDefaults(allEvalsRaw));
-
-  // Filter resources based on apply filter
-  const tools = shouldApplyResourceType("tools")
-    ? filterResourcesByPaths(allTools, "tools")
-    : [];
-  const structuredOutputs = shouldApplyResourceType("structuredOutputs")
-    ? filterResourcesByPaths(allStructuredOutputs, "structuredOutputs")
-    : [];
-  const assistants = shouldApplyResourceType("assistants")
-    ? filterResourcesByPaths(allAssistants, "assistants")
-    : [];
-  const squads = shouldApplyResourceType("squads")
-    ? filterResourcesByPaths(allSquads, "squads")
-    : [];
-  const personalities = shouldApplyResourceType("personalities")
-    ? filterResourcesByPaths(allPersonalities, "personalities")
-    : [];
-  const scenarios = shouldApplyResourceType("scenarios")
-    ? filterResourcesByPaths(allScenarios, "scenarios")
-    : [];
-  const simulations = shouldApplyResourceType("simulations")
-    ? filterResourcesByPaths(allSimulations, "simulations")
-    : [];
-  const simulationSuites = shouldApplyResourceType("simulationSuites")
-    ? filterResourcesByPaths(allSimulationSuites, "simulationSuites")
-    : [];
-  const evals = shouldApplyResourceType("evals")
-    ? filterResourcesByPaths(allEvals, "evals")
-    : [];
-
-  // Auto-dependency resolution context
-  const autoApplied = new Set<string>();
-  const autoAppliedTools: ResourceFile<Record<string, unknown>>[] = [];
-  const autoAppliedStructuredOutputs: ResourceFile<Record<string, unknown>>[] =
-    [];
-  const depCtx: DependencyContext = {
-    allTools,
-    allStructuredOutputs,
-    allAssistants,
-    state,
-    applied,
-    autoApplied,
-    autoAppliedTools,
-    autoAppliedStructuredOutputs,
-    touched,
-  };
-
-  // Determine which types to check for orphaned deletions
-  // Full apply: check all types. Partial apply: only check the filtered type(s).
-  let typesToDelete: ResourceType[] | undefined;
-  if (partial) {
-    typesToDelete = [];
-    if (APPLY_FILTER.resourceTypes?.length) {
-      typesToDelete.push(...APPLY_FILTER.resourceTypes);
-    } else if (APPLY_FILTER.filePaths?.length) {
-      if (tools.length > 0) typesToDelete.push("tools");
-      if (structuredOutputs.length > 0) typesToDelete.push("structuredOutputs");
-      if (assistants.length > 0) typesToDelete.push("assistants");
-      if (squads.length > 0) typesToDelete.push("squads");
-      if (personalities.length > 0) typesToDelete.push("personalities");
-      if (scenarios.length > 0) typesToDelete.push("scenarios");
-      if (simulations.length > 0) typesToDelete.push("simulations");
-      if (simulationSuites.length > 0) typesToDelete.push("simulationSuites");
-      if (evals.length > 0) typesToDelete.push("evals");
-    }
-  }
-
-  console.log(
-    partial
-      ? `\n🗑️  Checking for deleted resources (${typesToDelete!.join(", ")})...\n`
-      : "\n🗑️  Checking for deleted resources...\n",
-  );
-  // Use raw (unfiltered) lists for orphan checking — platform defaults must be
-  // included so they aren't mistakenly detected as orphaned and deleted
-  await deleteOrphanedResources(
-    {
+    const loadedResources: LoadedResources = {
       tools: allToolsRaw,
       structuredOutputs: allStructuredOutputsRaw,
       assistants: allAssistantsRaw,
@@ -1496,277 +1325,456 @@ async function main(): Promise<void> {
       simulations: allSimulationsRaw,
       simulationSuites: allSimulationSuitesRaw,
       evals: allEvalsRaw,
-    },
-    state,
-    typesToDelete,
-  );
+    };
 
-  // Apply in dependency order:
-  // 1. Base resources (tools, structuredOutputs)
-  // 2. Assistants (references tools, structuredOutputs)
-  // 3. Squads (references assistants)
-  // 4. Simulation building blocks (personalities, scenarios)
-  // 5. Simulations (references personalities, scenarios)
-  // 6. Simulation suites (references simulations)
-  // 7. Evals
+    state = await maybeBootstrapState(loadedResources, state);
 
-  if (tools.length > 0) {
-    console.log("\n🔧 Applying tools...\n");
-    for (const tool of tools) {
-      try {
-        const uuid = await applyTool(tool, state);
-        if (!uuid) continue;
-        upsertState(state.tools, tool.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(tool.data),
-        });
-        touched.tools.add(tool.resourceId);
-        applied.tools++;
-      } catch (error) {
-        console.error(formatApiError(tool.resourceId, error));
-        throw error;
-      }
+    // Run client-side validators against the loaded resource set. In default
+    // mode, errors are surfaced as warnings so a single bad spec doesn't block
+    // an otherwise-good push. With --strict, any error-severity finding aborts
+    // before any API call.
+    console.log("\n🔎 Running validators...");
+    const findings = validateResources(loadedResources);
+    if (findings.length > 0) {
+      console.log(summarizeFindings(findings));
+    } else {
+      console.log("   ✅ No validation issues.");
     }
-  }
-
-  if (structuredOutputs.length > 0) {
-    console.log("\n📊 Applying structured outputs...\n");
-    for (const output of structuredOutputs) {
-      try {
-        const uuid = await applyStructuredOutput(output, state);
-        if (!uuid) continue;
-        upsertState(state.structuredOutputs, output.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(output.data),
-        });
-        touched.structuredOutputs.add(output.resourceId);
-        applied.structuredOutputs++;
-      } catch (error) {
-        console.error(formatApiError(output.resourceId, error));
-        throw error;
+    const errorCount = findings.filter((f) => f.severity === "error").length;
+    if (errorCount > 0) {
+      if (STRICT_VALIDATION) {
+        console.error(
+          `\n❌ Validation failed (${errorCount} error(s)). --strict refuses to push. Fix the issues above or drop --strict.`,
+        );
+        process.exit(1);
       }
-    }
-  }
-
-  if (assistants.length > 0) {
-    console.log("\n🤖 Applying assistants...\n");
-    // Auto-resolve missing tool & structured output dependencies
-    for (const assistant of assistants) {
-      const refs = extractReferencedIds(
-        assistant.data as Record<string, unknown>,
+      console.warn(
+        `   ⚠️  ${errorCount} validation error(s) detected — push will continue (use --strict to abort on errors).`,
       );
-      for (const toolId of refs.tools) {
-        await ensureToolExists(toolId, depCtx);
-      }
-      for (const outputId of refs.structuredOutputs) {
-        await ensureStructuredOutputExists(outputId, depCtx);
-      }
     }
-    for (const assistant of assistants) {
-      if (autoApplied.has(`assistants:${assistant.resourceId}`)) continue;
-      try {
-        const uuid = await applyAssistant(assistant, state);
-        if (!uuid) continue;
-        upsertState(state.assistants, assistant.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(assistant.data),
-        });
-        touched.assistants.add(assistant.resourceId);
-        applied.assistants++;
-      } catch (error) {
-        console.error(formatApiError(assistant.resourceId, error));
-        throw error;
-      }
+
+    // Resolve credential names → UUIDs in all resource data before applying
+    const credMap = credentialForwardMap(state);
+    if (credMap.size > 0) {
+      console.log(`\n🔑 Resolving credentials (${credMap.size} mapped)...\n`);
+    } else {
+      console.log(
+        "\n🔑 No credentials in state — run pull first to populate credential mappings",
+      );
     }
-  }
 
-  if (squads.length > 0) {
-    console.log("\n👥 Applying squads...\n");
-    // Auto-resolve missing assistant dependencies (recursively resolves tools/SOs)
-    for (const squad of squads) {
-      const refs = extractReferencedIds(squad.data as Record<string, unknown>);
-      for (const assistantId of refs.assistants) {
-        await ensureAssistantExists(assistantId, depCtx);
+    const resolveCredentials = <T>(
+      resources: ResourceFile<T>[],
+    ): ResourceFile<T>[] =>
+      resources.map((r) => {
+        const resolved = replaceCredentialRefs(r.data, credMap);
+        warnUnresolvedCredentials(
+          r.resourceId,
+          resolved as Record<string, unknown>,
+        );
+        return { ...r, data: resolved };
+      });
+
+    // Filter out platform defaults (read-only, cannot be updated via API)
+    const filterDefaults = <T extends Record<string, unknown>>(
+      resources: ResourceFile<T>[],
+    ) => {
+      const defaults = resources.filter(
+        (r) => (r.data as Record<string, unknown>)._platformDefault === true,
+      );
+      if (defaults.length > 0) {
+        for (const d of defaults) {
+          console.log(`  🔒 Skipping platform default: ${d.resourceId}`);
+        }
       }
-    }
-    for (const squad of squads) {
-      try {
-        const uuid = await applySquad(squad, state);
-        if (!uuid) continue;
-        upsertState(state.squads, squad.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(squad.data),
-        });
-        touched.squads.add(squad.resourceId);
-        applied.squads++;
-      } catch (error) {
-        console.error(formatApiError(squad.resourceId, error));
-        throw error;
-      }
-    }
-  }
+      return resources.filter(
+        (r) => (r.data as Record<string, unknown>)._platformDefault !== true,
+      );
+    };
 
-  if (personalities.length > 0) {
-    console.log("\n🎭 Applying personalities...\n");
-    for (const personality of personalities) {
-      try {
-        const uuid = await applyPersonality(personality, state);
-        if (!uuid) continue;
-        upsertState(state.personalities, personality.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(personality.data),
-        });
-        touched.personalities.add(personality.resourceId);
-        applied.personalities++;
-      } catch (error) {
-        console.error(formatApiError(personality.resourceId, error));
-        throw error;
-      }
-    }
-  }
-
-  if (scenarios.length > 0) {
-    console.log("\n📋 Applying scenarios...\n");
-    for (const scenario of scenarios) {
-      try {
-        const uuid = await applyScenario(scenario, state);
-        if (!uuid) continue;
-        upsertState(state.scenarios, scenario.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(scenario.data),
-        });
-        touched.scenarios.add(scenario.resourceId);
-        applied.scenarios++;
-      } catch (error) {
-        console.error(formatApiError(scenario.resourceId, error));
-        throw error;
-      }
-    }
-  }
-
-  if (simulations.length > 0) {
-    console.log("\n🧪 Applying simulations...\n");
-    for (const simulation of simulations) {
-      try {
-        const uuid = await applySimulation(simulation, state);
-        if (!uuid) continue;
-        upsertState(state.simulations, simulation.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(simulation.data),
-        });
-        touched.simulations.add(simulation.resourceId);
-        applied.simulations++;
-      } catch (error) {
-        console.error(formatApiError(simulation.resourceId, error));
-        throw error;
-      }
-    }
-  }
-
-  if (simulationSuites.length > 0) {
-    console.log("\n📦 Applying simulation suites...\n");
-    for (const suite of simulationSuites) {
-      try {
-        const uuid = await applySimulationSuite(suite, state);
-        if (!uuid) continue;
-        upsertState(state.simulationSuites, suite.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(suite.data),
-        });
-        touched.simulationSuites.add(suite.resourceId);
-        applied.simulationSuites++;
-      } catch (error) {
-        console.error(formatApiError(suite.resourceId, error));
-        throw error;
-      }
-    }
-  }
-
-  if (evals.length > 0) {
-    console.log("\n🧪 Applying evals...\n");
-    for (const evalResource of evals) {
-      try {
-        const uuid = await applyEval(evalResource, state);
-        upsertState(state.evals, evalResource.resourceId, {
-          uuid,
-          lastPushedHash: hashPayload(evalResource.data),
-        });
-        touched.evals.add(evalResource.resourceId);
-        applied.evals++;
-      } catch (error) {
-        console.error(formatApiError(evalResource.resourceId, error));
-        throw error;
-      }
-    }
-  }
-
-  // Second pass: Link resources to assistants (include auto-applied deps)
-  const allAppliedTools = [...tools, ...autoAppliedTools];
-  if (allAppliedTools.length > 0) {
-    console.log("\n🔗 Linking tools to assistant destinations...\n");
-    await updateToolAssistantRefs(allAppliedTools, state);
-  }
-
-  const allAppliedOutputs = [
-    ...structuredOutputs,
-    ...autoAppliedStructuredOutputs,
-  ];
-  if (allAppliedOutputs.length > 0) {
-    console.log("\n🔗 Linking structured outputs to assistants...\n");
-    await updateStructuredOutputAssistantRefs(allAppliedOutputs, state);
-  }
-
-  console.log(
-    "\n═══════════════════════════════════════════════════════════════",
-  );
-  console.log(DRY_RUN ? "🧪 Dry-run complete (no changes applied)!" : "✅ Apply complete!");
-  console.log(
-    "═══════════════════════════════════════════════════════════════\n",
-  );
-
-  if (DRY_RUN) {
-    const counts = getDryRunCounts();
-    console.log(
-      `🧪 Would create ${counts.POST}, would update ${counts.PATCH}, would delete ${counts.DELETE} (no API calls fired)`,
+    const allTools = resolveCredentials(filterDefaults(allToolsRaw));
+    const allStructuredOutputs = resolveCredentials(
+      filterDefaults(allStructuredOutputsRaw),
     );
-  }
-
-  // Summary - show what was applied vs total in state
-  const totalApplied = Object.values(applied).reduce((a, b) => a + b, 0);
-
-  if (partial) {
-    console.log(`📋 Applied ${totalApplied} resource(s):`);
-    if (applied.tools > 0) console.log(`   Tools: ${applied.tools}`);
-    if (applied.structuredOutputs > 0)
-      console.log(`   Structured Outputs: ${applied.structuredOutputs}`);
-    if (applied.assistants > 0)
-      console.log(`   Assistants: ${applied.assistants}`);
-    if (applied.squads > 0) console.log(`   Squads: ${applied.squads}`);
-    if (applied.personalities > 0)
-      console.log(`   Personalities: ${applied.personalities}`);
-    if (applied.scenarios > 0)
-      console.log(`   Scenarios: ${applied.scenarios}`);
-    if (applied.simulations > 0)
-      console.log(`   Simulations: ${applied.simulations}`);
-    if (applied.simulationSuites > 0)
-      console.log(`   Simulation Suites: ${applied.simulationSuites}`);
-    if (applied.evals > 0) console.log(`   Evals: ${applied.evals}`);
-  } else {
-    console.log("📋 Summary:");
-    console.log(`   Tools: ${Object.keys(state.tools).length}`);
-    console.log(
-      `   Structured Outputs: ${Object.keys(state.structuredOutputs).length}`,
+    const allAssistants = resolveCredentials(filterDefaults(allAssistantsRaw));
+    const allSquads = resolveCredentials(filterDefaults(allSquadsRaw));
+    const allPersonalities = resolveCredentials(
+      filterDefaults(allPersonalitiesRaw),
     );
-    console.log(`   Assistants: ${Object.keys(state.assistants).length}`);
-    console.log(`   Squads: ${Object.keys(state.squads).length}`);
-    console.log(`   Personalities: ${Object.keys(state.personalities).length}`);
-    console.log(`   Scenarios: ${Object.keys(state.scenarios).length}`);
-    console.log(`   Simulations: ${Object.keys(state.simulations).length}`);
-    console.log(
-      `   Simulation Suites: ${Object.keys(state.simulationSuites).length}`,
+    const allScenarios = resolveCredentials(filterDefaults(allScenariosRaw));
+    const allSimulations = resolveCredentials(
+      filterDefaults(allSimulationsRaw),
     );
-    console.log(`   Evals: ${Object.keys(state.evals).length}`);
-  }
+    const allSimulationSuites = resolveCredentials(
+      filterDefaults(allSimulationSuitesRaw),
+    );
+    const allEvals = resolveCredentials(filterDefaults(allEvalsRaw));
+
+    // Filter resources based on apply filter
+    const tools = shouldApplyResourceType("tools")
+      ? filterResourcesByPaths(allTools, "tools")
+      : [];
+    const structuredOutputs = shouldApplyResourceType("structuredOutputs")
+      ? filterResourcesByPaths(allStructuredOutputs, "structuredOutputs")
+      : [];
+    const assistants = shouldApplyResourceType("assistants")
+      ? filterResourcesByPaths(allAssistants, "assistants")
+      : [];
+    const squads = shouldApplyResourceType("squads")
+      ? filterResourcesByPaths(allSquads, "squads")
+      : [];
+    const personalities = shouldApplyResourceType("personalities")
+      ? filterResourcesByPaths(allPersonalities, "personalities")
+      : [];
+    const scenarios = shouldApplyResourceType("scenarios")
+      ? filterResourcesByPaths(allScenarios, "scenarios")
+      : [];
+    const simulations = shouldApplyResourceType("simulations")
+      ? filterResourcesByPaths(allSimulations, "simulations")
+      : [];
+    const simulationSuites = shouldApplyResourceType("simulationSuites")
+      ? filterResourcesByPaths(allSimulationSuites, "simulationSuites")
+      : [];
+    const evals = shouldApplyResourceType("evals")
+      ? filterResourcesByPaths(allEvals, "evals")
+      : [];
+
+    // Auto-dependency resolution context
+    const autoApplied = new Set<string>();
+    const autoAppliedTools: ResourceFile<Record<string, unknown>>[] = [];
+    const autoAppliedStructuredOutputs: ResourceFile<
+      Record<string, unknown>
+    >[] = [];
+    const depCtx: DependencyContext = {
+      allTools,
+      allStructuredOutputs,
+      allAssistants,
+      state,
+      applied,
+      autoApplied,
+      autoAppliedTools,
+      autoAppliedStructuredOutputs,
+      touched,
+    };
+
+    // Determine which types to check for orphaned deletions
+    // Full apply: check all types. Partial apply: only check the filtered type(s).
+    let typesToDelete: ResourceType[] | undefined;
+    if (partial) {
+      typesToDelete = [];
+      if (APPLY_FILTER.resourceTypes?.length) {
+        typesToDelete.push(...APPLY_FILTER.resourceTypes);
+      } else if (APPLY_FILTER.filePaths?.length) {
+        if (tools.length > 0) typesToDelete.push("tools");
+        if (structuredOutputs.length > 0)
+          typesToDelete.push("structuredOutputs");
+        if (assistants.length > 0) typesToDelete.push("assistants");
+        if (squads.length > 0) typesToDelete.push("squads");
+        if (personalities.length > 0) typesToDelete.push("personalities");
+        if (scenarios.length > 0) typesToDelete.push("scenarios");
+        if (simulations.length > 0) typesToDelete.push("simulations");
+        if (simulationSuites.length > 0) typesToDelete.push("simulationSuites");
+        if (evals.length > 0) typesToDelete.push("evals");
+      }
+    }
+
+    console.log(
+      partial
+        ? `\n🗑️  Checking for deleted resources (${typesToDelete!.join(", ")})...\n`
+        : "\n🗑️  Checking for deleted resources...\n",
+    );
+    // Use raw (unfiltered) lists for orphan checking — platform defaults must be
+    // included so they aren't mistakenly detected as orphaned and deleted
+    await deleteOrphanedResources(
+      {
+        tools: allToolsRaw,
+        structuredOutputs: allStructuredOutputsRaw,
+        assistants: allAssistantsRaw,
+        squads: allSquadsRaw,
+        personalities: allPersonalitiesRaw,
+        scenarios: allScenariosRaw,
+        simulations: allSimulationsRaw,
+        simulationSuites: allSimulationSuitesRaw,
+        evals: allEvalsRaw,
+      },
+      state,
+      typesToDelete,
+    );
+
+    // Apply in dependency order:
+    // 1. Base resources (tools, structuredOutputs)
+    // 2. Assistants (references tools, structuredOutputs)
+    // 3. Squads (references assistants)
+    // 4. Simulation building blocks (personalities, scenarios)
+    // 5. Simulations (references personalities, scenarios)
+    // 6. Simulation suites (references simulations)
+    // 7. Evals
+
+    if (tools.length > 0) {
+      console.log("\n🔧 Applying tools...\n");
+      for (const tool of tools) {
+        try {
+          const uuid = await applyTool(tool, state);
+          if (!uuid) continue;
+          upsertState(state.tools, tool.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(tool.data),
+          });
+          touched.tools.add(tool.resourceId);
+          applied.tools++;
+        } catch (error) {
+          console.error(formatApiError(tool.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (structuredOutputs.length > 0) {
+      console.log("\n📊 Applying structured outputs...\n");
+      for (const output of structuredOutputs) {
+        try {
+          const uuid = await applyStructuredOutput(output, state);
+          if (!uuid) continue;
+          upsertState(state.structuredOutputs, output.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(output.data),
+          });
+          touched.structuredOutputs.add(output.resourceId);
+          applied.structuredOutputs++;
+        } catch (error) {
+          console.error(formatApiError(output.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (assistants.length > 0) {
+      console.log("\n🤖 Applying assistants...\n");
+      // Auto-resolve missing tool & structured output dependencies
+      for (const assistant of assistants) {
+        const refs = extractReferencedIds(
+          assistant.data as Record<string, unknown>,
+        );
+        for (const toolId of refs.tools) {
+          await ensureToolExists(toolId, depCtx);
+        }
+        for (const outputId of refs.structuredOutputs) {
+          await ensureStructuredOutputExists(outputId, depCtx);
+        }
+      }
+      for (const assistant of assistants) {
+        if (autoApplied.has(`assistants:${assistant.resourceId}`)) continue;
+        try {
+          const uuid = await applyAssistant(assistant, state);
+          if (!uuid) continue;
+          upsertState(state.assistants, assistant.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(assistant.data),
+          });
+          touched.assistants.add(assistant.resourceId);
+          applied.assistants++;
+        } catch (error) {
+          console.error(formatApiError(assistant.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (squads.length > 0) {
+      console.log("\n👥 Applying squads...\n");
+      // Auto-resolve missing assistant dependencies (recursively resolves tools/SOs)
+      for (const squad of squads) {
+        const refs = extractReferencedIds(
+          squad.data as Record<string, unknown>,
+        );
+        for (const assistantId of refs.assistants) {
+          await ensureAssistantExists(assistantId, depCtx);
+        }
+      }
+      for (const squad of squads) {
+        try {
+          const uuid = await applySquad(squad, state);
+          if (!uuid) continue;
+          upsertState(state.squads, squad.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(squad.data),
+          });
+          touched.squads.add(squad.resourceId);
+          applied.squads++;
+        } catch (error) {
+          console.error(formatApiError(squad.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (personalities.length > 0) {
+      console.log("\n🎭 Applying personalities...\n");
+      for (const personality of personalities) {
+        try {
+          const uuid = await applyPersonality(personality, state);
+          if (!uuid) continue;
+          upsertState(state.personalities, personality.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(personality.data),
+          });
+          touched.personalities.add(personality.resourceId);
+          applied.personalities++;
+        } catch (error) {
+          console.error(formatApiError(personality.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (scenarios.length > 0) {
+      console.log("\n📋 Applying scenarios...\n");
+      for (const scenario of scenarios) {
+        try {
+          const uuid = await applyScenario(scenario, state);
+          if (!uuid) continue;
+          upsertState(state.scenarios, scenario.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(scenario.data),
+          });
+          touched.scenarios.add(scenario.resourceId);
+          applied.scenarios++;
+        } catch (error) {
+          console.error(formatApiError(scenario.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (simulations.length > 0) {
+      console.log("\n🧪 Applying simulations...\n");
+      for (const simulation of simulations) {
+        try {
+          const uuid = await applySimulation(simulation, state);
+          if (!uuid) continue;
+          upsertState(state.simulations, simulation.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(simulation.data),
+          });
+          touched.simulations.add(simulation.resourceId);
+          applied.simulations++;
+        } catch (error) {
+          console.error(formatApiError(simulation.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (simulationSuites.length > 0) {
+      console.log("\n📦 Applying simulation suites...\n");
+      for (const suite of simulationSuites) {
+        try {
+          const uuid = await applySimulationSuite(suite, state);
+          if (!uuid) continue;
+          upsertState(state.simulationSuites, suite.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(suite.data),
+          });
+          touched.simulationSuites.add(suite.resourceId);
+          applied.simulationSuites++;
+        } catch (error) {
+          console.error(formatApiError(suite.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    if (evals.length > 0) {
+      console.log("\n🧪 Applying evals...\n");
+      for (const evalResource of evals) {
+        try {
+          const uuid = await applyEval(evalResource, state);
+          upsertState(state.evals, evalResource.resourceId, {
+            uuid,
+            lastPushedHash: hashPayload(evalResource.data),
+          });
+          touched.evals.add(evalResource.resourceId);
+          applied.evals++;
+        } catch (error) {
+          console.error(formatApiError(evalResource.resourceId, error));
+          throw error;
+        }
+      }
+    }
+
+    // Second pass: Link resources to assistants (include auto-applied deps)
+    const allAppliedTools = [...tools, ...autoAppliedTools];
+    if (allAppliedTools.length > 0) {
+      console.log("\n🔗 Linking tools to assistant destinations...\n");
+      await updateToolAssistantRefs(allAppliedTools, state);
+    }
+
+    const allAppliedOutputs = [
+      ...structuredOutputs,
+      ...autoAppliedStructuredOutputs,
+    ];
+    if (allAppliedOutputs.length > 0) {
+      console.log("\n🔗 Linking structured outputs to assistants...\n");
+      await updateStructuredOutputAssistantRefs(allAppliedOutputs, state);
+    }
+
+    console.log(
+      "\n═══════════════════════════════════════════════════════════════",
+    );
+    console.log(
+      DRY_RUN
+        ? "🧪 Dry-run complete (no changes applied)!"
+        : "✅ Apply complete!",
+    );
+    console.log(
+      "═══════════════════════════════════════════════════════════════\n",
+    );
+
+    if (DRY_RUN) {
+      const counts = getDryRunCounts();
+      console.log(
+        `🧪 Would create ${counts.POST}, would update ${counts.PATCH}, would delete ${counts.DELETE} (no API calls fired)`,
+      );
+    }
+
+    // Summary - show what was applied vs total in state
+    const totalApplied = Object.values(applied).reduce((a, b) => a + b, 0);
+
+    if (partial) {
+      console.log(`📋 Applied ${totalApplied} resource(s):`);
+      if (applied.tools > 0) console.log(`   Tools: ${applied.tools}`);
+      if (applied.structuredOutputs > 0)
+        console.log(`   Structured Outputs: ${applied.structuredOutputs}`);
+      if (applied.assistants > 0)
+        console.log(`   Assistants: ${applied.assistants}`);
+      if (applied.squads > 0) console.log(`   Squads: ${applied.squads}`);
+      if (applied.personalities > 0)
+        console.log(`   Personalities: ${applied.personalities}`);
+      if (applied.scenarios > 0)
+        console.log(`   Scenarios: ${applied.scenarios}`);
+      if (applied.simulations > 0)
+        console.log(`   Simulations: ${applied.simulations}`);
+      if (applied.simulationSuites > 0)
+        console.log(`   Simulation Suites: ${applied.simulationSuites}`);
+      if (applied.evals > 0) console.log(`   Evals: ${applied.evals}`);
+    } else {
+      console.log("📋 Summary:");
+      console.log(`   Tools: ${Object.keys(state.tools).length}`);
+      console.log(
+        `   Structured Outputs: ${Object.keys(state.structuredOutputs).length}`,
+      );
+      console.log(`   Assistants: ${Object.keys(state.assistants).length}`);
+      console.log(`   Squads: ${Object.keys(state.squads).length}`);
+      console.log(
+        `   Personalities: ${Object.keys(state.personalities).length}`,
+      );
+      console.log(`   Scenarios: ${Object.keys(state.scenarios).length}`);
+      console.log(`   Simulations: ${Object.keys(state.simulations).length}`);
+      console.log(
+        `   Simulation Suites: ${Object.keys(state.simulationSuites).length}`,
+      );
+      console.log(`   Evals: ${Object.keys(state.evals).length}`);
+    }
   } finally {
     // Always flush state, even on partial failure — resources that already
     // received UUIDs from the API must be recorded so the next run does not
@@ -1776,8 +1784,8 @@ async function main(): Promise<void> {
     // would be polluted with synthetic dry-run UUIDs. Skip the save entirely.
     if (DRY_RUN) {
       console.log(
-        "\n🧪 [dry-run] Skipping state file write (would have written to "
-          + `.vapi-state.${VAPI_ENV}.json)`,
+        "\n🧪 [dry-run] Skipping state file write (would have written to " +
+          `.vapi-state.${VAPI_ENV}.json)`,
       );
     } else {
       try {

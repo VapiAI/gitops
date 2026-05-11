@@ -52,12 +52,24 @@ test("sortedKeysReplacer leaves array order intact", () => {
 
 test("sortedKeysReplacer handles deeply nested mixed structures", () => {
   const insertion1 = {
-    z: { y: { x: 1, w: 2 }, v: [{ b: 1, a: 2 }, { d: 1, c: 2 }] },
+    z: {
+      y: { x: 1, w: 2 },
+      v: [
+        { b: 1, a: 2 },
+        { d: 1, c: 2 },
+      ],
+    },
     a: 0,
   };
   const insertion2 = {
     a: 0,
-    z: { v: [{ b: 1, a: 2 }, { d: 1, c: 2 }], y: { w: 2, x: 1 } },
+    z: {
+      v: [
+        { b: 1, a: 2 },
+        { d: 1, c: 2 },
+      ],
+      y: { w: 2, x: 1 },
+    },
   };
 
   assert.equal(

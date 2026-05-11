@@ -207,9 +207,7 @@ async function checkMicrophonePermission(): Promise<boolean> {
       console.log(
         "   If prompted, please grant microphone permission in System Settings.",
       );
-      console.log(
-        "   System Settings > Privacy & Security > Microphone\n",
-      );
+      console.log("   System Settings > Privacy & Security > Microphone\n");
 
       // Ask user to continue anyway
       const shouldContinue = await askUserConfirmation(
@@ -832,7 +830,9 @@ function handleControlMessage(
         "assistant-request-returned-error": "Assistant request error",
         "assistant-not-found": "Assistant not found",
       };
-      const label = cm.reason ? (reasonLabels[cm.reason] ?? cm.reason) : "unknown reason";
+      const label = cm.reason
+        ? (reasonLabels[cm.reason] ?? cm.reason)
+        : "unknown reason";
       clearWrittenLine(process.stdout, state.lastTranscript);
       state.lastTranscript = "";
       console.log(`📞 Call ended: ${label}`);
@@ -908,7 +908,10 @@ function handleControlMessage(
     }
     case "transfer-update": {
       const tm = message as TransferUpdateMessage;
-      printEvent(state, `🔀 Transfer${formatTransferDestination(tm.destination)}`);
+      printEvent(
+        state,
+        `🔀 Transfer${formatTransferDestination(tm.destination)}`,
+      );
       break;
     }
     default:
@@ -980,10 +983,17 @@ function createAudioContext(): {
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes("Cannot find module")) {
-      console.warn("⚠️  'speaker' module not installed. Audio playback disabled.");
+      console.warn(
+        "⚠️  'speaker' module not installed. Audio playback disabled.",
+      );
       console.warn("   Install with: npm install speaker");
-    } else if (msg.includes("Could not locate the bindings file") || msg.includes("NODE_MODULE_VERSION")) {
-      console.warn("⚠️  'speaker' native bindings not built for this Node version.");
+    } else if (
+      msg.includes("Could not locate the bindings file") ||
+      msg.includes("NODE_MODULE_VERSION")
+    ) {
+      console.warn(
+        "⚠️  'speaker' native bindings not built for this Node version.",
+      );
       console.warn("   Rebuild with: npm rebuild speaker");
     } else {
       console.warn(`⚠️  Could not initialize speaker: ${msg}`);
@@ -1040,7 +1050,9 @@ function createMicrophoneStream(onData: (data: Buffer) => void): {
       console.warn("   Install with: npm install mic");
     } else if (msg.includes("sox") || msg.includes("rec")) {
       console.warn("⚠️  sox/rec not found. Required for microphone input.");
-      console.warn("   Install with: brew install sox (macOS) or apt install sox (Linux)");
+      console.warn(
+        "   Install with: brew install sox (macOS) or apt install sox (Linux)",
+      );
     } else {
       console.warn(`⚠️  Could not initialize microphone: ${msg}`);
     }

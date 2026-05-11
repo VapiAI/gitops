@@ -111,13 +111,19 @@ test("mergeScoped: empty touched preserves all on-disk state", () => {
 
 test("mergeScoped: cross-section isolation (touched assistants do NOT affect tools section)", () => {
   const onDisk = emptyState();
-  onDisk.tools["unrelated-tool"] = { uuid: "u-tool", lastPulledHash: "tool-hash" };
+  onDisk.tools["unrelated-tool"] = {
+    uuid: "u-tool",
+    lastPulledHash: "tool-hash",
+  };
   onDisk.assistants["agent-a"] = { uuid: "u-old" };
 
   const inMemory = emptyState();
   inMemory.assistants["agent-a"] = { uuid: "u-old", lastPushedHash: "fresh" };
   // In-memory has an unrelated drift in tools section that should NOT bleed in
-  inMemory.tools["unrelated-tool"] = { uuid: "u-tool", lastPulledHash: "drifted" };
+  inMemory.tools["unrelated-tool"] = {
+    uuid: "u-tool",
+    lastPulledHash: "drifted",
+  };
 
   const touched = emptyTouched();
   touched.assistants.add("agent-a"); // ONLY assistants touched

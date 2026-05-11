@@ -36,7 +36,11 @@ function setupFixture(): Fixture {
   const dir = mkdtempSync(join(tmpdir(), "vapi-dry-run-test-"));
   cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
   cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
-  symlinkSync(join(REPO_ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+  symlinkSync(
+    join(REPO_ROOT, "node_modules"),
+    join(dir, "node_modules"),
+    "dir",
+  );
   // Empty resource tree — push has nothing real to do, but parsing and the
   // dry-run banner must still fire correctly.
   mkdirSync(join(dir, "resources", "test-dry-run"), { recursive: true });
