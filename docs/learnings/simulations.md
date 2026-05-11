@@ -350,6 +350,24 @@ Returns the org's voice-simulation concurrency budget:
 - `PATCH /eval/simulation/personality/:id` — body fields all optional: `name`, `assistant`, `path`
 - `DELETE /eval/simulation/personality/:id`
 
+### Vapi default personalities are immortal (and noisy on `--force` push)
+
+**What actually happens:** Every Vapi org is auto-seeded with 7 stock simulation personalities — `confused-carl`, `decisive-derek`, `emotional-eva`, `impatient-irene`, `multitasking-maya`, `rambling-roger`, `skeptical-sam` — with predictable UUIDs of the form `a0000000-0000-4000-8000-00000000000<n>`. Their `orgId` is `null` (the "Vapi-provided defaults" referenced above). The platform refuses to delete them: `DELETE /eval/simulation/personality/:id` returns **HTTP 404** with the error string `Personality <uuid> not found or is a Vapi default (cannot be deleted)`.
+
+**Why it matters for gitops:** in a freshly-scaffolded org (no local `simulations/personalities/` directory), the engine sees these 7 personalities as orphans on every push — "exist on the dashboard, not in local files." Without `--force` this is just log noise. With `--force`, the push halts on the FIRST delete attempt against an immortal default and exits non-zero, before reaching any legitimate orphans you actually wanted to clean.
+
+**Also note:** `.vapi-ignore` does **not** suppress these from the "pending deletions" warning. `matchesIgnore` is only called during pull operations (`src/pull.ts:695`), not during the push-time deletion-detection sweep. Adding `simulations/personalities/**` to `.vapi-ignore` quiets future pulls from materializing the defaults locally, but the push warning persists.
+
+**Recommendations:**
+1. **Skip `--force` against fresh orgs** that haven't had their stock fixtures touched. The pending-deletions warning is harmless without `--force`.
+2. **To clean other orphans (real assistants, tools you removed locally) without tripping on defaults**, delete them via direct API call instead of `--force`:
+   ```bash
+   curl -X DELETE -H "Authorization: Bearer $VAPI_TOKEN" \
+     https://api.vapi.ai/assistant/<orphan-uuid>
+   ```
+   Then `npm run pull -- <org> --bootstrap` to refresh state. This bypasses the engine's "delete all orphans" loop entirely.
+3. **Possible engine improvement:** the orphan-deletion sweep could skip resources whose `orgId === null` (the canonical "Vapi default" marker) or maintain a hardcoded UUID skiplist matching `a0000000-0000-4000-8000-00000000000<n>`. Until that lands, the workarounds above are the operational path.
+
 ---
 
 ## Simulation Suites (`/eval/simulation/suite`)
