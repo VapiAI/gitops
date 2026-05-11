@@ -1,7 +1,7 @@
 // CLI entry: `npm run sim -- <org> --suite <name> --target <name>`
 //
-// Distinct from `npm run eval` (legacy /evals endpoint). See AGENTS.md for
-// the rationale.
+// Wraps `POST /eval/simulation/run` (the simulations API). See AGENTS.md for
+// usage.
 
 import {
   formatSummary,

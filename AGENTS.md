@@ -775,8 +775,6 @@ npm run rollback -- <org> --list                   # List available snapshots
 # Testing
 npm run call -- <org> -a <assistant-name>          # Call an assistant via WebSocket
 npm run call -- <org> -s <squad-name>              # Call a squad via WebSocket
-npm run eval -- <org> -s <squad-name>              # Run evals against a squad
-npm run eval -- <org> -a <assistant-name>          # Run evals against an assistant
 
 # Maintenance
 npm run cleanup -- <org>                           # Dry-run: show orphaned remote resources

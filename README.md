@@ -76,7 +76,6 @@ Every command works in two modes:
 | `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | Pull → Merge → Push in one shot |
 | `npm run call` | ✅ | `npm run call -- <org> -a <name>` | Start a WebSocket call |
 | `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Delete orphaned remote resources (destructive run requires `--confirm <org>`) |
-| `npm run eval` | — | `npm run eval -- <org> -s <squad>` | Run evals against an assistant/squad |
 | `npm run build` | — | — | Type-check the codebase |
 | `npm test` | — | — | Run regression tests (`node:test`) |
 
@@ -142,10 +141,6 @@ npm run call -- my-org -a my-assistant
 
 # Call a squad
 npm run call -- my-org -s my-squad
-
-# Run evals
-npm run eval -- my-org -s my-squad
-npm run eval -- my-org -a my-assistant --filter booking
 ```
 
 ---
@@ -281,29 +276,6 @@ Squad push
        └─ missing tools / structured outputs? → auto-create those first
   └─ all references resolved → create the squad ✓
 ```
-
-### Running Evals
-
-Evals run mock conversations against an assistant or squad and check assertions.
-
-```bash
-# Run all evals against a squad (transient — loaded from local files)
-npm run eval -- my-org -s my-squad
-
-# Run a specific eval by name filter
-npm run eval -- my-org -a my-assistant --filter booking
-
-# Use stored assistant/squad IDs from state (already pushed)
-npm run eval -- my-org -s my-squad --stored
-
-# Load assistant from a specific file path
-npm run eval -- my-org -a resources/my-org/assistants/qa-tester.md
-
-# Provide variable overrides
-npm run eval -- my-org -s my-squad -v eval-variables.json
-```
-
-Evals must be pushed first (`npm run push -- my-org evals`). Eval definitions live in `resources/<org>/evals/*.yml`.
 
 ---
 
@@ -536,7 +508,6 @@ vapi-gitops/
 │   ├── push.ts                 # Push local state to platform
 │   ├── apply.ts                # Orchestrator: pull → merge → push
 │   ├── call.ts                 # WebSocket call script
-│   ├── eval.ts                 # Eval runner
 │   ├── cleanup.ts              # Orphan cleanup
 │   ├── pull-cmd.ts             # Entry point: interactive or direct pull
 │   ├── push-cmd.ts             # Entry point: interactive or direct push
