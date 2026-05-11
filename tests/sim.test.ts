@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { resolveSelection, resolveTarget } from "../src/sim.ts";
 import type { StateFile } from "../src/types.ts";
 

@@ -1,9 +1,9 @@
-import { existsSync, readdirSync } from "fs";
-import { mkdir, writeFile, rm } from "fs/promises";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
-import { input, password, confirm, select } from "@inquirer/prompts";
+import { existsSync, readdirSync } from "fs";
+import { mkdir, rm, writeFile } from "fs/promises";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 
 // ─────────────────────────────────────────────────────────────────────────────

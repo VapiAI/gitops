@@ -187,6 +187,14 @@ The blank line after `---` is conventional; the strict requirement is just that 
 
 `.vapi-ignore` lives at `resources/<org>/.vapi-ignore` and excludes specific resources from pull and push so the dashboard stays the source of truth for them. See `AGENTS.md` (line 13) for the basic gitignore-style syntax.
 
+The list is **bidirectional**:
+
+- **Pull** skips matched ids (never writes them to disk, never tracks them in state).
+- **Push** (and `apply`) skips matched ids in the load pass — they are filtered out before drift detection, validation, or any API call.
+- **Orphan-detect** during push honors the list: a `--force` push will NOT silently DELETE a dashboard resource whose id matches the ignore, even if the state file maps it. Operators see a `🚫 <type>/<id> retained (matched .vapi-ignore — orphan-protected)` line so the retention is visible.
+- **`--force`** on push bypasses the load-filter so a deliberate override can flow through (mirrors pull's `--force`), but the orphan-protect still applies — there is no `--force` escape hatch for the delete path.
+- **References to ignored resources are a hard validation error.** A squad pointing at `assistants/foo` while `assistants/foo` is in `.vapi-ignore` produces an `❌ squads/<id> references assistants/foo, which is in .vapi-ignore` finding. `--strict` push aborts before any API call.
+
 The recovery flow when a sync surfaces "drift" you didn't expect — typically prompted by "was that not in the .vapi-ignore?":
 
 1. **Inspect first**, don't edit. Diff the file against `main` to see whether the path was already ignored:

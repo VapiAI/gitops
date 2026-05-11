@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { join, dirname, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 // ─────────────────────────────────────────────────────────────────────────────

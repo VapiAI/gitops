@@ -1,11 +1,11 @@
 import {
   createPrompt,
-  useState,
-  useKeypress,
-  isUpKey,
   isDownKey,
-  isSpaceKey,
   isEnterKey,
+  isSpaceKey,
+  isUpKey,
+  useKeypress,
+  useState,
 } from "@inquirer/core";
 
 // ─────────────────────────────────────────────────────────────────────────────

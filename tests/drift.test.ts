@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { checkPronunciationDictDrop } from "../src/state-serialize.ts";
 
 // Stack G — drift unit tests.

@@ -1,23 +1,23 @@
 import { execSync } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
-import { join, dirname, relative, resolve } from "path";
+import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { stringify } from "yaml";
 import {
-  VAPI_ENV,
-  VAPI_BASE_URL,
-  VAPI_TOKEN,
-  RESOURCES_DIR,
-  BASE_DIR,
   APPLY_FILTER,
+  BASE_DIR,
   BOOTSTRAP_SYNC,
   loadIgnorePatterns,
   matchesIgnore,
+  RESOURCES_DIR,
+  VAPI_BASE_URL,
+  VAPI_ENV,
+  VAPI_TOKEN,
 } from "./config.ts";
-import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
-import type { ResourceState, StateFile, ResourceType } from "./types.ts";
+import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
+import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

@@ -5,7 +5,7 @@
 // here (rather than importing from `config.ts`) for the same reason.
 
 import { existsSync, readFileSync } from "fs";
-import { join, dirname } from "path";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { StateFile } from "./types.ts";
 

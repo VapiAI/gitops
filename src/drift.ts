@@ -18,8 +18,8 @@
 // has nothing to compare against — only PATCH (update) is drift-sensitive.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { hashPayload } from "./state-serialize.ts";
 import { VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
+import { hashPayload } from "./state-serialize.ts";
 import type { ResourceState } from "./types.ts";
 
 export interface DriftCheckResult {

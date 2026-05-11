@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { mergeScoped, type TouchedSets } from "../src/state-merge.ts";
 import type { StateFile } from "../src/types.ts";
 

@@ -1,8 +1,8 @@
+import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { join, dirname, relative, extname } from "path";
+import { dirname, extname, join, relative } from "path";
 import { fileURLToPath } from "url";
-import { select, confirm } from "@inquirer/prompts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import type { StateFile } from "./types.ts";
 

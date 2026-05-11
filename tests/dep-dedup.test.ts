@@ -1,10 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import {
-  findExistingResourceByName,
-  slugify,
   extractBaseSlug,
   extractResourceName,
+  findExistingResourceByName,
+  slugify,
 } from "../src/dep-dedup.ts";
 
 // Dedup helper coverage. Verifies that bootstrap-renamed state entries and

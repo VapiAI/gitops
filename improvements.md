@@ -72,6 +72,7 @@ you which stack PR closes the row.**
 | 18  | Structured-output `name` capped at 40 chars (no warning) | Push fails partway after partial application       | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Partial — Stack D heuristic       |
+| 21  | `.vapi-ignore` was pull-only (push could silently delete) | `--force` push DELETEd dashboard-only opt-outs    | None       | RESOLVED 2026-05-11 (#TBD)        |
 
 ---
 
@@ -971,6 +972,61 @@ regression shape.
 
 **Open.** Targeted by **Stack D** as a heuristic; entry stays open to
 flag that the heuristic is partial.
+
+---
+
+## 21. `.vapi-ignore` was pull-only — push and orphan-detect ignored the list
+
+**[RESOLVED 2026-05-11] (#TBD)**
+
+**Discovered:** during the symmetric-ignore plan review — a `--force` push
+in a fresh customer org would happily DELETE a dashboard assistant that the
+repo had explicitly opted out of managing via `.vapi-ignore`, just because
+the local file was absent. Data-safety incident waiting to happen.
+
+### Problem
+
+`.vapi-ignore` (gitignore-flavored opt-out list at
+`resources/<org>/.vapi-ignore`) was honored on `pull` only. `push` and
+`apply` loaded all on-disk resources unconditionally, validated them, and
+sent them. Orphan-detect computed "in state but not in local files" without
+consulting the ignore list, so a state-mapped resource whose local file had
+been removed would be queued for DELETE under `--force` — even when its id
+was explicitly listed in `.vapi-ignore`.
+
+### Current behavior (Verified)
+
+- `src/resources.ts` `loadResources()` accepts `{ ignorePatterns }`; matched
+  ids emit `🚫 <id> (matched .vapi-ignore: <pattern>)` and are filtered out
+  before duplicate detection or parsing.
+- `src/push.ts` reads `const ignorePatterns = FORCE_DELETE ? [] : loadIgnorePatterns()`
+  and passes it into every `loadResources` call. `--force` bypasses the
+  load-filter for deliberate overrides.
+- `src/delete.ts` `findOrphanedResources()` accepts an `ignoredIds: Set<string>`;
+  matched ids are excluded from the orphan list. `deleteOrphanedResources`
+  computes the matched set per type and emits
+  `🚫 <type>/<id> retained (matched .vapi-ignore — orphan-protected)` so the
+  retention is visible. Orphan-protect ALWAYS honors the list — `--force`
+  does not bypass it.
+- `src/validate.ts` `validateNoIgnoredReferences()` walks each loaded
+  resource's referenced ids and emits an `error`-severity finding for any
+  ref pointing at an ignored id. `--strict` push aborts before any API call.
+
+### Risk
+
+Silent dashboard deletion of a resource the repo had explicitly declined to
+manage. Hardest possible class of mistake to recover from in production.
+
+### Resolution
+
+Symmetric load-filter + orphan-protect + reference validator, with `--force`
+bypassing the load-filter but never bypassing orphan-protect. Test coverage
+in `tests/vapi-ignore-push.test.ts` (T1–T5 spawn-fixture integration tests +
+in-process unit tests for each helper).
+
+### Status
+
+RESOLVED 2026-05-11 (#TBD — PR number updates when opened).
 
 ---
 

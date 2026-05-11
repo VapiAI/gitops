@@ -356,7 +356,7 @@ Returns the org's voice-simulation concurrency budget:
 
 **Why it matters for gitops:** in a freshly-scaffolded org (no local `simulations/personalities/` directory), the engine sees these 7 personalities as orphans on every push — "exist on the dashboard, not in local files." Without `--force` this is just log noise. With `--force`, the push halts on the FIRST delete attempt against an immortal default and exits non-zero, before reaching any legitimate orphans you actually wanted to clean.
 
-**Also note:** `.vapi-ignore` does **not** suppress these from the "pending deletions" warning. `matchesIgnore` is only called during pull operations (`src/pull.ts:695`), not during the push-time deletion-detection sweep. Adding `simulations/personalities/**` to `.vapi-ignore` quiets future pulls from materializing the defaults locally, but the push warning persists.
+**Also note:** `.vapi-ignore` is now **bidirectional** (symmetric on pull, push, and orphan-detect). Adding `simulations/personalities/**` to `.vapi-ignore` quiets future pulls from materializing the defaults locally AND orphan-protects them: ignored ids are excluded from the "pending deletions" sweep and a `🚫 personalities/<id> retained (matched .vapi-ignore — orphan-protected)` line is emitted instead. `--force` does NOT override this — the orphan-protect always wins. A resource that references an ignored resource is a hard validation error; `--strict` push aborts before any API call.
 
 **Recommendations:**
 1. **Skip `--force` against fresh orgs** that haven't had their stock fixtures touched. The pending-deletions warning is harmless without `--force`.

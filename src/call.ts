@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from "fs";
-import { join, dirname, resolve } from "path";
-import { fileURLToPath } from "url";
 import { execSync } from "child_process";
-import * as readline from "readline";
+import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
+import { dirname, join, resolve } from "path";
+import * as readline from "readline";
+import { fileURLToPath } from "url";
 import type { Environment, StateFile } from "./types.ts";
 
 const require = createRequire(import.meta.url);
