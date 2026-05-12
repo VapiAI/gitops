@@ -32,3 +32,6 @@ tmp/
 .agent/
 .agent/handoffs/
 .claude/handoffs/
+
+# Local scratch notes
+requested improvements.md
