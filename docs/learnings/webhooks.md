@@ -39,6 +39,36 @@ They don't inherit from each other.
 
 ---
 
+## Retry & Backoff for Server Delivery
+
+A single failed POST to your `server.url` should not be the difference between getting an `end-of-call-report` and losing it. Configure an explicit `backoffPlan` on the `server` block so transient failures (502/503/504, network blips, brief handler restarts) get retried, while semantic errors that won't change on retry (4xx) short-circuit immediately.
+
+```yaml
+server:
+  url: https://your-webhook-endpoint.example.com/vapi
+  timeoutSeconds: 20
+  backoffPlan:
+    type: exponential
+    maxRetries: 3
+    baseDelaySeconds: 1
+    excludedStatusCodes: [400, 401, 403, 404, 413, 422]
+```
+
+**Field meanings:**
+
+| Field | Effect |
+|---|---|
+| `type: exponential` | Delay doubles each retry. With `baseDelaySeconds: 1` and `maxRetries: 3` the schedule is roughly 1s → 2s → 4s (~7s wall clock). |
+| `maxRetries` | Upper bound on retry attempts (not counting the initial request). |
+| `baseDelaySeconds` | First retry delay; subsequent retries double from this base when `type` is exponential. |
+| `excludedStatusCodes` | Status codes that skip retry entirely. The request fails immediately on receipt. |
+
+**Why exclude the 4xx family.** A 4xx response means your server understood the request and rejected it for a deterministic reason — bad auth (401/403), missing route (404), validation failure (400/422), payload too large (413). Retrying produces the same response, just later. `excludedStatusCodes` tells Vapi to give up on those codes and reserve the retry budget for genuinely transient failures (5xx, network errors, request timeouts).
+
+**Recommendation: make `backoffPlan` part of the default whenever you define a `server.url`.** The cost is one config block; the benefit is that the `end-of-call-report` event — your post-call analytics ground truth — survives a brief webhook hiccup instead of being silently lost. Keep `server.timeoutSeconds` shorter than your slowest downstream dependency so a hanging handler doesn't compound across retries.
+
+---
+
 ## Credential Resolution
 
 If `credentialId` is set on the server or tool, that specific credential is used. If omitted, Vapi picks one from the call's available credentials automatically.
