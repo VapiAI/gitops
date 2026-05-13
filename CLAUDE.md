@@ -7,6 +7,41 @@ This repository uses two instruction sources for Claude:
 
 When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as the canonical project playbook and use this file to reinforce Claude-specific behavior.
 
+---
+
+## ⚠️ CRITICAL SAFETY RULES — read before any direct Vapi API call
+
+### Vapi PATCH on nested objects is REPLACE, not deep-merge
+
+**The Vapi PATCH API does NOT deep-merge nested objects. When you PATCH a nested object (`model`, `voice`, `transcriber`, `messagePlan`, `analysisPlan`, `artifactPlan`, `voicemailDetection`, `startSpeakingPlan`, `stopSpeakingPlan`) with a partial body, the API REPLACES the entire object — wiping every field you didn't include.**
+
+This wiped three live-production assistants' system prompts on 2026-05-13 (gitops-mudflap iForm barge fleet). The PATCH was `{"model": {"model": "gpt-4.1", "provider": "openai", "maxTokens": 260, "temperature": 0.3, "toolIds": [...]}}` — looked complete, but did NOT include `model.messages`. Result: prompts gone, live calls ran with empty system prompt until the operator forced a restore.
+
+**Mandatory workflow for any direct API PATCH against a nested object:**
+
+```bash
+# 1. GET the full resource first
+ASSISTANT=$(curl -H "Authorization: Bearer $VAPI_TOKEN" https://api.vapi.ai/assistant/$id)
+
+# 2. Modify in place — keep every other field
+MODEL=$(echo "$ASSISTANT" | jq '.model | .model = "gpt-4.1"')
+
+# 3. PATCH the COMPLETE nested object back
+curl -X PATCH -H "Content-Type: application/json" \
+  -d "{\"model\": $MODEL}" \
+  https://api.vapi.ai/assistant/$id
+
+# 4. Re-GET and verify EVERY field you cared about — not just the one you changed
+```
+
+**The "I patched X and X came back correct" check is NOT sufficient.** Vapi can replace the rest of the nested object even when X looks right in the response. Verify the fields you DIDN'T touch survived too — especially `model.messages` (system prompt), `model.toolIds`, `model.knowledgeBase`, and any nested config under `voice` / `transcriber`.
+
+**When in doubt, use `npm run push -- <env>` instead of direct API PATCH.** The gitops engine constructs the full payload from local YAML automatically. Only fall back to direct curl PATCH when the engine is silently dropping specific fields (the 2026-04-26 `eagerEotThreshold` engine bug and the 2026-05-13 silent-push class). Even then, GET-modify-PATCH-verify.
+
+See `docs/learnings/voice-providers.md` for related "property X should not exist" 400 gotchas (e.g. `voice.enableSsmlParsing` is rejected on `provider: vapi` voices) — those failures are loud; the PATCH-is-REPLACE failure is silent and far more dangerous.
+
+---
+
 ## Required Reading Order
 
 1. Read `AGENTS.md` first.
