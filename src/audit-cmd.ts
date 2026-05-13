@@ -21,6 +21,12 @@ import { APPLY_FILTER, VAPI_BASE_URL, VAPI_ENV } from "./config.ts";
 import type { ResourceType } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
+// Single source of truth for the exit-code contract. Exported so tests can pin
+// behavior without duplicating the predicate.
+export function exitCodeForFindings(findings: AuditFinding[]): 0 | 1 {
+  return findings.length === 0 ? 0 : 1;
+}
+
 function groupFindings(
   findings: AuditFinding[],
 ): Map<ResourceType, AuditFinding[]> {
@@ -67,7 +73,7 @@ async function main(): Promise<void> {
 
   console.log(summarizeFindings(findings));
 
-  if (findings.length === 0) {
+  if (exitCodeForFindings(findings) === 0) {
     process.exit(0);
   }
 
@@ -86,7 +92,7 @@ async function main(): Promise<void> {
 
   // Any finding → exit 1. v1 has no --strict gate; a warning still indicates
   // operator-actionable drift.
-  process.exit(1);
+  process.exit(exitCodeForFindings(findings));
 }
 
 const isMainModule =

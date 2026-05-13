@@ -14,6 +14,7 @@ const { _resetIgnoreCache } = await import("../src/config.ts");
 const { formatFinding, runAudit, summarizeFindings } = await import(
   "../src/audit.ts"
 );
+const { exitCodeForFindings } = await import("../src/audit-cmd.ts");
 
 import type { AuditFinding } from "../src/audit.ts";
 import type { VapiResource } from "../src/pull.ts";
@@ -493,19 +494,12 @@ test("integration: orphan-yaml + collision + content-identical(4) + sibling-base
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Exit-code mapping — spec'd via the same severity-bar logic audit-cmd uses.
-//
-// GAP: audit-cmd.ts inlines `process.exit(findings.length === 0 ? 0 : 1)`
-// rather than delegating to an exported helper. Spec'ing the contract here
-// (rather than a subprocess test) is the project pattern for CLI exit codes.
+// Exit-code mapping — pinned to the exported helper in audit-cmd.ts so the test
+// catches drift if the CLI's severity bar ever changes.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function computeExitCode(findings: AuditFinding[]): 0 | 1 {
-  return findings.length === 0 ? 0 : 1;
-}
-
-test("exit-code: 0 findings → exit 0; ≥1 finding → exit 1 (mirrors audit-cmd severity bar)", () => {
-  assert.equal(computeExitCode([]), 0);
+test("exit-code: 0 findings → exit 0; ≥1 finding → exit 1 (via exported helper)", () => {
+  assert.equal(exitCodeForFindings([]), 0);
   const oneWarn: AuditFinding = {
     severity: "warn",
     type: "assistants",
@@ -513,9 +507,9 @@ test("exit-code: 0 findings → exit 0; ≥1 finding → exit 1 (mirrors audit-c
     resourceIds: ["x"],
     message: "msg",
   };
-  assert.equal(computeExitCode([oneWarn]), 1);
+  assert.equal(exitCodeForFindings([oneWarn]), 1);
   const oneError: AuditFinding = { ...oneWarn, severity: "error" };
-  assert.equal(computeExitCode([oneError]), 1);
+  assert.equal(exitCodeForFindings([oneError]), 1);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
