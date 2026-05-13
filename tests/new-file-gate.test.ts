@@ -91,7 +91,7 @@ test("detectOrphanYamls: empty state + 1 local file produces 1 orphan and 0 rena
   assert.equal(report.orphans[0]!.resourceId, "orphan-bot");
   assert.match(
     report.orphans[0]!.relativePath,
-    /resources\/<org>\/assistants\/orphan-bot\.md/,
+    /resources\/[^/]+\/assistants\/orphan-bot\.md/,
   );
   assert.equal(report.possibleRenameSources.length, 0);
   assert.equal(report.scopedToPaths, false);
@@ -170,6 +170,27 @@ test("detectOrphanYamls: filePathFilter scopes detection to the selective-push f
   assert.equal(report.orphans.length, 1);
   assert.equal(report.orphans[0]!.type, "assistants");
   assert.equal(report.orphans[0]!.resourceId, "foo");
+});
+
+test("detectOrphanYamls: files matched by `.vapi-ignore` are excluded from orphans (M1 regression guard)", () => {
+  // The user has explicitly opted certain on-disk files OUT of gitops
+  // tracking via `.vapi-ignore`. Those files exist on disk but the engine
+  // never uploads them. Without the .vapi-ignore skip here, the gate would
+  // halt every push for a file the engine wouldn't have touched anyway —
+  // defeating the workaround customers use to silence audit noise on stale
+  // dashboard artifacts. Surfaced by canonical code review of feature/new-file-gate.
+  const report = detectOrphanYamls({
+    state: makeStateFile(),
+    listLocalIds: makeListLocalIds({
+      assistants: ["ignored-stub", "real-orphan"],
+    }),
+    extractBaseSlug: fakeExtractBaseSlug,
+    matchesIgnore: (_folder, resourceId) =>
+      resourceId === "ignored-stub" ? "ignored-stub" : null,
+  });
+  // Only the non-ignored file appears as an orphan; the ignored file is gone.
+  assert.equal(report.orphans.length, 1);
+  assert.equal(report.orphans[0]!.resourceId, "real-orphan");
 });
 
 test("detectOrphanYamls: filePathFilter that excludes the orphan produces empty report", () => {
@@ -510,7 +531,7 @@ test("integration: orphan + no flag + --dry-run → exit 1, gate fires, no API c
       `expected exit 1; stdout=${res.stdout}\nstderr=${res.stderr}`,
     );
     assert.match(res.stderr, /Push refused/);
-    assert.match(res.stderr, /resources\/<org>\/assistants\/foo\.md/);
+    assert.match(res.stderr, /resources\/[^/]+\/assistants\/foo\.md/);
     assert.match(res.stderr, /FOR AI AGENTS/);
     // The gate must fire BEFORE the apply loops — no "would PATCH/POST" lines
     // should appear for the orphan.

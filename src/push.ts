@@ -1383,8 +1383,9 @@ async function main(): Promise<void> {
       });
       if (orphanReport.orphans.length > 0) {
         if (ALLOW_NEW_FILES) {
+          const verb = DRY_RUN ? "would create" : "creating";
           console.log(
-            `   ⚠️  bypassing new-file gate: creating ${orphanReport.orphans.length} new resource(s) on the dashboard`,
+            `   ⚠️  bypassing new-file gate: ${verb} ${orphanReport.orphans.length} new resource(s) on the dashboard`,
           );
         } else {
           console.error(

@@ -25,6 +25,7 @@
 // push CLI.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { matchesIgnore, VAPI_ENV } from "./config.ts";
 import { extractBaseSlug, listExistingResourceIds } from "./pull.ts";
 import { FOLDER_MAP } from "./resources.ts";
 import type { ResourceType, StateFile } from "./types.ts";
@@ -64,6 +65,14 @@ export interface DetectOrphanYamlsOptions {
   // Optional override of `extractBaseSlug`. Defaults to the pull.ts helper
   // — only swapped in tests to keep the unit suite filesystem-free.
   extractBaseSlug?: (resourceId: string) => string;
+  // Optional override of `matchesIgnore`. Defaults to the config.ts helper
+  // which reads `.vapi-ignore` from disk. Tests pass a stub so they don't
+  // need a fixture-tree.
+  matchesIgnore?: (folder: string, resourceId: string) => string | null;
+  // Optional override of `VAPI_ENV`. Defaults to the config.ts constant.
+  // Tests pass an explicit value to avoid relying on `process.argv` priming
+  // at module-load time.
+  vapiEnv?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,9 +99,12 @@ function pathMatchesAnyFilter(
   resourceId: string,
 ): boolean {
   for (const filter of filters) {
+    // Exact match, suffix match (filter omits the env prefix), or the
+    // resourceId-with-extension matching at the tail. We deliberately do NOT
+    // do `filter.endsWith(relativePath)` — that asymmetric direction
+    // over-matches when the relativePath is short.
     if (filter === relativePath) return true;
     if (relativePath.endsWith(filter)) return true;
-    if (filter.endsWith(relativePath)) return true;
     if (filter.endsWith(`${resourceId}.yml`)) return true;
     if (filter.endsWith(`${resourceId}.yaml`)) return true;
     if (filter.endsWith(`${resourceId}.md`)) return true;
@@ -114,6 +126,8 @@ export function detectOrphanYamls(
     listLocalIds = listExistingResourceIds,
     filePathFilter,
     extractBaseSlug: baseSlugFn = extractBaseSlug,
+    matchesIgnore: matchesIgnoreFn = matchesIgnore,
+    vapiEnv = VAPI_ENV,
   } = opts;
 
   const orphans: OrphanFile[] = [];
@@ -139,13 +153,20 @@ export function detectOrphanYamls(
 
     // Pass 1: orphan YAMLs (local files with no state entry).
     for (const localId of orphanIds) {
+      // Skip files matched by `.vapi-ignore`. The user has explicitly opted
+      // these out of gitops tracking — they exist on disk but the engine is
+      // not supposed to upload them. Without this skip, ignored files trip
+      // the gate and halt every push, which defeats `.vapi-ignore`'s purpose.
+      if (matchesIgnoreFn(folder, localId)) {
+        continue;
+      }
       // Determine relative path. Files are loaded with one of {.yml, .yaml,
       // .md}; we don't have the actual extension on hand here because
       // `listExistingResourceIds` strips it. Use `.md` for assistants (per
       // convention) and `.yml` for everything else when reporting — this is
       // only for human-readable output, not for matching.
       const ext = type === "assistants" ? "md" : "yml";
-      const relativePath = `resources/<org>/${folder}/${localId}.${ext}`;
+      const relativePath = `resources/${vapiEnv}/${folder}/${localId}.${ext}`;
       if (
         scopedToPaths &&
         !pathMatchesAnyFilter(
@@ -251,18 +272,14 @@ export function formatGateMessage(
   }
 
   lines.push("");
+  lines.push(
+    `${bold}State entries with no matching local file (possible rename SOURCES):${reset}`,
+  );
   if (report.possibleRenameSources.length === 0) {
-    lines.push(
-      `${bold}State entries with no matching local file (possible rename SOURCES):${reset}`,
-    );
     lines.push("  (none — no plausible rename pairings found)");
   } else {
-    lines.push(
-      `${bold}State entries with no matching local file (possible rename SOURCES):${reset}`,
-    );
     for (const src of report.possibleRenameSources) {
-      const shortUuid =
-        src.uuid.length > 8 ? `${src.uuid.slice(0, 8)}…` : src.uuid;
+      const shortUuid = `${src.uuid.slice(0, 8)}…`;
       lines.push(
         `  - ${src.type}/${src.resourceId} → ${shortUuid} (no ${src.resourceId} on disk)`,
       );
