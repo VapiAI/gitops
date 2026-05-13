@@ -43,7 +43,8 @@ export type AuditRule =
   | "content-identical"
   | "sibling-base-slug"
   | "dashboard-orphan"
-  | "inline-tools";
+  | "inline-tools"
+  | "fetch-failed";
 
 export type AuditSeverity = "warn" | "error";
 
@@ -393,23 +394,50 @@ export async function runAudit(
 
   // Parallelize dashboard fetches per type — the API is per-resource-type and
   // the audit is read-only, so concurrency is safe and noticeably faster on
-  // an org with many types.
+  // an org with many types. Use `allSettled` so a transient failure on one
+  // type doesn't abort the whole audit; emit a `fetch-failed` finding per
+  // failed type so the operator sees exactly which data is missing.
   const remoteByType = new Map<ResourceType, VapiResource[]>();
+  const fetchFailures: AuditFinding[] = [];
   if (fetchRemote) {
-    const fetched = await Promise.all(
+    const settled = await Promise.allSettled(
       types.map(async (t) => [t, await remoteFetcher(t)] as const),
     );
-    for (const [t, list] of fetched) remoteByType.set(t, list);
+    for (let i = 0; i < settled.length; i++) {
+      const result = settled[i];
+      const type = types[i];
+      if (!result || !type) continue;
+      if (result.status === "fulfilled") {
+        const [t, list] = result.value;
+        remoteByType.set(t, list);
+      } else {
+        const reason = result.reason;
+        const message =
+          reason instanceof Error ? reason.message : String(reason);
+        fetchFailures.push({
+          severity: "warn",
+          type,
+          rule: "fetch-failed",
+          resourceIds: [],
+          message: `Dashboard fetch failed for ${type}: ${message}. State-ghost and dashboard-orphan checks skipped for this type.`,
+          suggestedAction:
+            "Re-run audit after the API recovers, or inspect network connectivity / API token scope.",
+        });
+      }
+    }
   }
 
-  const findings: AuditFinding[] = [];
+  const findings: AuditFinding[] = [...fetchFailures];
 
   for (const type of types) {
     const localIds = listLocalIds(type);
 
     findings.push(...checkOrphanYaml(type, localIds, state));
 
-    if (fetchRemote) {
+    if (fetchRemote && remoteByType.has(type)) {
+      // Only run remote-coupled checks when the fetch actually succeeded —
+      // skip silently for types that failed (operator already saw a
+      // `fetch-failed` finding for them above).
       const remote = remoteByType.get(type) ?? [];
       const remoteUuids = new Set(remote.map((r) => r.id));
       findings.push(...checkStateGhosts(type, state, remoteUuids));

@@ -147,6 +147,47 @@ test("state-ghost: fetchRemote=false short-circuits the check (0 findings)", asy
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Rule: fetch-failed — one type's API call throws, the audit emits a
+// `fetch-failed` finding for that type and skips state-ghost /
+// dashboard-orphan checks for it. Other types proceed normally.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("fetch-failed: one type throws → 1 warn finding for that type; no false state-ghost positives", async () => {
+  const state = makeStateFile({
+    assistants: { "bot-a": makeStateEntry("uuid-a") },
+    tools: { "tool-x": makeStateEntry("uuid-x") },
+  });
+  const findings = await runAudit({
+    ...baseOpts(state),
+    types: ["assistants", "tools"] as ResourceType[],
+    fetchRemote: true,
+    remoteFetcher: async (t: ResourceType) => {
+      if (t === "assistants")
+        throw new Error("simulated 503 from dashboard API");
+      return [{ id: "uuid-x", name: "tool-x" }];
+    },
+  });
+  const fetchFails = findings.filter((f) => f.rule === "fetch-failed");
+  assert.equal(fetchFails.length, 1);
+  assert.equal(fetchFails[0]?.type, "assistants");
+  assert.equal(fetchFails[0]?.severity, "warn");
+  assert.match(fetchFails[0]?.message ?? "", /simulated 503/);
+
+  // Critical regression guard: the failed `assistants` fetch must NOT cause
+  // bot-a to be reported as a state-ghost (which would be a false positive
+  // born of treating an empty remote-list fallback as truth).
+  const ghosts = findings.filter((f) => f.rule === "state-ghost");
+  assert.equal(ghosts.length, 0);
+
+  // The tools type fetched cleanly, so its state-ghost check ran and found
+  // tool-x present on the dashboard. No finding either.
+  const toolGhosts = findings.filter(
+    (f) => f.rule === "state-ghost" && f.type === "tools",
+  );
+  assert.equal(toolGhosts.length, 0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Rule: state-uuid-collision
 // ─────────────────────────────────────────────────────────────────────────────
 
