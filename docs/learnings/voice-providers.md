@@ -8,15 +8,15 @@ The `voice` block on an assistant or `membersOverrides.voice` on a squad is **pr
 
 ## Quick lookup
 
-| Field | 11labs | Cartesia (sonic-3) | OpenAI / Azure / Rime / LMNT / Minimax / Neuphonic / SmallestAI |
-|-------|--------|---------------------|------------------------------------------------------------------|
-| Speech rate | `voice.speed` (0.7–1.2) | `voice.generationConfig.speed` (0.6–1.5) | `voice.speed` |
-| Stability / consistency | `voice.stability` (0.0–1.0) | — (not exposed) | — |
-| Voice similarity | `voice.similarityBoost` (0.0–1.0) | — | — |
-| SSML parsing | `voice.enableSsmlParsing: true` | (parsed natively, no flag) | varies — see provider docs |
-| Pronunciation dictionary | `voice.pronunciationDictionaryLocators[]` (array of `{pronunciationDictionaryId, versionId}`) | `voice.pronunciationDictId` (single string id; not in Vapi docs but accepted as a Cartesia passthrough) | — |
-| Volume control | — | `voice.generationConfig.volume` (0.5–2.0) | — |
-| Emotion / accent (experimental) | — | `voice.experimentalControls.emotion`, `voice.experimentalControls.speed` (-1 to 1, older API) | — |
+| Field | 11labs | Cartesia (sonic-3) | Vapi-native (Clara, Elliot, Nico, etc.) | OpenAI / Azure / Rime / LMNT / Minimax / Neuphonic / SmallestAI |
+|-------|--------|---------------------|-------|------------------------------------------------------------------|
+| Speech rate | `voice.speed` (0.7–1.2) | `voice.generationConfig.speed` (0.6–1.5) | `voice.speed` | `voice.speed` |
+| Stability / consistency | `voice.stability` (0.0–1.0) | — (not exposed) | — | — |
+| Voice similarity | `voice.similarityBoost` (0.0–1.0) | — | — | — |
+| SSML parsing | `voice.enableSsmlParsing: true` | (parsed natively, no flag) | **`enableSsmlParsing` REJECTED** — see notes below | varies — see provider docs |
+| Pronunciation dictionary | `voice.pronunciationDictionaryLocators[]` (array of `{pronunciationDictionaryId, versionId}`) | `voice.pronunciationDictId` (single string id; not in Vapi docs but accepted as a Cartesia passthrough) | — (treat as unsupported until confirmed) | — |
+| Volume control | — | `voice.generationConfig.volume` (0.5–2.0) | — | — |
+| Emotion / accent (experimental) | — | `voice.experimentalControls.emotion`, `voice.experimentalControls.speed` (-1 to 1, older API) | — | — |
 
 ---
 
@@ -67,6 +67,48 @@ voice:
 - `voice.stability`, `voice.similarityBoost` — those are 11labs fields.
 
 **Pronunciation dictionary warning (Cartesia):** changing the `voiceId` in the Vapi dashboard's voice picker silently drops `pronunciationDictId` from the resource. If you swap the Cartesia voice via the dashboard, re-attach the dictionary on the next pull or it will be gone. Treat `(voiceId, pronunciationDictId)` as one atomic unit during edits. Note: `voice.pronunciationDictId` for Cartesia is observed in real customer payloads but is not in the Vapi docs (Vapi only documents the 11labs `pronunciationDictionaryLocators[]` shape — see the 11labs section above). Vapi appears to pass the field through to Cartesia's native API; behavior may change without notice.
+
+---
+
+## Vapi-native voices (Clara, Elliot, Nico, Emma, Neil, Sagar, Kai, Godfrey, Naina, Sid, Layla, Gustavo)
+
+Vapi's first-party voice catalog wraps various TTS backends (Cartesia, ElevenLabs, others) behind a single `provider: vapi` alias. Which backend each named voice resolves to is **not publicly documented** — you can sometimes confirm by force-pulling an assistant that uses one (the pull engine occasionally resolves `vapi/<voiceId>` to the canonical provider name on the way back) or by inspecting the per-voice characteristics page in the Vapi voice docs.
+
+```yaml
+voice:
+  provider: vapi
+  voiceId: <voiceName>        # one of the Vapi catalog: Clara, Elliot, Nico, Emma, Neil, Sagar, Kai, Godfrey, Naina, Sid, Layla, Gustavo (grows over time)
+  speed: 1.05                 # top-level, 0.7–1.2 range observed
+  chunkPlan:
+    formatPlan:
+      numberToDigitsCutoff: 10000   # numbers below this are spoken naturally; above are spelled digit-by-digit
+  fallbackPlan:
+    voices:
+      - provider: 11labs
+        model: eleven_turbo_v2_5
+        voiceId: <fallback-voice-id>
+```
+
+**Forbidden at top level for Vapi-native voices (will 400):**
+
+- `voice.enableSsmlParsing` — API returns `400 Bad Request` with `"voice.property enableSsmlParsing should not exist"`. The field is **only valid on `provider: 11labs` voices**. Vapi-native voices do not expose an explicit SSML-parsing opt-in flag, even if the underlying backend (e.g. Cartesia sonic-3) parses SSML natively.
+- `voice.stability`, `voice.similarityBoost` — those are 11labs fields and will 400 here too.
+- `voice.generationConfig.*` — Cartesia path. Even if a Vapi-native voice wraps Cartesia internally, the `generationConfig` block is not exposed through the `provider: vapi` alias.
+
+**Does SSML actually work without the flag?** Depends on the wrapped backend:
+
+- If the Vapi voice wraps **Cartesia sonic-3**, SSML break tags work natively — Cartesia parses SSML from the text stream without an opt-in. Pause durations should approximate the declared values.
+- If the Vapi voice wraps **11labs Turbo v2.5**, SSML break tags would require `enableSsmlParsing: true` — but the flag is rejected on the `provider: vapi` alias, so SSML effectively does not render through this path. To use SSML on an 11labs-backed voice, declare it explicitly as `provider: 11labs` with the matching `voiceId`.
+- **Vapi's voice-formatting pipeline preserves `<break>`, `<spell>`, and `<<...>>` patterns through angle-bracket stripping** (the `removeAngleBracketContent` step has these as hardcoded exceptions — see `assistants/voice-formatting-plan` in the Vapi docs). So even when the wrapped backend doesn't render the tags, they don't leak as literal text either. Worst-case behavior is silent no-op, NOT audible regression like "the assistant says 'break time 350 milliseconds' out loud."
+
+**Smoke-test protocol** when adding SSML pacing to a `provider: vapi` voice (or migrating from `provider: 11labs` to `provider: vapi`):
+
+1. Push the new voice config to a non-prod sandbox assistant.
+2. Place one call that elicits a 3+ item enumeration (e.g. "what features does X have?").
+3. Listen for whether `<break time="..."/>` tags between list items render as audible pauses or get silently absorbed.
+4. If absorbed and pauses are needed for naturalness, either (a) switch the primary voice to `provider: 11labs` explicitly (with `enableSsmlParsing: true`), (b) use Cartesia natively, or (c) rely on commas + sentence punctuation as the prosody mechanism (Cartesia sonic-3 renders commas as ~150–200ms pauses, which covers most sentence-internal pacing without SSML).
+
+**Cross-reference:** the comma-as-micro-pause convention works on most TTS providers and is the recommended fallback for sentence-internal pacing when SSML support is unreliable. The SSML-only-for-lists convention works on Cartesia-wrapped Vapi voices but should be smoke-tested before relying on it for a production fleet.
 
 ---
 
