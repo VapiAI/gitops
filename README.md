@@ -75,7 +75,7 @@ Every command works in two modes:
 | `npm run audit` | — | `npm run audit -- <org> [--type <t>]` | Read-only drift detector — orphan local YAML, state ghosts, UUID collisions, content-identical clusters, sibling base-slug clusters, dashboard orphans, assistants with inline `model.tools`. Exit 1 on any finding; safe to wire into CI. |
 | `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | **Default deploy verb.** Pull → merge → push in one safe pass; resilient against dashboard drift. |
 | `npm run pull` | ✅ | `npm run pull -- <org> [flags]` | Fetch remote state into local files / state file. Local-first by default — won't clobber local edits. |
-| `npm run push` | ✅ | `npm run push -- <org> [flags]` | Raw push without a pre-pull. **Skip unless you just ran `pull` and are certain state is fresh** — otherwise prefer `apply`. |
+| `npm run push` | ✅ | `npm run push -- <org> [flags]` | Raw push without a pre-pull. Refuses by default when local YAML files lack state entries (orphan-YAML gate); pass `--allow-new-files` to bypass after confirming intent. **Skip unless you just ran `pull` and are certain state is fresh** — otherwise prefer `apply`. |
 | `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Inspect (default) or delete orphaned remote resources. Destructive run requires `--confirm <org>`. |
 | `npm run rollback` | — | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore from a snapshot in `.vapi-state.<org>.snapshots/` (one is written before every push/apply). |
 | `npm run call` | ✅ | `npm run call -- <org> -a <name>` or `-s <squad>` | Start an interactive WebSocket call against an assistant or squad. |
@@ -185,6 +185,31 @@ npm run apply -- <org>
 ```
 
 On a fresh org, `apply`'s pull phase bootstraps `.vapi-state.<org>.json` from the empty dashboard before pushing your local creates.
+
+### Creating new resources after the first push (orphan-YAML gate)
+
+After the initial setup, **`push` refuses by default** when it sees a local YAML file that has no entry in the state file. The engine can't tell whether the file is:
+
+- (a) a NEW resource you intentionally want to create,
+- (b) a RENAME of an existing resource (state has the old slug; YAML has the new name), or
+- (c) a MOVED file (file copied or restored without state being re-keyed).
+
+Silently treating every orphan as case (a) used to spawn duplicates on the dashboard. The gate halts push with a verbose message listing every orphan, and pairs each orphan with possible "rename source" candidates (state entries with no matching local file that share a base slug).
+
+To proceed when the orphans are genuinely new resources:
+
+```bash
+npm run push -- <org> --allow-new-files
+```
+
+This works on `apply` too: `npm run apply -- <org> --allow-new-files` propagates the flag through to the push stage.
+
+**For AI agents**: do NOT auto-pass `--allow-new-files` without confirming with the human. The gate's verbose message is designed to be surfaced to the user so they can reclassify each orphan (new vs rename vs cruft). Silent bypass defeats the gate.
+
+Suppressed automatically:
+- Explicit `--bootstrap` runs (population-from-scratch is expected to be all-new).
+- Files matched by `.vapi-ignore` (the engine wasn't going to upload them anyway).
+- Selective push (`-- <path>`) where the orphan is outside the selection.
 
 ### Pulling without losing local work
 
