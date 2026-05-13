@@ -72,6 +72,7 @@ Every command works in two modes:
 | --- | --- | --- | --- |
 | `npm run setup` | ✅ | — | First-time org wizard — creates `.env.<org>` and `resources/<org>/`. |
 | `npm run validate` | — | `npm run validate -- <org>` | Schema-check local YAML/MD with no network call. **Run before every `apply`.** |
+| `npm run audit` | — | `npm run audit -- <org> [--type <t>]` | Read-only drift detector — orphan local YAML, state ghosts, UUID collisions, content-identical clusters, sibling base-slug clusters, dashboard orphans, assistants with inline `model.tools`. Exit 1 on any finding; safe to wire into CI. |
 | `npm run apply` | ✅ | `npm run apply -- <org> [--force]` | **Default deploy verb.** Pull → merge → push in one safe pass; resilient against dashboard drift. |
 | `npm run pull` | ✅ | `npm run pull -- <org> [flags]` | Fetch remote state into local files / state file. Local-first by default — won't clobber local edits. |
 | `npm run push` | ✅ | `npm run push -- <org> [flags]` | Raw push without a pre-pull. **Skip unless you just ran `pull` and are certain state is fresh** — otherwise prefer `apply`. |

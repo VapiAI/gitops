@@ -13,6 +13,7 @@
     "call": "bash -c 'exec tsx src/call-cmd.ts \"$@\" 2> >(grep --line-buffered -v \"buffer underflow\" >&2)' --",
     "cleanup": "tsx src/cleanup-cmd.ts",
     "validate": "tsx src/validate-cmd.ts",
+    "audit": "tsx src/audit-cmd.ts",
     "sim": "tsx src/sim-cmd.ts",
     "rollback": "tsx src/rollback-cmd.ts",
     "build": "tsc --noEmit",
