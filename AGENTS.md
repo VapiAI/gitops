@@ -62,6 +62,7 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 | Promote resources across orgs       | Copy files between `resources/<org-a>/` and `resources/<org-b>/`                  |
 | Deploy local changes (default)      | `npm run apply -- <org>` — pull → merge → push, safe against dashboard drift       |
 | Pre-flight schema check (no network) | `npm run validate -- <org>` — run before every `apply`                            |
+| Audit state/dashboard drift (read-only) | `npm run audit -- <org>` — orphans, ghosts, content-identical clusters, inline-tools. Exit 1 on findings. |
 | Pull latest from Vapi               | `npm run pull -- <org>`, `--force`, or `--bootstrap`                              |
 | Pull one known remote resource      | `npm run pull -- <org> --type assistants --id <uuid>`                             |
 | Deploy a single file                | `npm run apply -- <org> resources/<org>/assistants/my-agent.md`                   |
@@ -813,6 +814,8 @@ npm run push -- <org> --dry-run                    # Preview without applying an
 npm run push -- <org> --strict                     # Abort push if any validator returns an error
 npm run apply -- <org>                             # Pull then push (full sync)
 npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
+npm run audit -- <org>                             # Read-only drift detector: orphan YAML, state ghosts, content-identical clusters, sibling base-slugs, dashboard orphans, inline model.tools. Exit 1 on findings.
+npm run audit -- <org> --type assistants           # Scope audit to a single resource type
 npm run sim -- <org> --suite <name> --target <name>  # Run a simulation suite against an assistant/squad
 npm run rollback -- <org> --to <ISO-timestamp>     # Re-apply a snapshot taken before a push
 npm run rollback -- <org> --list                   # List available snapshots
