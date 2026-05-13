@@ -124,7 +124,16 @@ voice:
 marker:A-original
 `;
 
-test("pull: 2 dashboard resources with same name (A in state, B new) — fix prevents clobber", async () => {
+// Run the full clobber scenario with a configurable dashboard-response
+// ordering. Asserts the fix works regardless of which Riley the API
+// returns first — this is the H1 case from code review: without merging
+// the prior-pull state into the adoption guard, B-first ordering would
+// clobber A's file because `newStateSection` is empty when B is
+// processed.
+async function runClobberScenario(
+  testName: string,
+  dashboardOrder: "A-first" | "B-first",
+): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "vapi-pull-clobber-"));
 
   // Copy source tree + package.json, symlink node_modules. Mirrors
@@ -165,16 +174,24 @@ test("pull: 2 dashboard resources with same name (A in state, B new) — fix pre
     ),
   );
 
-  // HTTP stub returns BOTH Rileys (A and B) for the /assistant list call.
-  // Other endpoints return [] (no credentials, no other resource types).
+  // HTTP stub returns BOTH Rileys (A and B) for the /assistant list call,
+  // in the configured order. The fix must produce the correct outcome
+  // regardless of which one the dashboard returns first.
+  const orderedBodies =
+    dashboardOrder === "A-first"
+      ? [
+          rileyDashboardBody(UUID_A, "A-fresh-from-platform"),
+          rileyDashboardBody(UUID_B, "B-new-twin"),
+        ]
+      : [
+          rileyDashboardBody(UUID_B, "B-new-twin"),
+          rileyDashboardBody(UUID_A, "A-fresh-from-platform"),
+        ];
   const { worker, port } = await startStub([
     {
       method: "GET",
       pathStartsWith: "/assistant",
-      body: [
-        rileyDashboardBody(UUID_A, "A-fresh-from-platform"),
-        rileyDashboardBody(UUID_B, "B-new-twin"),
-      ],
+      body: orderedBodies,
     },
   ]);
 
@@ -211,7 +228,7 @@ test("pull: 2 dashboard resources with same name (A in state, B new) — fix pre
     assert.equal(
       res.status,
       0,
-      `pull exit code ${res.status}\nstdout=${res.stdout}\nstderr=${res.stderr}`,
+      `[${testName}] pull exit code ${res.status}\nstdout=${res.stdout}\nstderr=${res.stderr}`,
     );
 
     // ── Filesystem assertions ────────────────────────────────────────────
@@ -219,17 +236,17 @@ test("pull: 2 dashboard resources with same name (A in state, B new) — fix pre
     // A-fresh-from-platform marker, since --force overwrites with platform
     // state — but NOT B's content).
     const rileyPath = join(assistantsDir, "riley.md");
-    assert.ok(existsSync(rileyPath), "riley.md must still exist");
+    assert.ok(existsSync(rileyPath), `[${testName}] riley.md must still exist`);
     const rileyContent = readFileSync(rileyPath, "utf-8");
     assert.match(
       rileyContent,
       /marker:A-fresh-from-platform/,
-      `riley.md must hold A's content (the file mapped to A in state); got:\n${rileyContent}`,
+      `[${testName}] riley.md must hold A's content (the file mapped to A in state); got:\n${rileyContent}`,
     );
     assert.doesNotMatch(
       rileyContent,
       /marker:B-new-twin/,
-      `riley.md must NOT have been clobbered by B; got:\n${rileyContent}`,
+      `[${testName}] riley.md must NOT have been clobbered by B; got:\n${rileyContent}`,
     );
 
     // B must have landed in its own file `riley-<B[:8]>.md`.
@@ -237,13 +254,13 @@ test("pull: 2 dashboard resources with same name (A in state, B new) — fix pre
     const bPath = join(assistantsDir, `${expectedBSlug}.md`);
     assert.ok(
       existsSync(bPath),
-      `expected B's file at ${bPath}; assistants dir contents: ${readdirSync(assistantsDir).join(", ")}`,
+      `[${testName}] expected B's file at ${bPath}; assistants dir contents: ${readdirSync(assistantsDir).join(", ")}`,
     );
     const bContent = readFileSync(bPath, "utf-8");
     assert.match(
       bContent,
       /marker:B-new-twin/,
-      `${expectedBSlug}.md must hold B's content; got:\n${bContent}`,
+      `[${testName}] ${expectedBSlug}.md must hold B's content; got:\n${bContent}`,
     );
 
     // ── State assertions ─────────────────────────────────────────────────
@@ -253,12 +270,12 @@ test("pull: 2 dashboard resources with same name (A in state, B new) — fix pre
     assert.equal(
       finalState.assistants.riley?.uuid,
       UUID_A,
-      `state[riley] must still map to A (${UUID_A}); got ${JSON.stringify(finalState.assistants.riley)}`,
+      `[${testName}] state[riley] must still map to A (${UUID_A}); got ${JSON.stringify(finalState.assistants.riley)}`,
     );
     assert.equal(
       finalState.assistants[expectedBSlug]?.uuid,
       UUID_B,
-      `state[${expectedBSlug}] must map to B (${UUID_B}); got ${JSON.stringify(finalState.assistants[expectedBSlug])}`,
+      `[${testName}] state[${expectedBSlug}] must map to B (${UUID_B}); got ${JSON.stringify(finalState.assistants[expectedBSlug])}`,
     );
   } finally {
     worker.postMessage({ type: "shutdown" });
@@ -273,4 +290,16 @@ test("pull: 2 dashboard resources with same name (A in state, B new) — fix pre
     });
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+test("pull: 2 same-name resources (A-first ordering) — fix prevents clobber", async () => {
+  await runClobberScenario("A-first", "A-first");
+});
+
+test("pull: 2 same-name resources (B-first ordering) — fix prevents clobber regardless of dashboard list order", async () => {
+  // Regression guard for the H1 finding from code review: without merging
+  // `state[resourceType]` into the adoption guard, B-first ordering would
+  // clobber A's file (B is processed while `newStateSection` is still empty,
+  // sees `riley.md` as "unclaimed in flight" — but prior state has it).
+  await runClobberScenario("B-first", "B-first");
 });

@@ -341,7 +341,11 @@ export function findExistingResourceId(
 
   // A file is adoptable when it is either unclaimed in state (cross-env
   // pull: file shipped from dev, this env has no prior state for it) or
-  // already claimed by THIS resource's UUID (re-pull: idempotent reuse).
+  // already claimed by THIS resource's UUID. The same-UUID branch is
+  // defensive — in the production code path the caller's
+  // `reverseMap.get(resource.id)` short-circuits this case, so we only
+  // reach this function when the UUID is unknown to state. Keep the
+  // branch anyway so the helper is correct in isolation.
   // A file claimed by a *different* UUID is not adoptable — adopting it
   // would clobber the existing resource's content and state mapping.
   const adoptable = matches.filter((id) => {
@@ -698,17 +702,23 @@ export async function pullResourceType(
 
     if (!resourceId) {
       // Reuse an existing file's resourceId if the name matches (cross-env
-      // pull). Pass `newStateSection` (the in-flight state map this pull is
-      // building) so that adoptions made earlier in this same loop block
-      // subsequent same-name resources from clobbering — `state[resourceType]`
-      // is the on-disk snapshot and would not reflect intra-pull claims.
+      // pull). The adoption guard needs both prior-pull claims AND
+      // intra-pull claims so the fix is iteration-order-independent:
+      //   - `state[resourceType]` carries prior-pull claims loaded from
+      //     disk. Without this, if the dashboard returns the new same-name
+      //     twin BEFORE the tracked one, the new twin sees `newStateSection`
+      //     empty and clobbers the tracked file. The customer's mudflap-prod
+      //     5-Rileys investigation surfaced this ordering dependency.
+      //   - `newStateSection` carries intra-pull claims from earlier
+      //     iterations. Handles the converse (tracked-then-twin order).
+      // Spread `newStateSection` last so it wins when both have the same
+      // slug — the in-flight value is the more authoritative claim during
+      // this pull (e.g. an earlier iteration rekeyed the slug to a new UUID).
+      const claimView = { ...state[resourceType], ...newStateSection };
       resourceId = bootstrap
         ? generateResourceId(resource)
-        : (findExistingResourceId(
-            existingResourceIds,
-            resource,
-            newStateSection,
-          ) ?? generateResourceId(resource));
+        : (findExistingResourceId(existingResourceIds, resource, claimView) ??
+          generateResourceId(resource));
     }
     const isNew =
       !reverseMap.get(resource.id) ||
