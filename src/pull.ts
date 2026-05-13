@@ -286,7 +286,7 @@ export function resourceIdMatchesName(
   return extractBaseSlug(resourceId) === slugify(name);
 }
 
-function listExistingResourceIds(resourceType: ResourceType): string[] {
+export function listExistingResourceIds(resourceType: ResourceType): string[] {
   const dir = join(RESOURCES_DIR, FOLDER_MAP[resourceType]);
   if (!existsSync(dir)) return [];
 
