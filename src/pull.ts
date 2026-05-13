@@ -316,9 +316,19 @@ export function listExistingResourceIds(resourceType: ResourceType): string[] {
 // When pulling a new environment, a resource may already exist on disk under a
 // different UUID suffix (e.g., `end-call-tool-8102e715` from dev). Match by
 // name-slug so we reuse the existing file instead of creating a duplicate.
-function findExistingResourceId(
+//
+// State-awareness guard: if a name-matching file is already claimed in state
+// by a *different* UUID, refuse adoption. Without this guard, two dashboard
+// resources sharing a name (e.g. a Duplicate-Assistant click, or any
+// platform auto-seed of a same-named twin) collapse onto the same file —
+// the second pull silently overwrites the first's content and reassigns
+// the slug's state mapping to the new UUID, orphaning the original.
+// Falling through to `generateResourceId` (caller) produces a deterministic
+// `<name>-<uuid8>` slug per UUID, so the second resource gets its own file.
+export function findExistingResourceId(
   existingResourceIds: string[],
   resource: VapiResource,
+  stateSection: Record<string, ResourceState>,
 ): string | undefined {
   const name = extractName(resource);
   if (!name) return undefined;
@@ -327,8 +337,23 @@ function findExistingResourceId(
   const matches = existingResourceIds.filter(
     (id) => extractBaseSlug(id) === nameSlug,
   );
+  if (matches.length === 0) return undefined;
 
-  return matches.length === 1 ? matches[0] : undefined;
+  // A file is adoptable when it is either unclaimed in state (cross-env
+  // pull: file shipped from dev, this env has no prior state for it) or
+  // already claimed by THIS resource's UUID. The same-UUID branch is
+  // defensive — in the production code path the caller's
+  // `reverseMap.get(resource.id)` short-circuits this case, so we only
+  // reach this function when the UUID is unknown to state. Keep the
+  // branch anyway so the helper is correct in isolation.
+  // A file claimed by a *different* UUID is not adoptable — adopting it
+  // would clobber the existing resource's content and state mapping.
+  const adoptable = matches.filter((id) => {
+    const claim = stateSection[id]?.uuid;
+    return claim === undefined || claim === resource.id;
+  });
+
+  return adoptable.length === 1 ? adoptable[0] : undefined;
 }
 
 function removeUuidMappings(
@@ -676,10 +701,23 @@ export async function pullResourceType(
     }
 
     if (!resourceId) {
-      // Reuse an existing file's resourceId if the name matches (cross-env pull)
+      // Reuse an existing file's resourceId if the name matches (cross-env
+      // pull). The adoption guard needs both prior-pull claims AND
+      // intra-pull claims so the fix is iteration-order-independent:
+      //   - `state[resourceType]` carries prior-pull claims loaded from
+      //     disk. Without this, if the dashboard returns the new same-name
+      //     twin BEFORE the tracked one, the new twin sees `newStateSection`
+      //     empty and clobbers the tracked file. The customer's mudflap-prod
+      //     5-Rileys investigation surfaced this ordering dependency.
+      //   - `newStateSection` carries intra-pull claims from earlier
+      //     iterations. Handles the converse (tracked-then-twin order).
+      // Spread `newStateSection` last so it wins when both have the same
+      // slug — the in-flight value is the more authoritative claim during
+      // this pull (e.g. an earlier iteration rekeyed the slug to a new UUID).
+      const claimView = { ...state[resourceType], ...newStateSection };
       resourceId = bootstrap
         ? generateResourceId(resource)
-        : (findExistingResourceId(existingResourceIds, resource) ??
+        : (findExistingResourceId(existingResourceIds, resource, claimView) ??
           generateResourceId(resource));
     }
     const isNew =
