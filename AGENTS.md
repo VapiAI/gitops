@@ -68,6 +68,7 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 | Deploy a single file                | `npm run apply -- <org> resources/<org>/assistants/my-agent.md`                   |
 | Recover from a bad deploy           | `npm run rollback -- <org> --list` then `--to <ISO-timestamp>`                    |
 | Raw push (no pre-pull)              | `npm run push -- <org>` — see safety hierarchy below; rarely the right call        |
+| Push with new resources             | `npm run push -- <org> --allow-new-files` — bypass orphan-YAML gate. **AI agents**: do NOT auto-pass this flag; confirm with the human first (see push section below) |
 | Test a call                         | `npm run call -- <org> -a <assistant-name>` or `-s <squad-name>`                  |
 | Run a simulation suite              | `npm run sim -- <org> --suite <name> --target <assistant-name>`                   |
 
@@ -96,6 +97,23 @@ Runs the engine's local validators against every YAML/MD file in the org without
 Skips the merge pass. Only use when (a) you literally just ran `pull` and (b) you're certain no one has touched the dashboard since. In a multi-developer environment or when dashboard editors are in play, default to `apply` instead. Stale local state can clobber recent dashboard edits or PATCH against UUIDs that no longer exist.
 
 If you do use `push`, dry-run first: `npm run push -- <org> --dry-run`.
+
+#### Orphan-YAML gate (default-on, refuses ambiguous pushes)
+
+`push` refuses by default when any local YAML file lacks a corresponding entry in `.vapi-state.<org>.json`. The engine can't disambiguate "intentionally new resource" vs "rename of an existing resource" vs "stale cruft" from the file alone. Silently treating every orphan as a create has been the spawn-source for duplicate-resource cascades on customer dashboards.
+
+When the gate fires, push exits 1 with a verbose message listing every orphan and pairing them with possible "rename source" candidates (state entries with no matching local file that share a base slug). Read the message — it tells you exactly what to do for each case.
+
+**Override**: `--allow-new-files`. Pass this flag ONLY after confirming with the human operator that each orphan is intentionally a new resource (case a above). For renames (case b), rename the file back and run `npm run pull -- <org>` to re-key state. For stale files (case c), delete them locally.
+
+**FOR AI AGENTS**: when you encounter this gate, do NOT auto-pass `--allow-new-files`. Surface the error message to the human and ask them to classify each orphan. Silent bypass defeats the entire purpose of the gate.
+
+Suppressed automatically when:
+- `--bootstrap` is passed (every file is legitimately "new" in a from-scratch population).
+- The file is matched by `.vapi-ignore` (the engine wasn't going to upload it anyway).
+- A selective push (`-- <path>`) is requested and the orphan is outside the selection.
+
+The same gate fires inside `apply` (which runs pull → merge → push). If pull's rename-detection orphans a local YAML, apply's push stage hits the gate and halts the whole apply with one explicit message. The `--allow-new-files` flag propagates through `apply -- <org> --allow-new-files` to the push stage.
 
 ### After-the-fact safety
 
@@ -812,7 +830,9 @@ npm run push -- <org> resources/<org>/assistants/my-agent.md  # Push single file
 npm run push -- <org> <path1> <path2>              # Push multiple specific files (one state write)
 npm run push -- <org> --dry-run                    # Preview without applying any platform changes
 npm run push -- <org> --strict                     # Abort push if any validator returns an error
+npm run push -- <org> --allow-new-files            # Bypass orphan-YAML gate (use only after confirming each orphan is intentionally new — see "Orphan-YAML gate" section above)
 npm run apply -- <org>                             # Pull then push (full sync)
+npm run apply -- <org> --allow-new-files           # Same, propagating the bypass through to the push stage
 npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
 npm run audit -- <org>                             # Read-only drift detector: orphan YAML, state ghosts, content-identical clusters, sibling base-slugs, dashboard orphans, inline model.tools. Exit 1 on findings.
 npm run audit -- <org> --type assistants           # Scope audit to a single resource type
