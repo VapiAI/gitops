@@ -44,6 +44,9 @@ function parseEnvironment(): Environment {
     console.error(
       "          --type <type> (apply only specific resource type, repeatable)",
     );
+    console.error(
+      "          --allow-new-files (bypass orphan-YAML pre-flight gate)",
+    );
     console.error("          -- <file...> (apply only specific files)");
     process.exit(1);
   }
@@ -88,6 +91,7 @@ function parseFlags(): {
   dryRun: boolean;
   strictValidation: boolean;
   overwriteDrift: boolean;
+  allowNewFiles: boolean;
   applyFilter: ApplyFilter;
 } {
   const args = process.argv.slice(3);
@@ -97,6 +101,7 @@ function parseFlags(): {
     dryRun: boolean;
     strictValidation: boolean;
     overwriteDrift: boolean;
+    allowNewFiles: boolean;
     applyFilter: ApplyFilter;
   } = {
     forceDelete: args.includes("--force"),
@@ -104,6 +109,7 @@ function parseFlags(): {
     dryRun: args.includes("--dry-run"),
     strictValidation: args.includes("--strict"),
     overwriteDrift: args.includes("--overwrite"),
+    allowNewFiles: args.includes("--allow-new-files"),
     applyFilter: {},
   };
 
@@ -119,7 +125,8 @@ function parseFlags(): {
       arg === "--bootstrap" ||
       arg === "--dry-run" ||
       arg === "--strict" ||
-      arg === "--overwrite"
+      arg === "--overwrite" ||
+      arg === "--allow-new-files"
     )
       continue;
 
@@ -184,7 +191,7 @@ function parseFlags(): {
     console.error(
       `   Expected a resource type (e.g. assistants, tools), a folder path ` +
         `(e.g. assistants/foo.yml or resources/<org>/assistants/foo.yml), or ` +
-        `a flag (--force, --bootstrap, --type, --id).`,
+        `a flag (--force, --bootstrap, --type, --id, --allow-new-files).`,
     );
     process.exit(1);
   }
@@ -257,6 +264,7 @@ export const {
   dryRun: DRY_RUN,
   strictValidation: STRICT_VALIDATION,
   overwriteDrift: OVERWRITE_DRIFT,
+  allowNewFiles: ALLOW_NEW_FILES,
   applyFilter: APPLY_FILTER,
 } = parseFlags();
 

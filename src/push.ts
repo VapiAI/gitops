@@ -2,8 +2,10 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import {
+  ALLOW_NEW_FILES,
   APPLY_FILTER,
   BASE_DIR,
+  BOOTSTRAP_SYNC,
   DRY_RUN,
   FORCE_DELETE,
   loadIgnorePatterns,
@@ -19,6 +21,7 @@ import {
   type RemoteResource,
 } from "./dep-dedup.ts";
 import { checkDriftForUpdate } from "./drift.ts";
+import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
 import {
@@ -1363,6 +1366,37 @@ async function main(): Promise<void> {
     };
 
     state = await maybeBootstrapState(loadedResources, state);
+
+    // Orphan-YAML pre-flight gate. Runs ONCE for ALL resource types after
+    // bootstrap (so state-recovery has a chance to rekey first) and BEFORE
+    // any apply phase. Halts push when local files exist with no state entry
+    // — the duplicate-creation pattern we surfaced during the gitops-mudflap
+    // working session 2026-05-13 (see src/new-file-gate.ts for context).
+    //
+    // Skipped during explicit `--bootstrap` runs: a bootstrap is supposed to
+    // populate state from scratch, so every local file legitimately lacks a
+    // state entry at that point.
+    if (!BOOTSTRAP_SYNC) {
+      const orphanReport = detectOrphanYamls({
+        state,
+        filePathFilter: APPLY_FILTER.filePaths,
+      });
+      if (orphanReport.orphans.length > 0) {
+        if (ALLOW_NEW_FILES) {
+          const verb = DRY_RUN ? "would create" : "creating";
+          console.log(
+            `   ⚠️  bypassing new-file gate: ${verb} ${orphanReport.orphans.length} new resource(s) on the dashboard`,
+          );
+        } else {
+          console.error(
+            formatGateMessage(orphanReport, VAPI_ENV, {
+              color: process.stderr.isTTY === true,
+            }),
+          );
+          process.exit(1);
+        }
+      }
+    }
 
     // Run client-side validators against the loaded resource set. In default
     // mode, errors are surfaced as warnings so a single bad spec doesn't block

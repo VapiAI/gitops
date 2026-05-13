@@ -21,6 +21,7 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { findOrphanResourceIds } from "./new-file-gate.ts";
 import {
   extractBaseSlug,
   fetchAllResources,
@@ -179,21 +180,20 @@ function checkOrphanYaml(
   localIds: string[],
   state: StateFile,
 ): AuditFinding[] {
-  const stateKeys = new Set(Object.keys(state[type]));
-  const findings: AuditFinding[] = [];
-  for (const localId of localIds) {
-    if (stateKeys.has(localId)) continue;
-    findings.push({
-      severity: "warn",
-      type,
-      rule: "orphan-yaml",
-      resourceIds: [localId],
-      message: `local file ${type}/${localId} has no state entry`,
-      suggestedAction:
-        "delete file OR run `npm run pull` to re-key it into state",
-    });
-  }
-  return findings;
+  // Single source of truth for "what counts as an orphan YAML" — shared with
+  // the push-time pre-flight gate in src/new-file-gate.ts. Both surfaces map
+  // the same predicate to different output shapes (here: AuditFinding[];
+  // there: OrphanFile[] + verbose halt message).
+  const orphanIds = findOrphanResourceIds(type, localIds, state);
+  return orphanIds.map((localId) => ({
+    severity: "warn",
+    type,
+    rule: "orphan-yaml",
+    resourceIds: [localId],
+    message: `local file ${type}/${localId} has no state entry`,
+    suggestedAction:
+      "delete file OR run `npm run pull` to re-key it into state",
+  }));
 }
 
 function checkStateGhosts(

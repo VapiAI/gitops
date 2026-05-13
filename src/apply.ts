@@ -33,7 +33,7 @@ export async function runApply(): Promise<void> {
   const pushArgs = allArgs.join(" ");
 
   if (!env || !SLUG_RE.test(env)) {
-    console.error("Usage: npm run apply <org> [--force]");
+    console.error("Usage: npm run apply <org> [--force] [--allow-new-files]");
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");
@@ -41,9 +41,20 @@ export async function runApply(): Promise<void> {
     console.error("  then pushes the result back to the platform.");
     console.error("");
     console.error(
-      "  --force   Enable deletions: resources you deleted locally",
+      "  --force            Enable deletions: resources you deleted locally",
     );
-    console.error("            will also be deleted from the platform.");
+    console.error(
+      "                     will also be deleted from the platform.",
+    );
+    console.error(
+      "  --allow-new-files  Bypass the orphan-YAML pre-flight gate (push stage).",
+    );
+    console.error(
+      "                     Use only after confirming every local file without a",
+    );
+    console.error(
+      "                     state entry is genuinely new — see src/new-file-gate.ts.",
+    );
     process.exit(1);
   }
 
