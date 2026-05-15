@@ -42,7 +42,18 @@ const FOLDER_TO_TYPE: Record<string, ResourceType> = Object.entries(
 // Resource Loading
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VALID_EXTENSIONS = [".yml", ".yaml", ".ts", ".md"];
+// Single source of truth for resource file extensions. Imported by
+// `recanonicalize.ts` so the precondition-5 "both files exist" check
+// stays in lockstep with the loader — without this, a `.ts`-authored
+// resource paired with a UUID-suffixed `.ts` twin would be invisible to
+// the safety check and silently allow the data-loss shape the
+// recanonicalize header explicitly refuses.
+export const VALID_EXTENSIONS: readonly string[] = [
+  ".yml",
+  ".yaml",
+  ".ts",
+  ".md",
+];
 
 /**
  * Parse a markdown file with YAML frontmatter

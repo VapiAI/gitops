@@ -22,6 +22,10 @@ import {
 } from "./dep-dedup.ts";
 import { checkDriftForUpdate } from "./drift.ts";
 import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
+import {
+  formatRecanonicalizeReport,
+  recanonicalizeStateKeys,
+} from "./recanonicalize.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
 import {
@@ -1366,6 +1370,35 @@ async function main(): Promise<void> {
     };
 
     state = await maybeBootstrapState(loadedResources, state);
+
+    // Recanonicalize stale UUID-suffixed state keys back to canonical slugs
+    // before the orphan-YAML gate runs. This is the safe collapse of the
+    // pull-side rekey-on-name-collision behavior (src/pull.ts) once the
+    // underlying collision has resolved (e.g. the conflicting twin was
+    // deleted on the dashboard). Without this pass, the orphan-YAML gate
+    // sees the canonical-slug local file as "new" — the recurring
+    // duplicate-creation root cause documented in improvements.md.
+    //
+    // Gating: `BOOTSTRAP_SYNC` (the user's explicit `--bootstrap` flag)
+    // skips this pass because state is being rebuilt from scratch. Note
+    // that the *internal* bootstrap-recovery pull triggered by
+    // `maybeBootstrapState` above does NOT set `BOOTSTRAP_SYNC` — so
+    // recanonicalize still runs after that recovery, which is intentional:
+    // bootstrap freshly generates UUID-suffixed keys for unresolved
+    // collisions, and recanonicalize collapses any that no longer have a
+    // live conflict.
+    //
+    // `touched` is plumbed through so scoped pushes flush the rename via
+    // `mergeScoped` at save time. Without this, the on-disk stale key
+    // would silently re-overwrite the in-memory canonical rename — H1 in
+    // the code review.
+    if (!BOOTSTRAP_SYNC) {
+      const recanonReport = recanonicalizeStateKeys({ state, touched });
+      const recanonSummary = formatRecanonicalizeReport(recanonReport);
+      if (recanonSummary) {
+        console.log(`\n${recanonSummary}`);
+      }
+    }
 
     // Orphan-YAML pre-flight gate. Runs ONCE for ALL resource types after
     // bootstrap (so state-recovery has a chance to rekey first) and BEFORE
