@@ -23,12 +23,12 @@ import { join } from "path";
 import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
 import {
-  extractBaseSlug,
   fetchAllResources,
   listExistingResourceIds,
   type VapiResource,
 } from "./pull.ts";
 import { FOLDER_MAP } from "./resources.ts";
+import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { loadState } from "./state.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
@@ -132,16 +132,8 @@ async function defaultReadAssistantTools(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Slug helpers (kept local; mirror src/pull.ts conventions)
+// Resource name extraction
 // ─────────────────────────────────────────────────────────────────────────────
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
-}
 
 function extractRemoteName(resource: VapiResource): string | undefined {
   if (typeof resource.name === "string" && resource.name) return resource.name;
