@@ -17,15 +17,17 @@
 //     duplicates from prior bug runs — the caller should warn and surface
 //     the loser UUIDs so a follow-up `npm run cleanup` can prune them).
 //
-// NOTE on duplication: `slugify` and `extractBaseSlug` here mirror the
-// definitions in `src/pull.ts`. pull.ts imports config.ts, which calls
-// `parseEnvironment()` at module load and `process.exit(1)`s without a
-// CLI env arg — making it impossible to import in a unit test. This
-// module imports ONLY from `./types.ts` so it stays testable in
-// isolation. Five lines duplicated is the right tradeoff; do not "DRY"
-// these back into pull.ts.
+// `slugify` and `extractBaseSlug` previously lived inline here as a
+// deliberate copy of pull.ts's definitions — pull.ts imports config.ts
+// which `process.exit(1)`s under unit tests, blocking direct reuse. They
+// now live in `./slug-utils.ts` (config-free, side-effect-free) and are
+// re-exported below so any existing test importing them from this module
+// keeps working unchanged.
 
+import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import type { ResourceState } from "./types.ts";
+
+export { extractBaseSlug, slugify } from "./slug-utils.ts";
 
 export interface RemoteResource {
   id: string;
@@ -41,19 +43,6 @@ export interface DedupMatch {
   // `ambiguous` is false. Caller should surface these in a warning so the
   // user can run `npm run cleanup` to prune the duplicates.
   duplicateUuids: string[];
-}
-
-export function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
-}
-
-export function extractBaseSlug(resourceId: string): string {
-  const match = resourceId.match(/^(.*)-([a-f0-9]{8})$/i);
-  return match?.[1] ?? resourceId;
 }
 
 // Minimal payload shape this module needs. Local resource files are loaded

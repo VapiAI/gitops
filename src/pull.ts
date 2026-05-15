@@ -20,6 +20,8 @@ import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
+import { FOLDER_MAP } from "./resources.ts";
+import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
@@ -57,19 +59,6 @@ const ENDPOINT_MAP: Record<ResourceType, string> = {
   simulations: "/eval/simulation",
   simulationSuites: "/eval/simulation/suite",
   evals: "/eval",
-};
-
-// Map resource types to their folder paths (relative to resources/)
-const FOLDER_MAP: Record<ResourceType, string> = {
-  tools: "tools",
-  structuredOutputs: "structuredOutputs",
-  assistants: "assistants",
-  squads: "squads",
-  personalities: "simulations/personalities",
-  scenarios: "simulations/scenarios",
-  simulations: "simulations/tests",
-  simulationSuites: "simulations/suites",
-  evals: "evals",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,16 +240,8 @@ async function pullCredentials(state: StateFile): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Naming & Slug Generation
+// Resource naming (slug generation lives in src/slug-utils.ts)
 // ─────────────────────────────────────────────────────────────────────────────
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
-}
 
 function extractName(resource: VapiResource): string | undefined {
   if (resource.name) return resource.name;
@@ -274,11 +255,6 @@ function generateResourceId(resource: VapiResource): string {
   const name = extractName(resource);
   const shortId = resource.id.slice(0, 8);
   return name ? `${slugify(name)}-${shortId}` : `resource-${shortId}`;
-}
-
-export function extractBaseSlug(resourceId: string): string {
-  const match = resourceId.match(/^(.*)-([a-f0-9]{8})$/i);
-  return match?.[1] ?? resourceId;
 }
 
 export function resourceIdMatchesName(
