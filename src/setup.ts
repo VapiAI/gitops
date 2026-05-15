@@ -5,6 +5,7 @@ import { mkdir, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
+import { slugify } from "./slug-utils.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -151,14 +152,6 @@ async function fetchAllResourceSnapshots(
 // ─────────────────────────────────────────────────────────────────────────────
 // Slug helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dependency detection — scan selected resources for UUID references

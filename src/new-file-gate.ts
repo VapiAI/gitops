@@ -26,8 +26,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { matchesIgnore, VAPI_ENV } from "./config.ts";
-import { extractBaseSlug, listExistingResourceIds } from "./pull.ts";
+import { listExistingResourceIds } from "./pull.ts";
 import { FOLDER_MAP } from "./resources.ts";
+import { extractBaseSlug } from "./slug-utils.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
@@ -62,8 +63,8 @@ export interface DetectOrphanYamlsOptions {
   // list are reported. Mirrors `APPLY_FILTER.filePaths` semantics used by
   // selective push.
   filePathFilter?: string[];
-  // Optional override of `extractBaseSlug`. Defaults to the pull.ts helper
-  // — only swapped in tests to keep the unit suite filesystem-free.
+  // Optional override of `extractBaseSlug`. Defaults to the slug-utils
+  // helper — only swapped in tests to keep the unit suite filesystem-free.
   extractBaseSlug?: (resourceId: string) => string;
   // Optional override of `matchesIgnore`. Defaults to the config.ts helper
   // which reads `.vapi-ignore` from disk. Tests pass a stub so they don't

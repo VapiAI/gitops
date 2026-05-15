@@ -44,11 +44,10 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { RESOURCES_DIR } from "./config.ts";
 import { FOLDER_MAP, VALID_EXTENSIONS } from "./resources.ts";
+import { isEngineSuffixedSlug } from "./slug-utils.ts";
 import type { TouchedSets } from "./state-merge.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
-
-const UUID_SUFFIX_RE = /^(.+)-([0-9a-f]{8})$/i;
 
 export interface RecanonicalizeRekey {
   type: ResourceType;
@@ -132,21 +131,14 @@ export function recanonicalizeStateKeys(
       const entry = section[stateKey];
       if (!entry) continue;
 
-      const match = stateKey.match(UUID_SUFFIX_RE);
-      if (!match) continue;
-
-      const [, canonicalSlug, capturedUuid8] = match;
-      if (!canonicalSlug || !capturedUuid8) continue;
-
-      // Precondition 2 — only recanonicalize engine-generated suffixes. If
-      // the captured 8 hex chars don't match the entry's UUID prefix, this
-      // is a user-named resource that coincidentally looks suffixed.
-      //
-      // Mirrors generateResourceId() in src/pull.ts:265-273 — UUID dashes
-      // start at index 8, so `slice(0, 8)` on the raw UUID is equivalent
-      // to stripping dashes first; the dash-strip is defensive.
-      const entryUuid8 = entry.uuid.replace(/-/g, "").slice(0, 8).toLowerCase();
-      if (capturedUuid8.toLowerCase() !== entryUuid8) continue;
+      // Preconditions 1 + 2 — the key must match the engine-generated
+      // shape `<base>-<uuid8>` AND the captured 8-hex must match the
+      // entry's UUID prefix. `isEngineSuffixedSlug` returns `null` on
+      // either failure, ruling out user-named resources that
+      // coincidentally end in `-abcd1234`.
+      const parsed = isEngineSuffixedSlug(stateKey, entry.uuid);
+      if (!parsed) continue;
+      const canonicalSlug = parsed.base;
 
       // Precondition 3 — canonical slot must be unclaimed in state.
       //
