@@ -49,6 +49,34 @@ Outbound Call
 - The fronter prompt is clean — optimized solely for conversation quality
 - Each concern is independently testable and tunable
 
+### ⚠️ Platform `voicemailDetection` MUST be disabled on the gatekeeper (Two-Agent Relay)
+
+This is the single most non-obvious failure mode in two-agent voicemail relay setups. If the gatekeeper assistant has Vapi's platform `voicemailDetection: { provider: vapi }` configured, the call will **silently break on every voicemail** — the bot never speaks, the message never lands, the call ends with `endedReason: voicemail` after ~10–22s of dead air. We hit this on mudflap-test's iform voicemail triage squad on 2026-05-14 and only diagnosed it after pulling full Axiom event timelines.
+
+**The mechanism (verified via call 019e2827 on 2026-05-14):**
+
+1. The carrier prompt audio streams into the gatekeeper's transcriber (e.g. Soniox stt-rt-v4). Soniox emits a flood of `assistant.transcriber.partialTranscript` events.
+2. Each partial transcript triggers a new `pipeline.turnStarted`, which calls `assistant.model.clearing` and emits `assistant.model.requestAborted` on any in-flight LLM request. The gatekeeper LLM never gets a stable 1–2 second window to complete a response.
+3. **Meanwhile**, platform `voicemailDetection` runs the Vapi VMD classifier on the raw audio in parallel — it doesn't wait for the LLM. With `backoffPlan: { frequencySeconds: 2.5, maxRetries: 6, startAtSeconds: 2 }`, it fires `call.voicemailDetected` events starting at ~+5s into the call.
+4. Platform VMD ends the call with `endedReason: voicemail` regardless of whether the LLM has emitted its handoff tool call. The gatekeeper LLM literally never finishes a `model.firstTokenReceived` event — every request gets aborted by streaming transcripts before completion.
+5. Worse: if the gatekeeper has NO `voicemailMessage` field configured, platform VMD's "voicemail detected" outcome is to end the call **silently**. No callback message plays. The recording captures the carrier prompt + dead air.
+
+**Architectural mismatch root cause:** Platform `voicemailDetection` + `voicemailMessage` is designed for the **single-agent** voicemail flow (platform detects → platform plays voicemailMessage → platform ends call). The two-agent relay's `handoff_to_voicemail_leaver` tool flow is a **competing detection path** that loses the race because:
+
+- LLM-based detection requires the LLM to actually run to completion. Streaming transcripts during the carrier prompt prevent that.
+- Platform VMD operates directly on audio, in parallel, and doesn't need the LLM.
+- Without `voicemailMessage` on the gatekeeper, platform VMD's win = silent call end.
+
+**Fix:** Disable platform `voicemailDetection` on the gatekeeper assistant. Either:
+
+- **Recommended**: don't set the field at all on the gatekeeper. Multilingual triage classifiers that never had `voicemailDetection` configured (e.g. `iform-triage-classifier-multilingual-d98136d9`, `iform-triage-multilingual-classic-f6b53e27` on mudflap-test) work where same-shape squads with VMD-on classifiers failed.
+- **If you can't modify the underlying assistant** (e.g. a customer is gatekeeping the base classifier UUID for another reason): fork the classifier and use the fork in the squad. `assistantOverrides.voicemailDetection: null` does **NOT** work — Vapi's API silently drops the field. Verified via direct PATCH test on 2026-05-14.
+- **Never** set `voicemailDetection` on the gatekeeper AND rely on the handoff path. They are mutually exclusive architectures.
+
+**Detection fallback when platform VMD is off:** The gatekeeper LLM's prompt is now the sole detector. Even with streaming-transcript aborts during the carrier prompt, the LLM eventually gets a stable window (the silence between carrier-prompt sentences, or after the prompt ends but before the beep) and emits its `handoff_to_voicemail_leaver` tool call. The leaver then speaks the callback message via the handoff's `request-start`.
+
+**Engine-gap note for gitops users:** the `assistantOverrides.voicemailDetection: null` rejection is one of several Vapi-side override fields that silently drop a null in a squad-member override. If you're trying to "turn off" any nested-object field via override, verify with a direct GET after PATCH — don't trust that null made it through.
+
 ---
 
 ## The Detection Priority Hierarchy
