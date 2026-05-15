@@ -16,6 +16,10 @@ import {
   VAPI_TOKEN,
 } from "./config.ts";
 import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
+import {
+  formatRecanonicalizeReport,
+  recanonicalizeStateKeys,
+} from "./recanonicalize.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
@@ -1045,6 +1049,26 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
       bootstrap,
       resourceIds,
     });
+
+  // Collapse UUID-suffixed state keys back to canonical when the underlying
+  // name-collision has resolved (the conflicting twin was deleted, etc.).
+  // Skipped during bootstrap because bootstrap is supposed to populate state
+  // from scratch — there is no prior rekey to undo. Also skipped on targeted
+  // ID pulls so we don't sweep types we haven't fully refreshed. When the
+  // pull is scoped by typeFilter, the pass is restricted to those types so
+  // we don't touch sections this pull didn't refresh — preserves the stated
+  // safety boundary even though the preconditions themselves are safe.
+  // Pull's saveState writes wholesale, so `touched` isn't needed here.
+  if (!bootstrap && !resourceIds?.length) {
+    const report = recanonicalizeStateKeys({
+      state,
+      types: typeFilter?.length ? (typeFilter as ResourceType[]) : undefined,
+    });
+    const summary = formatRecanonicalizeReport(report);
+    if (summary) {
+      console.log(`\n${summary}`);
+    }
+  }
 
   await saveState(state);
 
