@@ -52,7 +52,7 @@ export type AuditRule =
   | "content-drift"
   | "fetch-failed";
 
-export type AuditSeverity = "warn" | "error";
+export type AuditSeverity = "info" | "warn" | "error";
 
 export interface AuditFinding {
   severity: AuditSeverity;
@@ -378,7 +378,7 @@ function checkContentDrift(
 
   for (const resourceId of localIds) {
     const entry = state[type][resourceId];
-    if (!entry?.lastPulledHash) continue;
+    if (!entry) continue;
 
     const localHash = hashLocalResource(type, resourceId);
     if (!localHash) continue;
@@ -398,7 +398,19 @@ function checkContentDrift(
     });
     if (direction === "clean") continue;
 
-    const severity = direction === "both-diverged" ? "error" : "warn";
+    // Severity mapping:
+    //   - both-diverged  → error (CI-blocking; needs --resolve to disambiguate)
+    //   - local-ahead    → warn  (un-pushed edits; operator should push)
+    //   - dashboard-ahead → warn (UI edits not pulled; operator should pull)
+    //   - no-baseline    → info  (expected on fresh clones / pre-bootstrap;
+    //                             surfaces what would otherwise be silently
+    //                             skipped, but does NOT block CI)
+    const severity =
+      direction === "both-diverged"
+        ? "error"
+        : direction === "no-baseline"
+          ? "info"
+          : "warn";
     const detail =
       direction === "local-ahead"
         ? "local has unpushed edits"
@@ -406,7 +418,7 @@ function checkContentDrift(
           ? "local diverges from dashboard since last pull"
           : direction === "both-diverged"
             ? "3-way conflict between local, dashboard, and last-pulled baseline"
-            : "no lastPulledHash baseline for direction classification";
+            : "no lastPulledHash baseline — content-drift coverage uninitialized";
 
     findings.push({
       severity,
@@ -534,7 +546,8 @@ export async function runAudit(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function formatFinding(f: AuditFinding): string {
-  const icon = f.severity === "error" ? "❌" : "⚠️ ";
+  const icon =
+    f.severity === "error" ? "❌" : f.severity === "info" ? "ℹ️ " : "⚠️ ";
   const uuidSuffix = f.uuid ? ` [uuid=${f.uuid}]` : "";
   const lines = [
     `  ${icon} [${f.rule}] ${f.type}/${f.resourceIds.join(", ")}${uuidSuffix}`,
@@ -550,5 +563,8 @@ export function summarizeFindings(findings: AuditFinding[]): string {
   if (findings.length === 0) return "✅ No audit findings.";
   const errors = findings.filter((f) => f.severity === "error").length;
   const warns = findings.filter((f) => f.severity === "warn").length;
-  return `📋 Audit: ${findings.length} finding(s) — ${errors} error(s), ${warns} warning(s)`;
+  const infos = findings.filter((f) => f.severity === "info").length;
+  const parts = [`${errors} error(s)`, `${warns} warning(s)`];
+  if (infos > 0) parts.push(`${infos} info`);
+  return `📋 Audit: ${findings.length} finding(s) — ${parts.join(", ")}`;
 }

@@ -23,8 +23,14 @@ import { VALID_RESOURCE_TYPES } from "./types.ts";
 
 // Single source of truth for the exit-code contract. Exported so tests can pin
 // behavior without duplicating the predicate.
+//
+// `info`-severity findings (e.g. `no-baseline` from content-drift on fresh
+// clones) are surfaced for operator visibility but do NOT block CI. Without
+// this carve-out, every customer's first audit after this feature lands would
+// fail their build pipeline. `warn` and `error` still exit 1.
 export function exitCodeForFindings(findings: AuditFinding[]): 0 | 1 {
-  return findings.length === 0 ? 0 : 1;
+  const actionable = findings.filter((f) => f.severity !== "info");
+  return actionable.length === 0 ? 0 : 1;
 }
 
 function groupFindings(
