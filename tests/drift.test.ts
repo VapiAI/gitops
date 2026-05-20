@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   checkPronunciationDictDrop,
   hashPayload,
+  upsertState,
 } from "../src/state-serialize.ts";
+import type { ResourceState } from "../src/types.ts";
 
 // Stack G — drift unit tests.
 // `checkDriftForUpdate` itself fires GET against the Vapi platform; a unit
@@ -658,4 +660,99 @@ test("canonicalizeForHash: strips server-managed fields (id, orgId, createdAt, u
   assert.equal(result.createdAt, undefined);
   assert.equal(result.updatedAt, undefined);
   assert.equal(result.name, "Foo");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Section J (added 2026-05-20): classifier short-circuit state preservation.
+//
+// Regression coverage for a bug introduced by the drift-direction-classifier
+// PR (#38) and caught by the E2E both-diverged smoke test on mudflap-iform-test:
+//
+// pull.ts `newStateSection` starts EMPTY for a full pull (line 769). The
+// classifier short-circuit branches (`dashboard-ahead`, `local-ahead`,
+// `both-diverged`) previously called `upsertState(newStateSection, id, { uuid })`
+// against this empty section — dropping `lastPulledHash` and `lastPulledAt`
+// from state. The `both-diverged` branch was worse: it called no upsert at all,
+// so the entry vanished entirely.
+//
+// After the per-type loop, `state[type] = newStateSection` (line 1040)
+// persists the loss. The operator's NEXT pull sees no baseline → `no-baseline`
+// classification → the classifier can never detect drift on this resource
+// again until something writes a fresh baseline.
+//
+// These tests pin the upsertState patch SHAPE that the fix uses, plus the
+// bare-{ uuid }-only failure mode so a future contributor can't silently
+// revert without breaking a test.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("classifier short-circuit: full patch (uuid + lastPulledHash + lastPulledAt) survives empty newStateSection", () => {
+  const newStateSection: Record<string, ResourceState> = {};
+  upsertState(newStateSection, "r1", {
+    uuid: "u1",
+    lastPulledHash: "h-baseline",
+    lastPulledAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.equal(newStateSection.r1?.uuid, "u1");
+  assert.equal(
+    newStateSection.r1?.lastPulledHash,
+    "h-baseline",
+    "dashboard-ahead / local-ahead branches MUST pass lastPulledHash through; otherwise next pull sees no-baseline",
+  );
+  assert.equal(newStateSection.r1?.lastPulledAt, "2026-01-01T00:00:00.000Z");
+});
+
+test("classifier short-circuit: bare { uuid }-only patch DROPS lastPulledHash on empty section (regression hazard)", () => {
+  // Pins the failure mode — if a future contributor reverts to passing only
+  // { uuid: resource.id } to upsertState (the shape the original PR shipped
+  // with), this test catches it. The fix is in the CALLER (pull.ts classifier
+  // branches); upsertState's merge semantics are correct as-is.
+  const newStateSection: Record<string, ResourceState> = {};
+  upsertState(newStateSection, "r1", { uuid: "u1" });
+  assert.equal(newStateSection.r1?.uuid, "u1");
+  assert.equal(
+    newStateSection.r1?.lastPulledHash,
+    undefined,
+    "bare patch must NOT magically materialize lastPulledHash — fix lives in the caller's patch",
+  );
+});
+
+test("classifier both-diverged: direct assignment from existing state preserves all fields verbatim", () => {
+  // both-diverged path does NOT call upsertState (resolveBothDivergedResources
+  // takes over post-loop, with per-resolve-mode state mutation). Without the
+  // preservation assignment in the branch, the entry vanishes from
+  // newStateSection. With it, the operator can re-run pull with --resolve and
+  // still have the baseline to compare against.
+  const existingState: Record<string, ResourceState> = {
+    r1: {
+      uuid: "u1",
+      lastPulledHash: "h-baseline",
+      lastPulledAt: "2026-01-01T00:00:00.000Z",
+    },
+  };
+  const newStateSection: Record<string, ResourceState> = {};
+  const existing = existingState.r1;
+  if (existing) {
+    newStateSection.r1 = existing;
+  }
+  assert.deepEqual(
+    newStateSection.r1,
+    existing,
+    "both-diverged branch MUST preserve the existing entry verbatim; saveState writes newStateSection over state[type] at end of loop",
+  );
+});
+
+test("upsertState merge: pre-existing entry + new patch produces union, NOT replacement", () => {
+  // Sanity-check that upsertState's documented merge semantic still holds.
+  // If a future refactor switches to replacement semantics, the classifier
+  // short-circuits would lose lastPulledHash on subsequent calls.
+  const section: Record<string, ResourceState> = {
+    r1: {
+      uuid: "u1",
+      lastPulledHash: "h-old",
+      lastPulledAt: "2026-01-01T00:00:00.000Z",
+    },
+  };
+  upsertState(section, "r1", { uuid: "u1", lastPulledAt: "2026-02-01T00:00:00.000Z" });
+  assert.equal(section.r1?.lastPulledHash, "h-old", "upsertState must preserve fields not in the patch");
+  assert.equal(section.r1?.lastPulledAt, "2026-02-01T00:00:00.000Z", "upsertState must overwrite fields in the patch");
 });

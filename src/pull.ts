@@ -852,6 +852,16 @@ export async function pullResourceType(
           });
           if (driftCounts) driftCounts[direction]++;
 
+          // STATE-PRESERVATION INVARIANT: classifier short-circuit branches
+          // MUST carry `lastPulledHash` (and `lastPulledAt`) forward into
+          // `newStateSection`. `newStateSection` starts EMPTY for a full pull
+          // (pull.ts:769); a bare `upsertState(..., { uuid })` merges against
+          // `undefined`, producing `{ uuid }`-only — dropping the baseline.
+          // Then `state[type] = newStateSection` at end-of-loop persists the
+          // loss. Symptom: next pull sees no baseline → `no-baseline`, the
+          // classifier can never detect drift on this resource again until
+          // something else writes a fresh baseline. The both-diverged branch
+          // skipped `upsertState` entirely, dropping the entry outright.
           if (direction === "both-diverged") {
             bothDiverged?.push({
               resourceType,
@@ -861,6 +871,14 @@ export async function pullResourceType(
               platformHash,
               lastPulledHash,
             });
+            // Preserve the existing entry verbatim. `resolveBothDivergedResources`
+            // will overwrite it with the resolve-mode-appropriate hash after the
+            // per-type loop completes; if the operator doesn't pass --resolve, we
+            // want the baseline still intact so the next pull can see drift.
+            const existing = state[resourceType][resourceId];
+            if (existing) {
+              newStateSection[resourceId] = existing;
+            }
             skipped++;
             continue;
           }
@@ -869,7 +887,11 @@ export async function pullResourceType(
             console.log(
               `   ✏️  ${resourceId} (locally modified, preserving) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            upsertState(newStateSection, resourceId, {
+              uuid: resource.id,
+              lastPulledHash,
+              lastPulledAt: stateEntry?.lastPulledAt,
+            });
             skipped++;
             continue;
           }
@@ -881,7 +903,11 @@ export async function pullResourceType(
             console.log(
               `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            upsertState(newStateSection, resourceId, {
+              uuid: resource.id,
+              lastPulledHash,
+              lastPulledAt: stateEntry?.lastPulledAt,
+            });
             skipped++;
             continue;
           }
