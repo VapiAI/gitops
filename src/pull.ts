@@ -392,7 +392,7 @@ function buildReverseMap(
 // Reference Resolution (UUID -> resourceId)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveReferencesToResourceIds(
+export function resolveReferencesToResourceIds(
   resource: Record<string, unknown>,
   state: StateFile,
 ): Record<string, unknown> {

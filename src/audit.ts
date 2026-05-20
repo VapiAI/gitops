@@ -10,6 +10,7 @@
 //   5. sibling-base-slug    multiple slugs sharing the same base-slug
 //   6. dashboard-orphan     dashboard UUID not in state (.vapi-ignore suppresses)
 //   7. inline-tools         assistant with non-empty model.tools (use toolIds)
+//   8. content-drift        local vs dashboard vs lastPulledHash direction
 //
 // Designed for dependency injection: state loader, local file lister, remote
 // fetcher, and per-assistant tool reader are all swappable so tests stay
@@ -21,15 +22,19 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
+import { classifyDrift } from "./drift.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
 import {
+  cleanResource,
   fetchAllResources,
   listExistingResourceIds,
+  resolveReferencesToResourceIds,
   type VapiResource,
 } from "./pull.ts";
-import { FOLDER_MAP } from "./resources.ts";
+import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
-import { loadState } from "./state.ts";
+import { hashPayload, loadState } from "./state.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
@@ -45,6 +50,7 @@ export type AuditRule =
   | "sibling-base-slug"
   | "dashboard-orphan"
   | "inline-tools"
+  | "content-drift"
   | "fetch-failed";
 
 export type AuditSeverity = "warn" | "error";
@@ -345,6 +351,76 @@ function checkDashboardOrphans(
   return findings;
 }
 
+function contentDriftSuggestedAction(direction: string): string {
+  if (direction === "dashboard-ahead") {
+    return "run npm run pull to refresh, or push --overwrite to take ownership";
+  }
+  if (direction === "local-ahead") {
+    return "run npm run push to sync up";
+  }
+  if (direction === "both-diverged") {
+    return "run npm run pull --resolve=ours|theirs|fail to resolve";
+  }
+  if (direction === "no-baseline") {
+    return "run npm run pull --bootstrap to seed lastPulledHash baseline";
+  }
+  return "no action needed";
+}
+
+function checkContentDrift(
+  type: ResourceType,
+  state: StateFile,
+  remote: VapiResource[],
+  localIds: string[],
+): AuditFinding[] {
+  const remoteByUuid = new Map(remote.map((r) => [r.id, r]));
+  const credReverse = credentialReverseMap(state);
+  const findings: AuditFinding[] = [];
+
+  for (const resourceId of localIds) {
+    const entry = state[type][resourceId];
+    if (!entry?.lastPulledHash) continue;
+
+    const localHash = hashLocalResource(type, resourceId);
+    if (!localHash) continue;
+
+    const remoteResource = remoteByUuid.get(entry.uuid);
+    if (!remoteResource) continue;
+
+    const cleaned = cleanResource(remoteResource);
+    const resolved = resolveReferencesToResourceIds(cleaned, state);
+    const withCredNames = replaceCredentialRefs(resolved, credReverse);
+    const platformHash = hashPayload(withCredNames);
+    const direction = classifyDrift({
+      localHash,
+      lastPulledHash: entry.lastPulledHash,
+      platformHash,
+    });
+    if (direction === "clean") continue;
+
+    const severity = direction === "both-diverged" ? "error" : "warn";
+    const detail =
+      direction === "local-ahead"
+        ? "local has unpushed edits"
+        : direction === "dashboard-ahead"
+          ? "local diverges from dashboard since last pull"
+          : direction === "both-diverged"
+            ? "3-way conflict between local, dashboard, and last-pulled baseline"
+            : "no lastPulledHash baseline for direction classification";
+
+    findings.push({
+      severity,
+      type,
+      rule: "content-drift",
+      resourceIds: [resourceId],
+      message: `${detail} [${direction}]`,
+      suggestedAction: contentDriftSuggestedAction(direction),
+    });
+  }
+
+  return findings;
+}
+
 async function checkInlineTools(
   state: StateFile,
   readAssistantTools: (resourceId: string) => unknown[] | Promise<unknown[]>,
@@ -434,6 +510,7 @@ export async function runAudit(
       const remoteUuids = new Set(remote.map((r) => r.id));
       findings.push(...checkStateGhosts(type, state, remoteUuids));
       findings.push(...checkDashboardOrphans(type, state, remote));
+      findings.push(...checkContentDrift(type, state, remote, localIds));
     }
 
     findings.push(...checkStateUuidCollisions(type, state));
