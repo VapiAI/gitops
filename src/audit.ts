@@ -22,14 +22,13 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
-import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
+import { credentialReverseMap } from "./credentials.ts";
 import { classifyDrift } from "./drift.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
 import {
-  cleanResource,
+  canonicalizeForHash,
   fetchAllResources,
   listExistingResourceIds,
-  resolveReferencesToResourceIds,
   type VapiResource,
 } from "./pull.ts";
 import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
@@ -387,10 +386,11 @@ function checkContentDrift(
     const remoteResource = remoteByUuid.get(entry.uuid);
     if (!remoteResource) continue;
 
-    const cleaned = cleanResource(remoteResource);
-    const resolved = resolveReferencesToResourceIds(cleaned, state);
-    const withCredNames = replaceCredentialRefs(resolved, credReverse);
-    const platformHash = hashPayload(withCredNames);
+    // canonicalizeForHash centralizes the 3-step pipeline + _platformDefault
+    // mutation so the hash agrees with pull-write's lastPulledHash basis.
+    const platformHash = hashPayload(
+      canonicalizeForHash(remoteResource, state, credReverse),
+    );
     const direction = classifyDrift({
       localHash,
       lastPulledHash: entry.lastPulledHash,

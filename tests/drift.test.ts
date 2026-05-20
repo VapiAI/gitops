@@ -527,3 +527,135 @@ test("checkDriftForUpdate: no-baseline path is unaffected by the new direction l
     globalThis.fetch = originalFetch;
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Section I (added 2026-05-20): canonicalizeForHash invariants.
+//
+// Pins down the symmetric hash basis used by ALL drift hash sites
+// (pull-write, pull-classifier, audit, resolve-both). Any divergence in the
+// pipeline (missing _platformDefault marker, different mutation order, etc.)
+// makes lastPulledHash disagree with the next classifyDrift's localHash and
+// produces permanent phantom `both-diverged` reports that only --overwrite
+// can clear. This is the root cause of the simulation-suite drift in
+// improvements.md and the `_platformDefault` asymmetry surfaced in code
+// review on the drift-direction-classifier PR.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const pullModule = await import("../src/pull.ts");
+const { canonicalizeForHash } = pullModule as {
+  canonicalizeForHash?: (
+    resource: { id: string; orgId?: string | null; [key: string]: unknown },
+    state: Record<string, Record<string, { uuid: string }>>,
+    credReverse: Map<string, string>,
+  ) => Record<string, unknown>;
+};
+
+const emptyState = {
+  tools: {},
+  structuredOutputs: {},
+  assistants: {},
+  squads: {},
+  personalities: {},
+  scenarios: {},
+  simulations: {},
+  simulationSuites: {},
+  evals: {},
+} as unknown as Parameters<NonNullable<typeof canonicalizeForHash>>[1];
+
+const emptyCredReverse = new Map<string, string>();
+
+test("canonicalizeForHash: applies _platformDefault when orgId === null", () => {
+  assert.ok(canonicalizeForHash, "canonicalizeForHash export missing from src/pull.ts");
+  const result = canonicalizeForHash!(
+    { id: "abc", orgId: null, name: "Default Voice" },
+    emptyState,
+    emptyCredReverse,
+  );
+  assert.equal(result._platformDefault, true, "_platformDefault marker must be injected for null orgId");
+});
+
+test("canonicalizeForHash: applies _platformDefault when orgId is undefined", () => {
+  assert.ok(canonicalizeForHash);
+  const result = canonicalizeForHash!(
+    { id: "abc", name: "Default Voice" },
+    emptyState,
+    emptyCredReverse,
+  );
+  assert.equal(result._platformDefault, true);
+});
+
+test("canonicalizeForHash: does NOT apply _platformDefault when orgId is a real org uuid", () => {
+  assert.ok(canonicalizeForHash);
+  const result = canonicalizeForHash!(
+    { id: "abc", orgId: "org-12345", name: "Customer Resource" },
+    emptyState,
+    emptyCredReverse,
+  );
+  assert.equal(
+    result._platformDefault,
+    undefined,
+    "customer-owned resources must NOT receive the _platformDefault marker",
+  );
+});
+
+test("canonicalizeForHash: deterministic — same input produces same hash", () => {
+  assert.ok(canonicalizeForHash);
+  const input = {
+    id: "abc",
+    orgId: "org-12345",
+    name: "Foo",
+    voice: { provider: "11labs", voiceId: "v1" },
+    model: { provider: "openai", model: "gpt-4" },
+  };
+  const a = hashPayload(canonicalizeForHash!(input, emptyState, emptyCredReverse));
+  const b = hashPayload(canonicalizeForHash!(input, emptyState, emptyCredReverse));
+  assert.equal(a, b, "canonicalizeForHash must be deterministic");
+});
+
+test("canonicalizeForHash: platform-default vs customer-owned produce DIFFERENT hashes for otherwise-identical content", () => {
+  // This is the M1 regression test from the code review. Pre-fix, the
+  // classifier+audit hash sites omitted the _platformDefault marker while
+  // pull-write injected it before hashing — a 1-bit difference that made
+  // every platform-default resource look like permanent dashboard-ahead.
+  // Post-fix, BOTH sites apply the marker via this helper.
+  assert.ok(canonicalizeForHash);
+  const platformDefaultHash = hashPayload(
+    canonicalizeForHash!(
+      { id: "abc", orgId: null, name: "Foo" },
+      emptyState,
+      emptyCredReverse,
+    ),
+  );
+  const customerOwnedHash = hashPayload(
+    canonicalizeForHash!(
+      { id: "abc", orgId: "org-12345", name: "Foo" },
+      emptyState,
+      emptyCredReverse,
+    ),
+  );
+  assert.notEqual(
+    platformDefaultHash,
+    customerOwnedHash,
+    "platform-default marker must produce a distinct hash from same content without it",
+  );
+});
+
+test("canonicalizeForHash: strips server-managed fields (id, orgId, createdAt, updatedAt)", () => {
+  assert.ok(canonicalizeForHash);
+  const result = canonicalizeForHash!(
+    {
+      id: "abc",
+      orgId: "org-12345",
+      createdAt: "2026-01-01",
+      updatedAt: "2026-05-19",
+      name: "Foo",
+    },
+    emptyState,
+    emptyCredReverse,
+  );
+  assert.equal(result.id, undefined);
+  assert.equal(result.orgId, undefined);
+  assert.equal(result.createdAt, undefined);
+  assert.equal(result.updatedAt, undefined);
+  assert.equal(result.name, "Foo");
+});

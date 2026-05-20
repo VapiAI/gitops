@@ -504,6 +504,46 @@ export function resolveReferencesToResourceIds(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Canonicalization for content-hashing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Single source of truth for the canonical hash basis of a platform resource.
+ *
+ * Encodes the full pipeline: `cleanResource → resolveReferencesToResourceIds
+ * → replaceCredentialRefs → _platformDefault marker injection`.
+ *
+ * ALL hash sites MUST use this helper. The classifier (pull.ts), the audit
+ * (audit.ts/checkContentDrift), and the pull-write fallback all need the
+ * same transformation applied in the same order — any divergence (a missing
+ * step, a different mutation order) makes the resulting `lastPulledHash`
+ * disagree with the next read's `localHash`, producing permanent phantom
+ * `both-diverged` reports that only `--overwrite` can clear.
+ *
+ * Note: this is the *pre-write* canonical form (in-memory). At write sites,
+ * `lastPulledHash` should still be sourced from `hashLocalResource(...)` after
+ * the file is on disk, because YAML round-trip / MD frontmatter serialization
+ * is not guaranteed to be identity-preserving. This helper is the correct
+ * fallback when no file write happened (bootstrap mode) or when reading a
+ * platform payload for classifier/audit purposes.
+ */
+export function canonicalizeForHash(
+  resource: VapiResource,
+  state: StateFile,
+  credReverse: Map<string, string>,
+): Record<string, unknown> {
+  const cleaned = cleanResource(resource);
+  const resolved = resolveReferencesToResourceIds(cleaned, state);
+  const withCredNames = replaceCredentialRefs(resolved, credReverse);
+  const isPlatformDefault =
+    resource.orgId === null || resource.orgId === undefined;
+  if (isPlatformDefault) {
+    withCredNames._platformDefault = true;
+  }
+  return withCredNames;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // File Writing
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -798,16 +838,13 @@ export async function pullResourceType(
       if (localFile && lastPulledHash) {
         const localHash = hashLocalResource(resourceType, resourceId);
         if (localHash) {
-          const cleanedForHash = cleanResource(resource);
-          const resolvedForHash = resolveReferencesToResourceIds(
-            cleanedForHash,
-            state,
+          // Use canonicalizeForHash so platform-default mutation (_platformDefault)
+          // and the 3-step pipeline are applied identically across pull-write,
+          // classifier, audit, and resolveBothDiverged sites. Any asymmetry here
+          // makes every drifted file look `both-diverged` even when content matches.
+          const platformHash = hashPayload(
+            canonicalizeForHash(resource, state, credReverse),
           );
-          const withCredNamesForHash = replaceCredentialRefs(
-            resolvedForHash,
-            credReverse,
-          );
-          const platformHash = hashPayload(withCredNamesForHash);
           const direction = classifyDrift({
             localHash,
             lastPulledHash,
@@ -938,15 +975,10 @@ export async function pullResourceType(
     const isPlatformDefault =
       resource.orgId === null || resource.orgId === undefined;
 
-    // Clean, resolve resource references, and replace credential UUIDs with names
-    const cleaned = cleanResource(resource);
-    const resolved = resolveReferencesToResourceIds(cleaned, state);
-    const withCredNames = replaceCredentialRefs(resolved, credReverse);
-
-    // Mark platform defaults so apply skips them
-    if (isPlatformDefault) {
-      withCredNames._platformDefault = true;
-    }
+    // Single canonicalization for both the file write AND the lastPulledHash
+    // fallback. Encodes the 3-step pipeline (cleanResource → resolve refs →
+    // replace credential UUIDs) plus the _platformDefault marker.
+    const withCredNames = canonicalizeForHash(resource, state, credReverse);
 
     if (bootstrap) {
       const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
@@ -971,12 +1003,23 @@ export async function pullResourceType(
     else updated++;
 
     // Update state with new content hash + timestamp.
-    // Hashing the resolved-with-credentials payload (the form we will save
-    // to disk) keeps `lastPulledHash` aligned with the source-of-truth diff
-    // basis used by drift detection.
+    //
+    // CRITICAL INVARIANT: `lastPulledHash` MUST equal what `hashLocalResource`
+    // will return when classifyDrift next inspects this file. The way to
+    // guarantee that by construction is to hash the FILE AS WRITTEN TO DISK,
+    // not the in-memory payload before YAML/MD serialization. The two diverge
+    // for any resource whose YAML round-trip (key order, scalar formatting) or
+    // .md frontmatter split/merge isn't identity-preserving — historically the
+    // root cause of the simulation-suite phantom-drift logged in
+    // improvements.md and the `_platformDefault` marker asymmetry surfaced by
+    // code review on the drift-direction-classifier PR.
+    //
+    // Bootstrap mode writes no file; fall back to the in-memory canonical form.
     upsertState(newStateSection, resourceId, {
       uuid: resource.id,
-      lastPulledHash: hashPayload(withCredNames),
+      lastPulledHash:
+        hashLocalResource(resourceType, resourceId) ??
+        hashPayload(withCredNames),
       lastPulledAt: new Date().toISOString(),
     });
   }
@@ -1039,8 +1082,12 @@ async function resolveBothDivergedResources(options: {
     const section = state[entry.resourceType];
     if (resolveMode === "ours") {
       console.log(
-        `   📝 ${entry.resourceId} (both diverged — resolving with --resolve=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
+        `   ⬆️  ${entry.resourceId} (both diverged — resolving with --resolve=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
       );
+      // No write — local file is preserved. lastPulledHash = entry.platformHash
+      // marks "the last-pulled baseline was the platform state at resolve time,
+      // even though we kept local," so the next classifyDrift correctly reports
+      // `local-ahead` instead of re-flagging `both-diverged`.
       upsertState(section, entry.resourceId, {
         uuid: entry.resource.id,
         lastPulledHash: entry.platformHash,
@@ -1049,14 +1096,7 @@ async function resolveBothDivergedResources(options: {
       continue;
     }
 
-    const cleaned = cleanResource(entry.resource);
-    const resolved = resolveReferencesToResourceIds(cleaned, state);
-    const withCredNames = replaceCredentialRefs(resolved, credReverse);
-    const isPlatformDefault =
-      entry.resource.orgId === null || entry.resource.orgId === undefined;
-    if (isPlatformDefault) {
-      withCredNames._platformDefault = true;
-    }
+    const withCredNames = canonicalizeForHash(entry.resource, state, credReverse);
 
     await writeResourceFile(
       entry.resourceType,
@@ -1066,9 +1106,12 @@ async function resolveBothDivergedResources(options: {
     console.log(
       `   ⬇️  ${entry.resourceId} (both diverged — resolving with --resolve=theirs, overwriting local with platform) ${formatDriftLabel("both-diverged")}`,
     );
+    // Hash the post-write disk form (same invariant as the normal pull-write path).
     upsertState(section, entry.resourceId, {
       uuid: entry.resource.id,
-      lastPulledHash: entry.platformHash,
+      lastPulledHash:
+        hashLocalResource(entry.resourceType, entry.resourceId) ??
+        hashPayload(withCredNames),
       lastPulledAt: new Date().toISOString(),
     });
   }
