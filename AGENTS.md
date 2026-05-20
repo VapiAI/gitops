@@ -92,6 +92,15 @@ npm run apply -- <org> <path-to-file> # single-file apply (same safety, scoped d
 
 Runs the engine's local validators against every YAML/MD file in the org without any network call. Catches shape errors (missing required fields, wrong types, stale tool references) before they burn a deploy. **Run before every `apply`.**
 
+### `npm run pull -- <org>` — refresh from dashboard (default: plain pull)
+
+**Default to plain pull, NOT --force.** Plain `npm run pull -- <org>` shows:
+- Per-resource direction labels (dashboard-ahead / local-ahead / both-diverged / clean)
+- End-of-pull summary with counts per direction
+- A hard gate (`--resolve` flag) on 3-way conflicts before they silently lose data
+
+`--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
+
 ### `npm run push -- <org>` — raw push, no pre-pull
 
 Skips the merge pass. Only use when (a) you literally just ran `pull` and (b) you're certain no one has touched the dashboard since. In a multi-developer environment or when dashboard editors are in play, default to `apply` instead. Stale local state can clobber recent dashboard edits or PATCH against UUIDs that no longer exist.
