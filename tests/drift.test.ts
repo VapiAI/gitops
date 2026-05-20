@@ -1,12 +1,77 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkPronunciationDictDrop } from "../src/state-serialize.ts";
+import {
+  checkPronunciationDictDrop,
+  hashPayload,
+} from "../src/state-serialize.ts";
 
 // Stack G — drift unit tests.
 // `checkDriftForUpdate` itself fires GET against the Vapi platform; a unit
 // test for that path requires either a fake fetch or live API access. Manual
 // integration coverage is the right place. Here we cover the
 // pronunciation-dict-drop detector, which is pure-data.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Section H (added 2026-05-19): three-way drift-direction classifier coverage.
+//
+// Plan: ~/.pi/plans/pull-drift-direction-classifier-2026-05-19T2235Z.md
+//
+// In-scope for this test file:
+//   1. `classifyDrift` truth table — every cell of the 3-hash decision matrix,
+//      including the both-diverged edge where local == platform but both
+//      diverge from the baseline.
+//   2. `formatDriftLabel` — non-empty + operator-actionable phrasing per
+//      direction. The exact wording is the implementer's choice; the contract
+//      is that the operator can read the label and know which command to run.
+//   3. `checkDriftForUpdate` push-side direction-label surfacing — light
+//      coverage via global.fetch stub (no engine refactor needed).
+//
+// Out of scope here (validated via the plan's smoke test, NOT by these
+// adjacent specs):
+//   - `pull.ts` direction labeling at the ✏️ log sites — requires a fixture
+//     filesystem AND a mock of the platform list-fetch pipeline; properly an
+//     integration test, not a unit test.
+//   - `pull.ts --resolve=ours|theirs|fail` gate behavior — same reason
+//     (state mutation + filesystem writes + argv parsing all interact).
+//   - End-of-pull drift summary block — cosmetic; the truth is in the
+//     direction counts, which `classifyDrift` already pins down.
+//   - `--force` warning + 2s grace period — pure UX; covered by the smoke test.
+//   - `audit.ts` default-on content-drift — same shape as the existing
+//     audit.test.ts fixtures BUT also needs a platform-fetch stub; left to a
+//     follow-up that extends audit.test.ts's DI surface to inject a
+//     platform-payload-fetcher (parallel to the existing `stateLoader` /
+//     `listLocalIds` injection points).
+//   - `AGENTS.md` doc commit — no code, nothing to test.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `src/drift.ts` transits `src/config.ts`, which asserts argv[2] and
+// VAPI_TOKEN at module load. Prime both BEFORE the dynamic import — same
+// trick as tests/audit.test.ts / tests/validate.test.ts. The static imports
+// above (state-serialize.ts) do NOT transit config.ts, so they remain.
+process.argv = ["node", "test", "test-fixture-org"];
+process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
+
+const driftModule = await import("../src/drift.ts");
+const { classifyDrift, formatDriftLabel, checkDriftForUpdate } = driftModule as {
+  classifyDrift?: (input: {
+    localHash: string;
+    lastPulledHash?: string;
+    platformHash: string;
+  }) => string;
+  formatDriftLabel?: (direction: string) => string;
+  checkDriftForUpdate?: (options: {
+    endpoint: string;
+    resourceLabel: string;
+    resourceId: string;
+    state: { uuid: string; lastPulledHash?: string };
+    overwrite: boolean;
+  }) => Promise<{
+    ok: boolean;
+    reason: string;
+    message?: string;
+    platformHash?: string;
+  }>;
+};
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {
   const prior = {
@@ -156,4 +221,309 @@ test("checkPronunciationDictDrop: detects either shape when prior has both someh
   const msg = checkPronunciationDictDrop("hybrid-agent", prior, current);
   assert.ok(msg, "expected a warning when locators dropped");
   assert.match(msg!, /pronunciationDictionaryLocators/);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Section H — `classifyDrift` truth table.
+//
+// Three hashes → five direction outcomes. Each test exercises one row of the
+// decision matrix described in the plan. Where the plan is silent, the test
+// pins down the contract.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Fixture hashes — 16 hex chars so they are visually distinguishable in
+// failure output. Real hashes are sha256 (64 hex) but the helper is
+// content-agnostic; any string equality / inequality drives the classifier.
+const H_BASE = "baseline00000000";
+const H_LOCAL = "localXXXXXXXXXXX";
+const H_PLATFORM = "platformYYYYYYYY";
+const H_CONVERGED = "converged0000000"; // local == platform, ≠ baseline
+
+test("classifyDrift: clean — local == lastPulled == platform", () => {
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_BASE,
+    lastPulledHash: H_BASE,
+    platformHash: H_BASE,
+  });
+  assert.equal(direction, "clean");
+});
+
+test("classifyDrift: dashboard-ahead — local == lastPulled, platform diverged", () => {
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_BASE,
+    lastPulledHash: H_BASE,
+    platformHash: H_PLATFORM,
+  });
+  assert.equal(direction, "dashboard-ahead");
+});
+
+test("classifyDrift: local-ahead — local diverged, platform == lastPulled", () => {
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_LOCAL,
+    lastPulledHash: H_BASE,
+    platformHash: H_BASE,
+  });
+  assert.equal(direction, "local-ahead");
+});
+
+test("classifyDrift: both-diverged — local, platform, lastPulled all differ", () => {
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_LOCAL,
+    lastPulledHash: H_BASE,
+    platformHash: H_PLATFORM,
+  });
+  assert.equal(direction, "both-diverged");
+});
+
+test("classifyDrift: both-diverged edge — local == platform but both diverged from baseline", () => {
+  // Real edge: two independent edits happen to converge on the same content
+  // (e.g. both sides corrected the same typo). The classifier must still
+  // report both-diverged — the baseline is what the operator pulled, and
+  // BOTH sides have moved past it. Treating this as `clean` would lose the
+  // signal that the operator's state pointer is stale.
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_CONVERGED,
+    lastPulledHash: H_BASE,
+    platformHash: H_CONVERGED,
+  });
+  assert.equal(direction, "both-diverged");
+});
+
+test("classifyDrift: no-baseline — lastPulledHash is undefined", () => {
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_LOCAL,
+    lastPulledHash: undefined,
+    platformHash: H_PLATFORM,
+  });
+  assert.equal(direction, "no-baseline");
+});
+
+test("classifyDrift: no-baseline — lastPulledHash is empty string (pinned: treated as no baseline)", () => {
+  // Contract decision: the plan's reference implementation uses
+  // `if (!lastPulledHash) return 'no-baseline'`. An empty string is falsy in
+  // JS and is not a meaningful sha256 hash, so it is treated the same as
+  // `undefined`. If a future implementer wants to distinguish "" from
+  // `undefined`, this test will fail and the contract should be revisited
+  // deliberately (not silently).
+  assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
+  const direction = classifyDrift!({
+    localHash: H_LOCAL,
+    lastPulledHash: "",
+    platformHash: H_PLATFORM,
+  });
+  assert.equal(direction, "no-baseline");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Section H — `formatDriftLabel` operator-actionable phrasing.
+//
+// We do NOT pin the exact wording of each label (the implementer can word
+// them naturally) — we pin the *operator action* each label must surface:
+// dashboard-ahead points at `pull` (or the override path), local-ahead points
+// at `push`, both-diverged points at the `--resolve` gate, no-baseline
+// points at bootstrap, clean is silent. If a label loses its actionable
+// keyword, the operator can't follow it without reading the source.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const DIRECTIONS = [
+  "clean",
+  "dashboard-ahead",
+  "local-ahead",
+  "both-diverged",
+  "no-baseline",
+] as const;
+
+test("formatDriftLabel: every direction returns a non-empty string", () => {
+  assert.ok(
+    formatDriftLabel,
+    "formatDriftLabel export missing from src/drift.ts",
+  );
+  for (const direction of DIRECTIONS) {
+    const label = formatDriftLabel!(direction);
+    assert.equal(typeof label, "string", `${direction} label is not a string`);
+    assert.ok(label.length > 0, `${direction} label is empty`);
+  }
+});
+
+test("formatDriftLabel: dashboard-ahead label points operator at pull / overwrite", () => {
+  assert.ok(
+    formatDriftLabel,
+    "formatDriftLabel export missing from src/drift.ts",
+  );
+  const label = formatDriftLabel!("dashboard-ahead");
+  // Should mention at least one of the actionable verbs/flags so the
+  // operator can act on the label without reading the source.
+  assert.match(
+    label,
+    /pull|overwrite|--force/i,
+    `dashboard-ahead label should mention pull/overwrite/--force, got: ${label}`,
+  );
+});
+
+test("formatDriftLabel: local-ahead label points operator at push", () => {
+  assert.ok(
+    formatDriftLabel,
+    "formatDriftLabel export missing from src/drift.ts",
+  );
+  const label = formatDriftLabel!("local-ahead");
+  assert.match(
+    label,
+    /push/i,
+    `local-ahead label should mention push, got: ${label}`,
+  );
+});
+
+test("formatDriftLabel: both-diverged label points operator at --resolve or names the conflict", () => {
+  assert.ok(
+    formatDriftLabel,
+    "formatDriftLabel export missing from src/drift.ts",
+  );
+  const label = formatDriftLabel!("both-diverged");
+  assert.match(
+    label,
+    /--resolve|conflict/i,
+    `both-diverged label should mention --resolve or conflict, got: ${label}`,
+  );
+});
+
+test("formatDriftLabel: no-baseline label points operator at bootstrap / pull / baseline", () => {
+  assert.ok(
+    formatDriftLabel,
+    "formatDriftLabel export missing from src/drift.ts",
+  );
+  const label = formatDriftLabel!("no-baseline");
+  assert.match(
+    label,
+    /bootstrap|pull|baseline/i,
+    `no-baseline label should mention bootstrap/pull/baseline, got: ${label}`,
+  );
+});
+
+test("formatDriftLabel: clean label is benign (no error/warning markers)", () => {
+  // The clean label should not include error symbols (❌) or warning
+  // symbols (⚠️) — these labels are appended to per-resource log lines and
+  // a clean line with a warning glyph is misleading.
+  assert.ok(
+    formatDriftLabel,
+    "formatDriftLabel export missing from src/drift.ts",
+  );
+  const label = formatDriftLabel!("clean");
+  assert.doesNotMatch(
+    label,
+    /❌|⚠/u,
+    `clean label should not carry error/warning glyphs, got: ${label}`,
+  );
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Section H — `checkDriftForUpdate` direction-aware messaging (light cov).
+//
+// Per the plan (item 6), the push-side drift-blocked message should include
+// a bracketed direction label (e.g. `[dashboard-ahead]`). We stub global
+// fetch — the function calls `fetch(`${VAPI_BASE_URL}${endpoint}`, ...)`
+// and parses the JSON — so no engine refactor or live API is needed.
+//
+// Caveat for the implementer: `checkDriftForUpdate` currently only has
+// `platformHash` and `state.lastPulledHash` in scope. `classifyDrift`
+// requires `localHash` too. Three paths the implementer can take:
+//   (a) thread `localHash` through `checkDriftForUpdate`'s options (caller
+//       change), then call `classifyDrift`;
+//   (b) read the local file inside `checkDriftForUpdate` and hash it
+//       (adds I/O but keeps the API the same);
+//   (c) hardcode `[dashboard-ahead]` for the push case (push-side drift IS
+//       always `dashboard-ahead` relative to baseline when local hasn't
+//       moved; it becomes `both-diverged` if local also changed, which the
+//       push-side caller may or may not care about).
+//
+// This test does NOT pin which approach is taken — it only asserts that
+// SOME bracketed direction label appears in the drift-blocked message. If
+// the implementer picks (a) or (b) and the regex resolves to a specific
+// direction, that is also fine.
+// ═════════════════════════════════════════════════════════════════════════════
+
+function makeFetchStub(remotePayload: unknown, status = 200) {
+  // Minimal Response-like shape for what checkDriftForUpdate needs:
+  //   `.status`, `.ok`, and `.json()` (only called when 2xx).
+  return async (_input: unknown, _init?: unknown): Promise<Response> => {
+    return {
+      status,
+      ok: status >= 200 && status < 300,
+      json: async () => remotePayload,
+      text: async () => JSON.stringify(remotePayload),
+    } as unknown as Response;
+  };
+}
+
+test("checkDriftForUpdate: drift-blocked message includes a bracketed direction label", async () => {
+  assert.ok(
+    checkDriftForUpdate,
+    "checkDriftForUpdate export missing from src/drift.ts",
+  );
+
+  // Build a remote payload whose hash we can predict.
+  // `stripServerFields` (private) removes id/orgId/etc — our fixture has
+  // none of them, so hashPayload(remote) == platformHash inside the engine.
+  const remote = { name: "intake-bot", systemPrompt: "hello" };
+  const platformHash = hashPayload(remote);
+  // Different baseline hash → drift detected.
+  const lastPulledHash = `${platformHash}-stale`;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = makeFetchStub(remote) as typeof globalThis.fetch;
+  try {
+    const result = await checkDriftForUpdate!({
+      endpoint: "/assistant/test-uuid",
+      resourceLabel: "assistants",
+      resourceId: "intake-bot",
+      state: { uuid: "test-uuid", lastPulledHash },
+      overwrite: false,
+    });
+    assert.equal(result.ok, false, "drift should be blocked");
+    assert.equal(result.reason, "drift-blocked");
+    assert.ok(result.message, "drift-blocked must carry a message");
+    assert.match(
+      result.message!,
+      /\[(dashboard-ahead|local-ahead|both-diverged|no-baseline|clean)\]/,
+      `drift-blocked message should contain a bracketed direction label, got: ${result.message}`,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("checkDriftForUpdate: no-baseline path is unaffected by the new direction label", async () => {
+  // Regression guard — when there's no lastPulledHash, the function returns
+  // early without fetching. The new direction-label work should not break
+  // the existing no-baseline contract.
+  assert.ok(
+    checkDriftForUpdate,
+    "checkDriftForUpdate export missing from src/drift.ts",
+  );
+
+  let fetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    throw new Error("fetch should not be called when lastPulledHash absent");
+  }) as typeof globalThis.fetch;
+  try {
+    const result = await checkDriftForUpdate!({
+      endpoint: "/assistant/test-uuid",
+      resourceLabel: "assistants",
+      resourceId: "new-bot",
+      state: { uuid: "test-uuid" }, // no lastPulledHash
+      overwrite: false,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, "no-baseline");
+    assert.equal(fetchCalled, false, "fetch must not fire without a baseline");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
