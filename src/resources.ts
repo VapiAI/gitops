@@ -1,8 +1,9 @@
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
 import { dirname, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { hashPayload } from "./state-serialize.ts";
 import type { ResourceFile, ResourceType } from "./types.ts";
 
 // Options bag for the load functions. `ignorePatterns` is the symmetric
@@ -81,6 +82,68 @@ function parseFrontmatter(content: string): {
   const config = parseYaml(yamlContent) as Record<string, unknown>;
 
   return { config, body: body.trim() };
+}
+
+function parseResourceDataFromFile(filePath: string): Record<string, unknown> {
+  const ext = extname(filePath);
+
+  if (ext === ".md") {
+    const content = readFileSync(filePath, "utf-8");
+    const { config, body } = parseFrontmatter(content);
+
+    if (body) {
+      const model = (config.model as Record<string, unknown>) || {};
+      const existingMessages = Array.isArray(model.messages)
+        ? model.messages
+        : [];
+      model.messages = [
+        { role: "system", content: body },
+        ...existingMessages.filter(
+          (m: { role?: string }) => m.role !== "system",
+        ),
+      ];
+      config.model = model;
+    }
+
+    return config;
+  }
+
+  const content = readFileSync(filePath, "utf-8");
+  const data = parseYaml(content) as Record<string, unknown>;
+  if (data === null || data === undefined) {
+    throw new Error(`Empty or invalid YAML in ${filePath}`);
+  }
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new Error(`YAML must be an object in ${filePath}`);
+  }
+  return data;
+}
+
+function findLocalResourceFile(
+  type: ResourceType,
+  resourceId: string,
+): string | undefined {
+  const dir = join(RESOURCES_DIR, FOLDER_MAP[type]);
+  for (const ext of VALID_EXTENSIONS) {
+    if (ext === ".ts") continue;
+    const filePath = join(dir, `${resourceId}${ext}`);
+    if (existsSync(filePath)) return filePath;
+  }
+  return undefined;
+}
+
+/** Stable content hash of a local resource file (same basis as lastPulledHash). */
+export function hashLocalResource(
+  type: ResourceType,
+  resourceId: string,
+): string | null {
+  const filePath = findLocalResourceFile(type, resourceId);
+  if (!filePath) return null;
+  try {
+    return hashPayload(parseResourceDataFromFile(filePath));
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -17,10 +17,15 @@ import {
 } from "./config.ts";
 import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
 import {
+  classifyDrift,
+  formatDriftLabel,
+  type DriftDirection,
+} from "./drift.ts";
+import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
-import { FOLDER_MAP } from "./resources.ts";
+import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
@@ -604,11 +609,62 @@ export interface PullStats {
   skipped: number;
 }
 
+export type DriftResolveMode = "ours" | "theirs" | "fail";
+
+export interface BothDivergedResource {
+  resourceType: ResourceType;
+  resourceId: string;
+  resource: VapiResource;
+  localHash: string;
+  platformHash: string;
+  lastPulledHash: string;
+}
+
+export type DriftDirectionCounts = Record<DriftDirection, number>;
+
+function emptyDriftCounts(): DriftDirectionCounts {
+  return {
+    clean: 0,
+    "dashboard-ahead": 0,
+    "local-ahead": 0,
+    "both-diverged": 0,
+    "no-baseline": 0,
+  };
+}
+
+function parseResolveMode(explicit?: DriftResolveMode): DriftResolveMode | undefined {
+  if (explicit) return explicit;
+  const arg = process.argv.find((a) => a.startsWith("--resolve="));
+  if (!arg) return undefined;
+  const mode = arg.slice("--resolve=".length);
+  if (mode === "ours" || mode === "theirs" || mode === "fail") return mode;
+  throw new Error(
+    `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail`,
+  );
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findLocalResourcePath(
+  folderPath: string,
+  resourceId: string,
+): string | undefined {
+  const dir = join(RESOURCES_DIR, folderPath);
+  return [
+    join(dir, `${resourceId}.md`),
+    join(dir, `${resourceId}.yml`),
+    join(dir, `${resourceId}.yaml`),
+  ].find((p) => existsSync(p));
+}
+
 export interface PullOptions {
   force?: boolean;
   bootstrap?: boolean;
   typeFilter?: ResourceType[];
   resourceIds?: string[];
+  resolveMode?: DriftResolveMode;
 }
 
 export interface PullResult {
@@ -626,9 +682,18 @@ export async function pullResourceType(
     force?: boolean;
     bootstrap?: boolean;
     resourceIds?: string[];
+    driftCounts?: DriftDirectionCounts;
+    bothDiverged?: BothDivergedResource[];
   } = {},
 ): Promise<PullStats> {
-  const { changedFiles, force, bootstrap, resourceIds } = options;
+  const {
+    changedFiles,
+    force,
+    bootstrap,
+    resourceIds,
+    driftCounts,
+    bothDiverged,
+  } = options;
   console.log(`\n📥 Pulling ${resourceType}...`);
 
   const allResources = (await fetchAllResources(resourceType)) ?? [];
@@ -721,8 +786,75 @@ export async function pullResourceType(
       }
     }
 
+    let skipLegacyPreserveChecks = false;
+
+    // Hash-based drift direction when a lastPulledHash baseline exists.
+    if (!bootstrap && !force) {
+      const stateEntry =
+        newStateSection[resourceId] ?? state[resourceType][resourceId];
+      const lastPulledHash = stateEntry?.lastPulledHash;
+      const localFile = findLocalResourcePath(folderPath, resourceId);
+
+      if (localFile && lastPulledHash) {
+        const localHash = hashLocalResource(resourceType, resourceId);
+        if (localHash) {
+          const cleanedForHash = cleanResource(resource);
+          const resolvedForHash = resolveReferencesToResourceIds(
+            cleanedForHash,
+            state,
+          );
+          const withCredNamesForHash = replaceCredentialRefs(
+            resolvedForHash,
+            credReverse,
+          );
+          const platformHash = hashPayload(withCredNamesForHash);
+          const direction = classifyDrift({
+            localHash,
+            lastPulledHash,
+            platformHash,
+          });
+          if (driftCounts) driftCounts[direction]++;
+
+          if (direction === "both-diverged") {
+            bothDiverged?.push({
+              resourceType,
+              resourceId,
+              resource,
+              localHash,
+              platformHash,
+              lastPulledHash,
+            });
+            skipped++;
+            continue;
+          }
+
+          if (direction === "dashboard-ahead") {
+            console.log(
+              `   ✏️  ${resourceId} (locally modified, preserving) ${formatDriftLabel(direction)}`,
+            );
+            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            skipped++;
+            continue;
+          }
+
+          if (direction === "local-ahead") {
+            console.log(
+              `   📝 ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
+            );
+            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            skipped++;
+            continue;
+          }
+
+          skipLegacyPreserveChecks = true;
+        }
+      } else if (localFile && !lastPulledHash && driftCounts) {
+        driftCounts["no-baseline"]++;
+      }
+    }
+
     // Skip files that have been locally modified (git detection)
-    if (!bootstrap && changedFiles) {
+    if (!skipLegacyPreserveChecks && !bootstrap && changedFiles) {
       const mdPath = join(
         "resources",
         VAPI_ENV,
@@ -754,14 +886,8 @@ export async function pullResourceType(
     }
 
     // Skip locally edited files even without git (mtime-based detection).
-    // If the resource file is newer than the state file, it was locally
-    // modified after the last successful pull. This is the safety net for the
-    // fresh-clone case: if git either isn't enabled at all OR has nothing
-    // useful to say about the resource tree (untracked, no changes, etc.),
-    // fall through here. The bug we are guarding against was treating an
-    // empty `changedFiles` Set as "git already gave us the answer" — it has
-    // not, and the mtime check must run.
     if (
+      !skipLegacyPreserveChecks &&
       !bootstrap &&
       !force &&
       !isNew &&
@@ -861,6 +987,120 @@ export async function pullResourceType(
   return { created, updated, skipped };
 }
 
+async function resolveBothDivergedResources(options: {
+  state: StateFile;
+  bothDiverged: BothDivergedResource[];
+  resolveMode?: DriftResolveMode;
+}): Promise<{ exitCode: number }> {
+  const { state, bothDiverged, resolveMode } = options;
+  if (bothDiverged.length === 0) return { exitCode: 0 };
+
+  if (resolveMode === "fail") {
+    console.error(
+      `\n❌ ${bothDiverged.length} resource(s) have 3-way drift (--resolve=fail).`,
+    );
+    for (const entry of bothDiverged) {
+      console.error(
+        `     - ${entry.resourceType}/${entry.resourceId}\n` +
+          `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…`,
+      );
+    }
+    return { exitCode: 1 };
+  }
+
+  if (!resolveMode) {
+    console.error(
+      `\n❌ ${bothDiverged.length} resource(s) have 3-way drift (both local and dashboard changed since last pull).`,
+    );
+    console.error(
+      "   Pass --resolve=ours|theirs|fail to proceed:",
+    );
+    for (const entry of bothDiverged) {
+      console.error(
+        `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}\n` +
+          `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…`,
+      );
+    }
+    console.error(
+      "\n     --resolve=ours   keep local version (overrides dashboard edits — same as today's preserve-local default; you'll push local up next)",
+    );
+    console.error(
+      "     --resolve=theirs overwrite local with dashboard version (loses local edits; same as --force pull but scoped to both-diverged only)",
+    );
+    console.error(
+      "     --resolve=fail   exit non-zero without writing anything (CI mode — fail the build so a human investigates)",
+    );
+    return { exitCode: 1 };
+  }
+
+  const credReverse = credentialReverseMap(state);
+
+  for (const entry of bothDiverged) {
+    const section = state[entry.resourceType];
+    if (resolveMode === "ours") {
+      console.log(
+        `   📝 ${entry.resourceId} (both diverged — resolving with --resolve=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
+      );
+      upsertState(section, entry.resourceId, {
+        uuid: entry.resource.id,
+        lastPulledHash: entry.platformHash,
+        lastPulledAt: new Date().toISOString(),
+      });
+      continue;
+    }
+
+    const cleaned = cleanResource(entry.resource);
+    const resolved = resolveReferencesToResourceIds(cleaned, state);
+    const withCredNames = replaceCredentialRefs(resolved, credReverse);
+    const isPlatformDefault =
+      entry.resource.orgId === null || entry.resource.orgId === undefined;
+    if (isPlatformDefault) {
+      withCredNames._platformDefault = true;
+    }
+
+    await writeResourceFile(
+      entry.resourceType,
+      entry.resourceId,
+      withCredNames,
+    );
+    console.log(
+      `   ⬇️  ${entry.resourceId} (both diverged — resolving with --resolve=theirs, overwriting local with platform) ${formatDriftLabel("both-diverged")}`,
+    );
+    upsertState(section, entry.resourceId, {
+      uuid: entry.resource.id,
+      lastPulledHash: entry.platformHash,
+      lastPulledAt: new Date().toISOString(),
+    });
+  }
+
+  return { exitCode: 0 };
+}
+
+function printDriftSummary(counts: DriftDirectionCounts): void {
+  const lines: string[] = [];
+  if (counts["dashboard-ahead"] > 0) {
+    lines.push(
+      `   ✏️  dashboard-ahead : ${counts["dashboard-ahead"]}  (these resources have UI edits since last pull; preserved locally)`,
+    );
+  }
+  if (counts["local-ahead"] > 0) {
+    lines.push(
+      `   📝 local-ahead      : ${counts["local-ahead"]}  (run npm run push to propagate local edits up)`,
+    );
+  }
+  if (counts["both-diverged"] > 0) {
+    lines.push(`   ⚠️  both-diverged   : ${counts["both-diverged"]}`);
+  }
+  if (counts["no-baseline"] > 0) {
+    lines.push(
+      `   ❓ no-baseline      : ${counts["no-baseline"]}  (run pull once with --bootstrap to seed)`,
+    );
+  }
+  if (lines.length === 0) return;
+  console.log("\n📊 Drift direction summary:");
+  for (const line of lines) console.log(line);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Pull Engine
 // ─────────────────────────────────────────────────────────────────────────────
@@ -870,6 +1110,20 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
   const typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
   const resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
+  const resolveMode = parseResolveMode(options.resolveMode);
+  const driftCounts = emptyDriftCounts();
+  const bothDivergedResources: BothDivergedResource[] = [];
+
+  if (force && process.env.CI !== "true") {
+    console.warn(
+      "\n⚠️  --force will overwrite local files without showing you direction labels or surfacing 3-way conflicts.",
+    );
+    console.warn(
+      "   Run `npm run pull -- <org>` (no flag) first to see the drift report.",
+    );
+    console.warn("   Continuing in 2s — Ctrl+C to abort.");
+    await sleepMs(2000);
+  }
 
   if (resourceIds?.length) {
     if (!typeFilter?.length || typeFilter.length !== 1) {
@@ -963,68 +1217,41 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   const shouldPull = (type: ResourceType) =>
     !typeFilter?.length || typeFilter.includes(type);
 
+  const pullOpts = {
+    changedFiles,
+    force,
+    bootstrap,
+    resourceIds,
+    driftCounts,
+    bothDiverged: bothDivergedResources,
+  };
+
   if (shouldPull("tools"))
-    stats.tools = await pullResourceType("tools", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.tools = await pullResourceType("tools", state, pullOpts);
   if (shouldPull("assistants"))
-    stats.assistants = await pullResourceType("assistants", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.assistants = await pullResourceType("assistants", state, pullOpts);
   if (shouldPull("structuredOutputs"))
     stats.structuredOutputs = await pullResourceType(
       "structuredOutputs",
       state,
-      { changedFiles, force, bootstrap, resourceIds },
+      pullOpts,
     );
   if (shouldPull("squads"))
-    stats.squads = await pullResourceType("squads", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.squads = await pullResourceType("squads", state, pullOpts);
   if (shouldPull("personalities"))
-    stats.personalities = await pullResourceType("personalities", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.personalities = await pullResourceType("personalities", state, pullOpts);
   if (shouldPull("scenarios"))
-    stats.scenarios = await pullResourceType("scenarios", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.scenarios = await pullResourceType("scenarios", state, pullOpts);
   if (shouldPull("simulations"))
-    stats.simulations = await pullResourceType("simulations", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.simulations = await pullResourceType("simulations", state, pullOpts);
   if (shouldPull("simulationSuites"))
-    stats.simulationSuites = await pullResourceType("simulationSuites", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.simulationSuites = await pullResourceType(
+      "simulationSuites",
+      state,
+      pullOpts,
+    );
   if (shouldPull("evals"))
-    stats.evals = await pullResourceType("evals", state, {
-      changedFiles,
-      force,
-      bootstrap,
-      resourceIds,
-    });
+    stats.evals = await pullResourceType("evals", state, pullOpts);
 
   // Collapse UUID-suffixed state keys back to canonical when the underlying
   // name-collision has resolved (the conflicting twin was deleted, etc.).
@@ -1045,6 +1272,12 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
       console.log(`\n${summary}`);
     }
   }
+
+  const resolveResult = await resolveBothDivergedResources({
+    state,
+    bothDiverged: bothDivergedResources,
+    resolveMode,
+  });
 
   await saveState(state);
 
@@ -1074,10 +1307,30 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     );
     console.log("       🚫 = matched .vapi-ignore (not tracked)");
     console.log("       ✏️  = locally modified (preserved)");
+    console.log("       📝 = local ahead of dashboard (preserved)");
     console.log("       🗑️  = locally deleted (intent in state)");
     console.log(
       `   Run with --force to overwrite: npm run pull -- ${VAPI_ENV} --force`,
     );
+  }
+
+  if (!force && !bootstrap) {
+    printDriftSummary(driftCounts);
+    if (
+      driftCounts["dashboard-ahead"] > 0 ||
+      driftCounts["both-diverged"] > 0
+    ) {
+      console.log(
+        "\n💡 Tip: run plain pull first (this) to see what changed before resorting to --force.",
+      );
+      console.log(
+        "   --force is for \"I know exactly what I want from the dashboard and I'm overwriting locals\" — rare.",
+      );
+    }
+  }
+
+  if (resolveResult.exitCode !== 0) {
+    throw new Error("Pull halted: unresolved 3-way drift (both-diverged).");
   }
 
   return { state, stats, force, bootstrap };

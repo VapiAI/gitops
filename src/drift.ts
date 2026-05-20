@@ -112,6 +112,10 @@ function stripServerFields(payload: unknown): unknown {
   return out;
 }
 
+export function hashPlatformResource(resource: unknown): string {
+  return hashPayload(stripServerFields(resource));
+}
+
 export async function checkDriftForUpdate(options: {
   endpoint: string; // e.g. "/assistant/<uuid>"
   resourceLabel: string; // for log lines
