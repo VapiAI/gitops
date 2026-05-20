@@ -101,6 +101,25 @@ Runs the engine's local validators against every YAML/MD file in the org without
 
 `--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
 
+**Pull-output icon legend.** Distinct semantics in a single pulled-resource line:
+
+| Icon | Meaning |
+|------|---------|
+| `📝` | Engine wrote/updated a file on disk (clean / no-baseline path) |
+| `✨` | Engine created a NEW file on disk (first-time pull of this resource) |
+| `✏️`  | Locally modified file detected by git, preserved as-is |
+| `⬆️`  | `local-ahead` — local has unpushed edits, needs to flow UP to dashboard (preserved) |
+| `⬇️`  | `--resolve=theirs` — overwrote local with dashboard (flowed DOWN) |
+| `🔒` | Platform-default resource (read-only, immutable) |
+| `🚫` | Matched `.vapi-ignore` (not tracked locally) |
+| `🗑️`  | Locally deleted (deletion intent recorded in state) |
+
+Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull-overwrite), `📝` is the engine doing routine file I/O.
+
+**First-adoption noise on customer repos.** The first `npm run audit -- <org>` after upgrading to a version with the content-drift rule will surface `[content-drift] [no-baseline]` info findings for every resource whose state row predates `lastPulledHash` tracking. These are info-severity (do NOT block CI), but the noise is real. Two ways to clear:
+- `npm run pull -- <org> --bootstrap` — refreshes state with the current platform-hash baseline, no resource materialization. One-shot fix for the whole fleet.
+- Or just let them sit — each plain `npm run pull` after this writes `lastPulledHash` for whichever resources it touches, so the no-baseline rows naturally drain over the next few sync cycles.
+
 ### `npm run push -- <org>` — raw push, no pre-pull
 
 Skips the merge pass. Only use when (a) you literally just ran `pull` and (b) you're certain no one has touched the dashboard since. In a multi-developer environment or when dashboard editors are in play, default to `apply` instead. Stale local state can clobber recent dashboard edits or PATCH against UUIDs that no longer exist.

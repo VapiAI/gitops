@@ -875,8 +875,11 @@ export async function pullResourceType(
           }
 
           if (direction === "local-ahead") {
+            // ⬆️ — local has unpushed edits, needs to flow UP to dashboard.
+            // Distinct from 📝 (= engine wrote a file to disk) to avoid icon
+            // overload in mixed-direction pulls.
             console.log(
-              `   📝 ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
+              `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
             );
             upsertState(newStateSection, resourceId, { uuid: resource.id });
             skipped++;
@@ -1128,7 +1131,7 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
   }
   if (counts["local-ahead"] > 0) {
     lines.push(
-      `   📝 local-ahead      : ${counts["local-ahead"]}  (run npm run push to propagate local edits up)`,
+      `   ⬆️  local-ahead      : ${counts["local-ahead"]}  (run npm run push to propagate local edits up)`,
     );
   }
   if (counts["both-diverged"] > 0) {
@@ -1350,7 +1353,9 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     );
     console.log("       🚫 = matched .vapi-ignore (not tracked)");
     console.log("       ✏️  = locally modified (preserved)");
-    console.log("       📝 = local ahead of dashboard (preserved)");
+    console.log("       ⬆️  = local ahead of dashboard (preserved)");
+    console.log("       ⬇️  = both diverged, --resolve=theirs (overwrote local)");
+    console.log("       📝 = engine wrote/updated file on disk");
     console.log("       🗑️  = locally deleted (intent in state)");
     console.log(
       `   Run with --force to overwrite: npm run pull -- ${VAPI_ENV} --force`,
