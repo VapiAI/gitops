@@ -118,8 +118,10 @@ export async function checkDriftForUpdate(options: {
   resourceId: string; // local resource id
   state: ResourceState;
   overwrite: boolean;
+  localHash?: string;
 }): Promise<DriftCheckResult> {
-  const { endpoint, resourceLabel, resourceId, state, overwrite } = options;
+  const { endpoint, resourceLabel, resourceId, state, overwrite, localHash } =
+    options;
 
   if (!state.lastPulledHash) {
     return {
@@ -143,14 +145,22 @@ export async function checkDriftForUpdate(options: {
     return { ok: true, reason: "match", platformHash };
   }
 
+  const effectiveLocalHash = localHash ?? state.lastPulledHash ?? platformHash;
+  const direction = classifyDrift({
+    localHash: effectiveLocalHash,
+    lastPulledHash: state.lastPulledHash,
+    platformHash,
+  });
+  const directionTag = `[${direction}]`;
+
   if (overwrite) {
     return {
       ok: true,
       reason: "drift-overwritten",
       platformHash,
       message:
-        `   ⚠️  drift on ${resourceLabel} ${resourceId}: platform changed since last pull, ` +
-        `overwriting (--overwrite).`,
+        `   ⚠️  drift on ${resourceLabel} ${resourceId} ${directionTag}: platform changed since last pull, ` +
+        `overwriting (--overwrite). ${formatDriftLabel(direction)}`,
     };
   }
 
@@ -159,9 +169,10 @@ export async function checkDriftForUpdate(options: {
     reason: "drift-blocked",
     platformHash,
     message:
-      `   ❌ drift detected on ${resourceLabel} ${resourceId}: ` +
+      `   ❌ drift detected on ${resourceLabel} ${resourceId} ${directionTag}: ` +
       `platform hash (${platformHash.slice(0, 8)}...) differs from last-pulled ` +
       `(${state.lastPulledHash.slice(0, 8)}...). ` +
+      `${formatDriftLabel(direction)} ` +
       `Re-run pull, resolve locally, or push with --overwrite to take ownership.`,
   };
 }
