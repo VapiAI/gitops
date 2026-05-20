@@ -516,9 +516,9 @@ export function resolveReferencesToResourceIds(
  * ALL hash sites MUST use this helper. The classifier (pull.ts), the audit
  * (audit.ts/checkContentDrift), and the pull-write fallback all need the
  * same transformation applied in the same order — any divergence (a missing
- * step, a different mutation order) makes the resulting `lastPulledHash`
- * disagree with the next read's `localHash`, producing permanent phantom
- * `both-diverged` reports that only `--overwrite` can clear.
+ * step, a different mutation order) makes the recomputed `platformHash`
+ * disagree with the stored `lastPulledHash` from a prior pull, producing
+ * permanent phantom `both-diverged` reports that only `--overwrite` can clear.
  *
  * Note: this is the *pre-write* canonical form (in-memory). At write sites,
  * `lastPulledHash` should still be sourced from `hashLocalResource(...)` after
@@ -1018,11 +1018,20 @@ export async function pullResourceType(
     // code review on the drift-direction-classifier PR.
     //
     // Bootstrap mode writes no file; fall back to the in-memory canonical form.
+    // Warn loudly when the disk-form hash fails on a written file — silent
+    // fallback would reintroduce the M1 asymmetry with no diagnostic for the
+    // next operator to find.
+    const diskHash = bootstrap
+      ? null
+      : hashLocalResource(resourceType, resourceId);
+    if (!bootstrap && diskHash === null) {
+      console.warn(
+        `   ⚠️  ${resourceType}/${resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
+      );
+    }
     upsertState(newStateSection, resourceId, {
       uuid: resource.id,
-      lastPulledHash:
-        hashLocalResource(resourceType, resourceId) ??
-        hashPayload(withCredNames),
+      lastPulledHash: diskHash ?? hashPayload(withCredNames),
       lastPulledAt: new Date().toISOString(),
     });
   }
@@ -1110,11 +1119,15 @@ async function resolveBothDivergedResources(options: {
       `   ⬇️  ${entry.resourceId} (both diverged — resolving with --resolve=theirs, overwriting local with platform) ${formatDriftLabel("both-diverged")}`,
     );
     // Hash the post-write disk form (same invariant as the normal pull-write path).
+    const diskHash = hashLocalResource(entry.resourceType, entry.resourceId);
+    if (diskHash === null) {
+      console.warn(
+        `   ⚠️  ${entry.resourceType}/${entry.resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
+      );
+    }
     upsertState(section, entry.resourceId, {
       uuid: entry.resource.id,
-      lastPulledHash:
-        hashLocalResource(entry.resourceType, entry.resourceId) ??
-        hashPayload(withCredNames),
+      lastPulledHash: diskHash ?? hashPayload(withCredNames),
       lastPulledAt: new Date().toISOString(),
     });
   }

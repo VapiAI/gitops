@@ -588,7 +588,7 @@ test("summarizeFindings: info-severity count appears in the summary line when pr
   ];
   const out = summarizeFindings(findings);
   assert.match(out, /1 warning/);
-  assert.match(out, /1 info/);
+  assert.match(out, /1 info finding/);
   assert.match(out, /2 finding/);
 });
 

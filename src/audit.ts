@@ -565,6 +565,6 @@ export function summarizeFindings(findings: AuditFinding[]): string {
   const warns = findings.filter((f) => f.severity === "warn").length;
   const infos = findings.filter((f) => f.severity === "info").length;
   const parts = [`${errors} error(s)`, `${warns} warning(s)`];
-  if (infos > 0) parts.push(`${infos} info`);
+  if (infos > 0) parts.push(`${infos} info finding(s)`);
   return `📋 Audit: ${findings.length} finding(s) — ${parts.join(", ")}`;
 }
