@@ -22,6 +22,45 @@ import { VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceState } from "./types.ts";
 
+export type DriftDirection =
+  | "clean"
+  | "dashboard-ahead"
+  | "local-ahead"
+  | "both-diverged"
+  | "no-baseline";
+
+export interface ClassifyDriftInput {
+  localHash: string;
+  lastPulledHash?: string;
+  platformHash: string;
+}
+
+export function classifyDrift(input: ClassifyDriftInput): DriftDirection {
+  const { localHash, lastPulledHash, platformHash } = input;
+  if (!lastPulledHash) return "no-baseline";
+  const localMatches = localHash === lastPulledHash;
+  const platformMatches = platformHash === lastPulledHash;
+  if (localMatches && platformMatches) return "clean";
+  if (localMatches && !platformMatches) return "dashboard-ahead";
+  if (!localMatches && platformMatches) return "local-ahead";
+  return "both-diverged";
+}
+
+export function formatDriftLabel(direction: DriftDirection): string {
+  switch (direction) {
+    case "dashboard-ahead":
+      return "[dashboard-ahead — sync down via plain pull (preserves local) or push --overwrite to take ownership]";
+    case "local-ahead":
+      return "[local-ahead — run npm run push to propagate local edits up]";
+    case "both-diverged":
+      return "[both-diverged — 3-way conflict, pass --resolve=ours|theirs|fail]";
+    case "no-baseline":
+      return "[direction unknown — no lastPulledHash baseline; pull --bootstrap first]";
+    case "clean":
+      return "[no drift]";
+  }
+}
+
 export interface DriftCheckResult {
   ok: boolean;
   reason: "no-baseline" | "match" | "drift-overwritten" | "drift-blocked";
@@ -73,14 +112,20 @@ function stripServerFields(payload: unknown): unknown {
   return out;
 }
 
+export function hashPlatformResource(resource: unknown): string {
+  return hashPayload(stripServerFields(resource));
+}
+
 export async function checkDriftForUpdate(options: {
   endpoint: string; // e.g. "/assistant/<uuid>"
   resourceLabel: string; // for log lines
   resourceId: string; // local resource id
   state: ResourceState;
   overwrite: boolean;
+  localHash?: string;
 }): Promise<DriftCheckResult> {
-  const { endpoint, resourceLabel, resourceId, state, overwrite } = options;
+  const { endpoint, resourceLabel, resourceId, state, overwrite, localHash } =
+    options;
 
   if (!state.lastPulledHash) {
     return {
@@ -104,14 +149,22 @@ export async function checkDriftForUpdate(options: {
     return { ok: true, reason: "match", platformHash };
   }
 
+  const effectiveLocalHash = localHash ?? state.lastPulledHash ?? platformHash;
+  const direction = classifyDrift({
+    localHash: effectiveLocalHash,
+    lastPulledHash: state.lastPulledHash,
+    platformHash,
+  });
+  const directionTag = `[${direction}]`;
+
   if (overwrite) {
     return {
       ok: true,
       reason: "drift-overwritten",
       platformHash,
       message:
-        `   ⚠️  drift on ${resourceLabel} ${resourceId}: platform changed since last pull, ` +
-        `overwriting (--overwrite).`,
+        `   ⚠️  drift on ${resourceLabel} ${resourceId} ${directionTag}: platform changed since last pull, ` +
+        `overwriting (--overwrite). ${formatDriftLabel(direction)}`,
     };
   }
 
@@ -120,9 +173,10 @@ export async function checkDriftForUpdate(options: {
     reason: "drift-blocked",
     platformHash,
     message:
-      `   ❌ drift detected on ${resourceLabel} ${resourceId}: ` +
+      `   ❌ drift detected on ${resourceLabel} ${resourceId} ${directionTag}: ` +
       `platform hash (${platformHash.slice(0, 8)}...) differs from last-pulled ` +
       `(${state.lastPulledHash.slice(0, 8)}...). ` +
+      `${formatDriftLabel(direction)} ` +
       `Re-run pull, resolve locally, or push with --overwrite to take ownership.`,
   };
 }

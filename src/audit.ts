@@ -10,6 +10,7 @@
 //   5. sibling-base-slug    multiple slugs sharing the same base-slug
 //   6. dashboard-orphan     dashboard UUID not in state (.vapi-ignore suppresses)
 //   7. inline-tools         assistant with non-empty model.tools (use toolIds)
+//   8. content-drift        local vs dashboard vs lastPulledHash direction
 //
 // Designed for dependency injection: state loader, local file lister, remote
 // fetcher, and per-assistant tool reader are all swappable so tests stay
@@ -21,15 +22,18 @@
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { credentialReverseMap } from "./credentials.ts";
+import { classifyDrift } from "./drift.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
 import {
+  canonicalizeForHash,
   fetchAllResources,
   listExistingResourceIds,
   type VapiResource,
 } from "./pull.ts";
-import { FOLDER_MAP } from "./resources.ts";
+import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
-import { loadState } from "./state.ts";
+import { hashPayload, loadState } from "./state.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
@@ -45,9 +49,10 @@ export type AuditRule =
   | "sibling-base-slug"
   | "dashboard-orphan"
   | "inline-tools"
+  | "content-drift"
   | "fetch-failed";
 
-export type AuditSeverity = "warn" | "error";
+export type AuditSeverity = "info" | "warn" | "error";
 
 export interface AuditFinding {
   severity: AuditSeverity;
@@ -345,6 +350,89 @@ function checkDashboardOrphans(
   return findings;
 }
 
+function contentDriftSuggestedAction(direction: string): string {
+  if (direction === "dashboard-ahead") {
+    return "run npm run pull to refresh, or push --overwrite to take ownership";
+  }
+  if (direction === "local-ahead") {
+    return "run npm run push to sync up";
+  }
+  if (direction === "both-diverged") {
+    return "run npm run pull --resolve=ours|theirs|fail to resolve";
+  }
+  if (direction === "no-baseline") {
+    return "run npm run pull --bootstrap to seed lastPulledHash baseline";
+  }
+  return "no action needed";
+}
+
+function checkContentDrift(
+  type: ResourceType,
+  state: StateFile,
+  remote: VapiResource[],
+  localIds: string[],
+): AuditFinding[] {
+  const remoteByUuid = new Map(remote.map((r) => [r.id, r]));
+  const credReverse = credentialReverseMap(state);
+  const findings: AuditFinding[] = [];
+
+  for (const resourceId of localIds) {
+    const entry = state[type][resourceId];
+    if (!entry) continue;
+
+    const localHash = hashLocalResource(type, resourceId);
+    if (!localHash) continue;
+
+    const remoteResource = remoteByUuid.get(entry.uuid);
+    if (!remoteResource) continue;
+
+    // canonicalizeForHash centralizes the 3-step pipeline + _platformDefault
+    // mutation so the hash agrees with pull-write's lastPulledHash basis.
+    const platformHash = hashPayload(
+      canonicalizeForHash(remoteResource, state, credReverse),
+    );
+    const direction = classifyDrift({
+      localHash,
+      lastPulledHash: entry.lastPulledHash,
+      platformHash,
+    });
+    if (direction === "clean") continue;
+
+    // Severity mapping:
+    //   - both-diverged  → error (CI-blocking; needs --resolve to disambiguate)
+    //   - local-ahead    → warn  (un-pushed edits; operator should push)
+    //   - dashboard-ahead → warn (UI edits not pulled; operator should pull)
+    //   - no-baseline    → info  (expected on fresh clones / pre-bootstrap;
+    //                             surfaces what would otherwise be silently
+    //                             skipped, but does NOT block CI)
+    const severity =
+      direction === "both-diverged"
+        ? "error"
+        : direction === "no-baseline"
+          ? "info"
+          : "warn";
+    const detail =
+      direction === "local-ahead"
+        ? "local has unpushed edits"
+        : direction === "dashboard-ahead"
+          ? "local diverges from dashboard since last pull"
+          : direction === "both-diverged"
+            ? "3-way conflict between local, dashboard, and last-pulled baseline"
+            : "no lastPulledHash baseline — content-drift coverage uninitialized";
+
+    findings.push({
+      severity,
+      type,
+      rule: "content-drift",
+      resourceIds: [resourceId],
+      message: `${detail} [${direction}]`,
+      suggestedAction: contentDriftSuggestedAction(direction),
+    });
+  }
+
+  return findings;
+}
+
 async function checkInlineTools(
   state: StateFile,
   readAssistantTools: (resourceId: string) => unknown[] | Promise<unknown[]>,
@@ -434,6 +522,7 @@ export async function runAudit(
       const remoteUuids = new Set(remote.map((r) => r.id));
       findings.push(...checkStateGhosts(type, state, remoteUuids));
       findings.push(...checkDashboardOrphans(type, state, remote));
+      findings.push(...checkContentDrift(type, state, remote, localIds));
     }
 
     findings.push(...checkStateUuidCollisions(type, state));
@@ -457,7 +546,8 @@ export async function runAudit(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function formatFinding(f: AuditFinding): string {
-  const icon = f.severity === "error" ? "❌" : "⚠️ ";
+  const icon =
+    f.severity === "error" ? "❌" : f.severity === "info" ? "ℹ️ " : "⚠️ ";
   const uuidSuffix = f.uuid ? ` [uuid=${f.uuid}]` : "";
   const lines = [
     `  ${icon} [${f.rule}] ${f.type}/${f.resourceIds.join(", ")}${uuidSuffix}`,
@@ -473,5 +563,8 @@ export function summarizeFindings(findings: AuditFinding[]): string {
   if (findings.length === 0) return "✅ No audit findings.";
   const errors = findings.filter((f) => f.severity === "error").length;
   const warns = findings.filter((f) => f.severity === "warn").length;
-  return `📋 Audit: ${findings.length} finding(s) — ${errors} error(s), ${warns} warning(s)`;
+  const infos = findings.filter((f) => f.severity === "info").length;
+  const parts = [`${errors} error(s)`, `${warns} warning(s)`];
+  if (infos > 0) parts.push(`${infos} info finding(s)`);
+  return `📋 Audit: ${findings.length} finding(s) — ${parts.join(", ")}`;
 }

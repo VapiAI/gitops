@@ -129,6 +129,7 @@ async function upsertResourceWithStateRecovery(options: {
           resourceId,
           state: stateEntry,
           overwrite: OVERWRITE_DRIFT,
+          localHash: hashPayload(updatePayload),
         });
         if (drift.message) {
           if (drift.ok) console.log(drift.message);

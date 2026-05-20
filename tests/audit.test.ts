@@ -539,7 +539,7 @@ test("integration: orphan-yaml + collision + content-identical(4) + sibling-base
 // catches drift if the CLI's severity bar ever changes.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("exit-code: 0 findings → exit 0; ≥1 finding → exit 1 (via exported helper)", () => {
+test("exit-code: 0 findings → exit 0; ≥1 warn/error → exit 1; info-only → exit 0", () => {
   assert.equal(exitCodeForFindings([]), 0);
   const oneWarn: AuditFinding = {
     severity: "warn",
@@ -551,6 +551,45 @@ test("exit-code: 0 findings → exit 0; ≥1 finding → exit 1 (via exported he
   assert.equal(exitCodeForFindings([oneWarn]), 1);
   const oneError: AuditFinding = { ...oneWarn, severity: "error" };
   assert.equal(exitCodeForFindings([oneError]), 1);
+
+  // info-severity findings (e.g. no-baseline from content-drift on fresh
+  // clones) surface for visibility but must NOT block CI. Without this
+  // carve-out, every customer's first audit after the drift-classifier
+  // feature lands would fail their build pipeline.
+  const oneInfo: AuditFinding = {
+    severity: "info",
+    type: "assistants",
+    rule: "content-drift",
+    resourceIds: ["x"],
+    message: "no lastPulledHash baseline",
+  };
+  assert.equal(exitCodeForFindings([oneInfo]), 0);
+  assert.equal(exitCodeForFindings([oneInfo, oneInfo]), 0);
+  // Mixed: any non-info finding still gates.
+  assert.equal(exitCodeForFindings([oneInfo, oneWarn]), 1);
+});
+
+test("summarizeFindings: info-severity count appears in the summary line when present", () => {
+  const findings: AuditFinding[] = [
+    {
+      severity: "info",
+      type: "assistants",
+      rule: "content-drift",
+      resourceIds: ["x"],
+      message: "no baseline",
+    },
+    {
+      severity: "warn",
+      type: "tools",
+      rule: "orphan-yaml",
+      resourceIds: ["y"],
+      message: "orphan",
+    },
+  ];
+  const out = summarizeFindings(findings);
+  assert.match(out, /1 warning/);
+  assert.match(out, /1 info finding/);
+  assert.match(out, /2 finding/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
