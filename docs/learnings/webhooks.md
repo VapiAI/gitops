@@ -24,8 +24,9 @@ These are **two independent settings**:
 
 | Setting | Controls | Default |
 |---------|----------|---------|
-| `server.timeoutSeconds` | Webhook delivery timeout (status-update, end-of-call-report, etc.) | Platform default (see API reference) |
-| `tool.timeoutSeconds` (apiRequest) | Individual tool HTTP call timeout | Platform default (see API reference) |
+| `server.timeoutSeconds` | Webhook delivery timeout (status-update, end-of-call-report, function tools using `server.url`, etc.) | Platform default (see API reference) |
+| `timeoutSeconds` (apiRequest tool) | Individual API request tool HTTP call timeout | Platform default (see API reference) |
+| `timeoutSeconds` (code tool) | Code tool execution timeout | Platform default, capped at 30s |
 
 They don't inherit from each other.
 
@@ -74,6 +75,12 @@ server:
 If `credentialId` is set on the server or tool, that specific credential is used. If omitted, Vapi picks one from the call's available credentials automatically.
 
 **Recommendation:** Always set `credentialId` explicitly when multiple credentials exist to avoid ambiguous selection.
+
+### `X-Vapi-Secret` is legacy shared-secret auth
+
+`server.secret` (or legacy `serverUrlSecret`) is sent to your server as the `X-Vapi-Secret` header. This is a simple shared-secret comparison, not an HMAC signature.
+
+**Recommendation:** Prefer `server.credentialId` / webhook credentials for new integrations when you need OAuth2, Bearer, or HMAC auth. Keep `server.secret` for simple endpoints that only need a shared-secret check. Do not also set `X-Vapi-Secret` manually in `server.headers` unless you intentionally want to override the generated value.
 
 ---
 

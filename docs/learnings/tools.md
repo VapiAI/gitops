@@ -99,6 +99,19 @@ Vapi ignores `async` on apiRequest tools. They always execute synchronously (HTT
 
 If `credentialId` is set on the tool, that specific credential is used. If omitted, Vapi picks one from the call's available credentials automatically. If you have multiple webhook credentials, always set `credentialId` explicitly to avoid ambiguity.
 
+### Timeout is top-level, not under `server`
+
+For apiRequest tools, set `timeoutSeconds` directly on the tool. Do not put it under `server.timeoutSeconds` — apiRequest tools execute their own HTTP request path.
+
+```yaml
+type: apiRequest
+url: https://your-api-endpoint.example.com/search
+method: POST
+timeoutSeconds: 45
+```
+
+**Dashboard gotcha:** the current API Request tool form does not expose this field. Configure it through API/gitops JSON if you need a non-default timeout.
+
 ---
 
 ## function Tools
@@ -110,6 +123,19 @@ If `credentialId` is set on the tool, that specific credential is used. If omitt
 **What actually happens:** Vapi falls back through a hierarchy: tool `server.url` → assistant `server.url` → phone number `server.url` → org `server.url`. Omitting `server` on the tool is valid if the assistant or org has a server URL configured.
 
 **Recommendation:** Set `server.url` on the tool for clarity, or document which level provides the webhook URL.
+
+### Timeout lives under `server.timeoutSeconds`
+
+Function tools use the Server URL webhook path, so their per-tool timeout is configured on the tool's `server` block:
+
+```yaml
+type: function
+server:
+  url: https://your-webhook-endpoint.example.com/tool
+  timeoutSeconds: 45
+```
+
+This is separate from apiRequest's top-level `timeoutSeconds`.
 
 ### `async: true` changes execution flow significantly
 

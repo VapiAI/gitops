@@ -140,6 +140,18 @@ destinations:
 
 Within a single assistant there is no equivalent. `request-complete` is a speech lever, `variableExtractionPlan` aliases give determinism but not invisibility, and tool responses are always in the next-completion conversation history. If the model must not see a value, your tool server must not place it in the response body in the first place. See [tools.md → Every tool result is in conversation history](tools.md#every-tool-result-is-in-conversation-history).
 
+### Enabling PCI for every squad member
+
+Squads do not have a first-class `squad.compliancePlan` field. To enable PCI mode for all members, set it through `membersOverrides`, which is applied to every resolved assistant before the call-level compliance plan is computed.
+
+```yaml
+membersOverrides:
+  compliancePlan:
+    pciEnabled: true
+```
+
+For a one-off call using an existing `squadId`, the same shape can be passed as `squadOverrides.compliancePlan.pciEnabled`. Org-level `org.compliancePlan.pciEnabled` also applies globally. The squad builder UI currently exposes model, voice, and transcriber overrides, but not a PCI toggle, so use API/gitops JSON for squad-level PCI.
+
 ---
 
 ## Override Merge Order
