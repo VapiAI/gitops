@@ -85,3 +85,15 @@ Structured outputs are the primary way to measure voice agent performance. Commo
 | `request_success_rate` | Aggregated per-request | Percentage of individual requests completed |
 
 **Tip:** Start with 2–3 boolean KPIs (`call_successful`, `appointment_booked`) before adding more complex extraction. Each additional field increases extraction cost and latency.
+
+---
+
+## Squad `membersOverrides` vs standalone structured outputs
+
+**What you might expect:** Linking structured outputs in `artifactPlan.structuredOutputIds` is enough for every call path in a squad.
+
+**What actually happens:** Standalone structured-output resources run against the call transcript when listed on the assistant/squad artifact plan. **`analysisPlan.structuredDataPlan`** (inline schema + messages on the assistant or squad) is a separate end-of-call extraction path. In multi-agent squads, calls that end on an early member (voicemail leaver, silent classifier) often **never had** `structuredDataPlan` on that member — only the final conversational member did — so KPI fields stay empty even when the call succeeded.
+
+**Recommendation:** For squad-wide KPIs that must populate on **every** ending (VM-only, classifier-only, and live-agent), use **`squad.membersOverrides.analysisPlan.structuredDataPlan`** plus **`membersOverrides.artifactPlan.fullMessageHistoryEnabled: true`**. Remove per-assistant duplicate plans. Keep standalone structured outputs for evals, dashboard analytics, or schemas you want versioned as separate resources.
+
+Full YAML pattern and merge-order notes: [squads.md → Squad-level post-call extraction via `membersOverrides`](squads.md#squad-level-post-call-extraction-via-membersoverrides-multi-member-squads).

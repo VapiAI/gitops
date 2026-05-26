@@ -40,8 +40,8 @@ Gotchas and silent defaults for each resource type:
 |------|----------------|
 | [tools.md](tools.md) | apiRequest, function, transferCall, endCall, handoff, voicemail, dtmf, code tools; tool messages; strict mode |
 | [assistants.md](assistants.md) | Model defaults, voice, transcriber, firstMessage, outbound modes, voicemailMessage, hooks, idle messages, endpointing, interruption, analysis, artifacts, background sound, server messages, HIPAA, tool resolution |
-| [squads.md](squads.md) | Name uniqueness, tools:append, assistantDestinations, handoff context, contextEngineeringPlan, VM detection relay pattern, override merge order |
-| [structured-outputs.md](structured-outputs.md) | Schema type gotchas, assistant_ids, default models, target modes, KPI patterns |
+| [squads.md](squads.md) | Name uniqueness, tools:append, assistantDestinations, handoff context, contextEngineeringPlan, VM detection relay pattern, override merge order, `membersOverrides` structuredDataPlan + fullMessageHistory |
+| [structured-outputs.md](structured-outputs.md) | Schema type gotchas, assistant_ids, default models, target modes, KPI patterns, squad `membersOverrides` vs standalone SOs |
 | [simulations.md](simulations.md) | Personalities, evaluation comparators, chat-mode gotcha, missing references, full `/eval/simulation/*` API reference |
 | [webhooks.md](webhooks.md) | Default server messages, timeouts, unreachable servers, credential resolution, payload shape |
 | [voice-providers.md](voice-providers.md) | Per-provider voice block layout (Cartesia vs 11labs vs OpenAI/Azure/Rime/LMNT/Minimax/Neuphonic/SmallestAI) — saves 400s at push time |

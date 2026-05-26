@@ -169,6 +169,67 @@ Later layers win on conflicts. `variableValues` from all layers are merged separ
 
 ---
 
+## Squad-level post-call extraction via `membersOverrides` (multi-member squads)
+
+**What you might expect:** Every squad member that should contribute to post-call KPIs needs its own `analysisPlan.structuredDataPlan` on the assistant file, or you attach standalone structured-output resources via `artifactPlan.structuredOutputIds`.
+
+**What actually happens:** Vapi has no separate “squad structured output” resource. For squads, set **`membersOverrides.analysisPlan.structuredDataPlan`** on the squad YAML so the same extraction plan runs once at end-of-call for **all members** — including members that never reached a live conversation (silent classifier, voicemail-only leaver, etc.). The gitops engine pushes this as squad `membersOverrides` on the platform squad object.
+
+**Critical companion flag:** If extraction must reason over speech from **more than one member** (e.g. classifier → voicemail leaver → conversational agent), also set:
+
+```yaml
+membersOverrides:
+  artifactPlan:
+    fullMessageHistoryEnabled: true
+  analysisPlan:
+    structuredDataPlan:
+      enabled: true
+      messages:
+        - role: system
+          content: |-
+            You will be given the full transcript of a multi-assistant call, the ended reason,
+            and context from all squad members.
+
+            Extract fields based on what was said and how the call ended.
+            Include squad-specific rules for voicemail-only or classifier-only endings.
+
+            Json Schema:
+            {{schema}}
+
+            Only respond with the JSON.
+        - role: user
+          content: |-
+            Here is the transcript:
+
+            {{transcript}}
+
+            Here is the ended reason of the call:
+
+            {{endedReason}}
+      schema:
+        type: object
+        properties:
+          call_outcome:
+            type: string
+            enum: [goal_met, not_interested, transfer, no_answer, callback]
+          summary:
+            type: string
+        # ... other KPI fields
+```
+
+Without `fullMessageHistoryEnabled: true`, structured-data extraction often sees only the **last active member’s** transcript slice. Early voicemail or triage audio is missing from the prompt → empty or wrong KPI fields (`label_not_filled` in QA tooling).
+
+**Recommendation:**
+
+1. **Single source of truth** — Define the plan once under `membersOverrides`. **Remove** duplicate `analysisPlan.structuredDataPlan` from individual member assistants to avoid drift (two prompts, or assistant-only plan winning on SDR calls but not on VM-only calls).
+2. **Pass `{{endedReason}}`** in the user message when outcomes depend on how the call ended (`voicemail`, silence timeout, transfer, etc.), not only spoken content.
+3. **Squad-specific classification rules** in the system message — e.g. map voicemail-only / never-reached-live-agent paths to `no_answer` (or your enum), and only use `interested` / `not_interested` when a live human had a substantive exchange.
+4. **Standalone structured outputs** (`structuredOutputs/*.yml` + `artifactPlan.structuredOutputIds`) are a different pipeline. You can use both, but do not assume they replace `structuredDataPlan` on squad members unless you link them explicitly.
+
+See also [structured-outputs.md → Squad `membersOverrides` vs standalone structured outputs](structured-outputs.md#squad-membersoverrides-vs-standalone-structured-outputs).
+
+---
+
 ## toolIds in assistantOverrides require UUIDs
 
 `assistantOverrides.model.toolIds` in squad members must use **Vapi platform UUIDs**, not local filenames. The gitops engine resolves filenames to UUIDs for base assistant `model.toolIds`, but it does **not** resolve them inside squad `assistantOverrides`. If you use a local filename, the push will fail with `each value in toolIds must be a UUID`.
