@@ -132,6 +132,15 @@ function findLocalResourceFile(
   return undefined;
 }
 
+export function loadLocalResourceData(
+  type: ResourceType,
+  resourceId: string,
+): Record<string, unknown> | null {
+  const filePath = findLocalResourceFile(type, resourceId);
+  if (!filePath) return null;
+  return parseResourceDataFromFile(filePath);
+}
+
 /** Stable content hash of a local resource file (same basis as lastPulledHash). */
 export function hashLocalResource(
   type: ResourceType,

@@ -224,6 +224,29 @@ npm run pull -- <org> --bootstrap
 npm run pull -- <org> --type assistants --id <uuid>
 ```
 
+When `pull` reports `both-diverged`, choose a whole-run default, mix decisions
+per resource, or merge selected paths:
+
+```bash
+# Same decision for every both-diverged resource.
+npm run pull -- <org> --resolve=ours
+npm run pull -- <org> --resolve=theirs
+
+# Different decisions in one run.
+npm run pull -- <org> \
+  --resolve=assistants/intake=ours \
+  --resolve=squads/main=theirs
+
+# Keep git as the base, but take dashboard voice settings.
+npm run pull -- <org> \
+  --resolve=assistants/intake=ours \
+  --resolve-path=assistants/intake:voice=theirs
+```
+
+Path rules use the parsed resource object shape. For assistants, the Markdown
+body is represented as the system message under `model.messages`; squad arrays
+can be addressed with indexes such as `members[0].assistantId`.
+
 ### Live testing what you just deployed
 
 ```bash

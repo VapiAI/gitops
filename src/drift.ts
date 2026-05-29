@@ -53,7 +53,7 @@ export function formatDriftLabel(direction: DriftDirection): string {
     case "local-ahead":
       return "[local-ahead — run npm run push to propagate local edits up]";
     case "both-diverged":
-      return "[both-diverged — 3-way conflict, pass --resolve=ours|theirs|fail]";
+      return "[both-diverged — 3-way conflict, pass --resolve=ours|theirs|fail or scoped --resolve=<type>/<id>=ours|theirs]";
     case "no-baseline":
       return "[direction unknown — no lastPulledHash baseline; pull --bootstrap first]";
     case "clean":

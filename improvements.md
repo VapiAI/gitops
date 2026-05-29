@@ -73,6 +73,7 @@ you which stack PR closes the row.**
 | 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Partial — Stack D heuristic       |
 | 21  | `.vapi-ignore` was pull-only (push could silently delete) | `--force` push DELETEd dashboard-only opt-outs    | None       | RESOLVED 2026-05-11 (#TBD)        |
+| 22  | Granular `both-diverged` resolution                      | Mix dashboard/git choices without manual hand-merge | #4         | RESOLVED 2026-05-29 (#TBD)        |
 
 ---
 
@@ -1027,6 +1028,58 @@ in-process unit tests for each helper).
 ### Status
 
 RESOLVED 2026-05-11 (#TBD — PR number updates when opened).
+
+---
+
+## 22. Granular `both-diverged` resolution was whole-run only
+
+**[RESOLVED 2026-05-29] (#TBD)**
+
+**Discovered:** PRISM-852, from the mudflap-prod iForm drift incident on
+2026-05-26. Squad and assistant resources diverged after dashboard pushes
+and local bucket edits, and the operator had to use coarse overwrite/manual
+merge choices to ship.
+
+### Problem
+
+`pull` could classify resources as `both-diverged`, but conflict resolution
+was whole-run and whole-resource only. Operators could not take dashboard
+`voice` while keeping git `model.messages`, or resolve one squad from the
+dashboard and another assistant from git in a single command.
+
+### Current behavior (Verified)
+
+- Whole-run defaults still work: `--resolve=ours|theirs|fail`.
+- Per-resource resolution is supported with repeatable flags:
+  `--resolve=assistants/intake=ours --resolve=squads/main=theirs`.
+- Path-level resolution is supported by choosing a resource base and then
+  overriding parsed object paths:
+  `--resolve=assistants/intake=ours --resolve-path=assistants/intake:voice=theirs`.
+- Path rules support dot paths and numeric array indexes, including
+  `members[0].assistantId`. Assistant Markdown bodies are parsed into
+  `model.messages`, so prompt/body resolution uses the same object shape as
+  the hash pipeline.
+- Path-level mixed writes set `lastPulledHash` to the platform hash observed
+  during resolution. If the merged local file still differs from the full
+  dashboard payload, the next pull classifies it as `local-ahead`, not a
+  phantom `both-diverged`.
+
+### Risk
+
+Without granular resolution, a safe sync can force broad choices: lose
+dashboard changes, lose git changes, or hand-merge resource files manually
+while preserving the engine's hash invariants by memory.
+
+### Resolution
+
+Added a pure drift-resolution parser/merger and wired it into `pull` after
+all `both-diverged` resources are collected, before any conflict writes occur.
+If any conflict lacks an explicit mode, the pull exits before applying scoped
+resolutions. Test coverage lives in `tests/drift-resolve.test.ts`.
+
+### Status
+
+RESOLVED 2026-05-29 (#TBD — PR number updates when opened).
 
 ---
 
