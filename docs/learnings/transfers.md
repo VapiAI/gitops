@@ -99,6 +99,21 @@ Some SIP trunks/providers don't support the REFER method. The call ends during t
 **Provider-specific auth issues:**
 Some providers (especially with SIP REFER) reject the transfer due to authentication header issues. The call looks "forwarded" on the Vapi side but drops at the provider level. Check your provider's transfer compatibility docs.
 
+**Warm-transfer destination leg fails before the phone shows a missed call:**
+With `warm-transfer-experimental`, Vapi decides whether to continue waiting based on the destination leg's SIP/call-status events, not on the callee handset UI. A terminal destination-leg status such as `failed`, `busy`, or `no-answer` can trigger the fallback message before the destination phone displays a missed call. Treat Vapi/provider logs as the source of truth for transfer timing.
+
+**Unowned caller ID on the destination leg:**
+Avoid setting a transfer destination `callerId` to the original customer's number unless that number is owned/attested on the outbound trunk. Presenting an unowned number can be rejected by carriers or spam/STIR-SHAKEN filters, producing a fast destination-leg failure even though the handset may later show a missed call. Prefer an owned caller ID, commonly the calling Vapi number:
+
+```yaml
+destinations:
+  - type: number
+    number: "+15551234567"
+    callerId: "{{phoneNumber.number}}"
+```
+
+If true customer-number passthrough is required, solve it at the telephony/trunk ownership and attestation layer rather than by spoofing `{{customer.number}}` in the tool config.
+
 ### How to verify
 
 Check the call's `endedReason` and provider-level call logs:
