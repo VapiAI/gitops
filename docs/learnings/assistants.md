@@ -152,11 +152,26 @@ Don't try both layers at once. They shape independent halves of the call and the
 
 | Language | Recommended Provider |
 |----------|---------------------|
-| English | Deepgram Nova-3 |
+| English | Deepgram Flux General English (`flux-general-en`) |
 | Spanish | Deepgram Nova-3 |
 | Portuguese | Azure Transcriber |
 
 For multilingual setups, see [multilingual.md](multilingual.md).
+
+### Default STT for new demo assistants: Deepgram Flux General English
+
+When spinning up a fresh English-language demo assistant, use Deepgram Flux General English by default. It is the baseline for first-pass/demo assistants because Flux gives better conversational turn handling than Nova-3, while still keeping the config simple.
+
+```yaml
+transcriber:
+  provider: deepgram
+  model: flux-general-en
+  language: en
+  numerals: true
+  confidenceThreshold: 0.4
+```
+
+Only reach for Nova-3 when you have a specific reason, such as compatibility with an existing production assistant, a known Flux regression, or a non-demo flow whose current tuning is already validated.
 
 ### `confidenceThreshold` defaults to 0.4
 
