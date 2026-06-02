@@ -348,6 +348,27 @@ For voicemail detection assistants that should never speak, set `messages[0].con
 
 ## dtmf Tools
 
+### Two separate concepts: DTMF tool vs caller keypad input
+
+Vapi has two keypad-related mechanisms with opposite directionality:
+
+| Mechanism | Who sends digits? | Configure it when |
+|---|---|---|
+| `type: dtmf` tool | The assistant sends keypad tones into the call | The agent needs to navigate an IVR, e.g. pressing 1 for sales |
+| `keypadInputPlan` | The caller enters digits on their phone keypad | The agent needs to collect a PIN, OTP, ZIP, account fragment, or similar verification input |
+
+For caller-entered digits, configure the assistant, not a tool:
+
+```yaml
+keypadInputPlan:
+  enabled: true
+  timeoutSeconds: 2
+  delimiters:
+    - "#"
+```
+
+Vapi injects the collected input into the conversation as a user keypad entry, so the assistant can read it back or pass it to a normal server/function tool. Keep the backend authoritative for identity decisions, and avoid using keypad input for highly sensitive full secrets because the value becomes part of the call context and event/log stream.
+
 ### DTMF requires no configuration
 
 The `dtmf` tool type is built-in and requires no function definition, parameters, or server URL:
