@@ -78,6 +78,7 @@ Vapi's first-party voice catalog wraps various TTS backends (Cartesia, ElevenLab
 voice:
   provider: vapi
   voiceId: <voiceName>        # one of the Vapi catalog: Clara, Elliot, Nico, Emma, Neil, Sagar, Kai, Godfrey, Naina, Sid, Layla, Gustavo (grows over time)
+  version: 2                  # opt in to Vapi Voices V2 where supported; voiceId stays the base name, e.g. Elliot
   speed: 1.05                 # top-level, 0.7–1.2 range observed
   chunkPlan:
     formatPlan:
@@ -88,6 +89,8 @@ voice:
         model: eleven_turbo_v2_5
         voiceId: <fallback-voice-id>
 ```
+
+**Vapi Voices V2:** for supported voices, opt in with `voice.version: 2`. Do **not** change the `voiceId` to a display label like `Elliot V2`; the API still expects the base enum value (`Elliot`) and returns `400 Bad Request` if the suffix is included in `voiceId`.
 
 **Forbidden at top level for Vapi-native voices (will 400):**
 
