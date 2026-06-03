@@ -1079,6 +1079,83 @@ RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
 
 ---
 
+## 23. Phantom `both-diverged`: canonicalization trapped in pull.ts + a gate that blocked when local and dashboard already agreed
+
+**[RESOLVED 2026-06-03] (#TBD)**
+
+**Discovered:** a scoped `npm run push` of an unedited assistant blocked with
+`❌ drift detected ... [both-diverged]` and "Applied 0 resource(s)", even
+though the local file matched the dashboard. A first fix looked like it
+worked — but it was only ever verified with `--dry-run`, which **skips the
+drift check entirely**, so the real push path was never exercised. The block
+came back on the first real push.
+
+### Problem (two layers)
+
+**Layer 1 — canonicalization was trapped in `pull.ts` (architectural smell).**
+`canonicalizeForHash` (the single basis pull writes `lastPulledHash` in:
+resourceId refs, credential names, prompt-in-body, `_platformDefault` marker)
+lived in `pull.ts`. Because `pull.ts` imports `drift.ts`, `drift.ts` could not
+import it back (cycle) — so it grew a **divergent duplicate**
+(`stripServerFields` / `SERVER_FIELDS`, byte-identical to pull's
+`cleanResource` / `EXCLUDED_FIELDS`) plus a dead `hashPlatformResource`. The
+first fix bridged the gap with an injected `hashPlatformPayload` callback +
+manual hash plumbing at the push call site — a patch around the module
+placement, not the root cause.
+
+**Layer 2 — the real phantom (the bug the patch never reached).** Even with
+matching bases, an untouched resource blocked because the **gate** treated a
+stale baseline as a conflict. A diagnostic on the live resource:
+
+```
+hashLocalResource (local file)      : 54734d2b…
+platformHash (canonicalized remote) : 54734d2b…   ← byte-identical
+state lastPulledHash                : 3a83baba…   ← stale (older basis)
+```
+
+Local and dashboard **agreed perfectly** — nothing to reconcile. But
+`classifyDrift` returns `both-diverged` whenever both live sides differ from
+the baseline (a deliberate, test-pinned *descriptive* contract), and
+`checkDriftForUpdate` only short-circuited on `platformHash === lastPulledHash`.
+So a stale baseline (every resource in a freshly-upgraded customer repo, whose
+`lastPulledHash` was written in an older hash basis) manufactured a conflict
+where none existed.
+
+### Risk
+
+Push/apply unusable for normal resources without `--overwrite` — the exact
+escape hatch that silently clobbers concurrent dashboard edits. The phantom
+drift trained operators to reach for the dangerous flag on every push.
+
+### Resolution
+
+1. **Extracted `src/canonical.ts`** (dependency-light: credentials + types).
+   It holds `VapiResource`, `EXCLUDED_FIELDS`, `cleanResource`,
+   `buildReverseMap`, `resolveReferencesToResourceIds`, and
+   `canonicalizeForHash`. `pull.ts`, `push.ts`, `audit.ts`, AND `drift.ts` now
+   import the ONE definition. Deleted drift's duplicate field-strip and the
+   dead `hashPlatformResource`. `checkDriftForUpdate` computes platform + local
+   hashes itself (no injected callback, no hash plumbing at the call site).
+2. **Fixed the gate, not the classifier.** `checkDriftForUpdate` now returns
+   `match` (no-op, never blocks) when `localHash === platformHash`, regardless
+   of the baseline. `classifyDrift` keeps its descriptive `both-diverged`
+   contract (it still signals the stale pointer) — policy lives in the gate.
+
+Regression coverage: `tests/push-stale-baseline-noop.test.ts` (e2e — stale
+baseline + local==dashboard → push applies, no block) and `tests/drift.test.ts`
+(canonicalization resolves tool UUID→slug so a clean resource matches baseline).
+
+### Lesson
+
+`--dry-run` is NOT a verification of the drift path — it skips it. Verify
+push-gate changes with a real (idempotent) push or the e2e harness.
+
+### Status
+
+RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally

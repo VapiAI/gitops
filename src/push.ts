@@ -48,7 +48,10 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   "simulation suite": "simulationSuites",
 };
 
-import { credentialForwardMap, replaceCredentialRefs } from "./credentials.ts";
+import {
+  credentialForwardMap,
+  replaceCredentialRefs,
+} from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
 import { fetchAllResources, fetchResourceById, runPull } from "./pull.ts";
 import {
@@ -56,7 +59,12 @@ import {
   resolveAssistantIds,
   resolveReferences,
 } from "./resolver.ts";
-import { FOLDER_MAP, loadResources, loadSingleResource, pathMatchesFolder } from "./resources.ts";
+import {
+  FOLDER_MAP,
+  loadResources,
+  loadSingleResource,
+  pathMatchesFolder,
+} from "./resources.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type {
   LoadedResources,
@@ -91,6 +99,12 @@ async function upsertResourceWithStateRecovery(options: {
   updatePayload: Record<string, unknown>;
   createEndpoint: string;
   createPayload: Record<string, unknown>;
+  // Full state file — needed so drift detection can canonicalize the platform
+  // payload into the same basis as `lastPulledHash` (resolves UUID refs back
+  // to resourceId slugs + credential names). Without it the drift check
+  // compares incompatible hash bases and phantom-reports `both-diverged` on
+  // every resource that references a tool, credential, or has a prompt.
+  fullState: StateFile;
 }): Promise<string | null> {
   const {
     resourceLabel,
@@ -101,6 +115,7 @@ async function upsertResourceWithStateRecovery(options: {
     updatePayload,
     createEndpoint,
     createPayload,
+    fullState,
   } = options;
 
   if (!existingUuid) {
@@ -122,28 +137,36 @@ async function upsertResourceWithStateRecovery(options: {
   if (!DRY_RUN) {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {
-      try {
-        const drift = await checkDriftForUpdate({
-          endpoint: updateEndpoint,
-          resourceLabel,
-          resourceId,
-          state: stateEntry,
-          overwrite: OVERWRITE_DRIFT,
-          localHash: hashPayload(updatePayload),
-        });
-        if (drift.message) {
-          if (drift.ok) console.log(drift.message);
-          else console.error(drift.message);
+      const driftResourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
+      // The drift check now owns the full hash computation (platform, local,
+      // and baseline all canonicalized via canonical.ts). Push just hands it
+      // the full state + resource type — no hash plumbing at the call site.
+      if (driftResourceType) {
+        try {
+          const drift = await checkDriftForUpdate({
+            endpoint: updateEndpoint,
+            resourceLabel,
+            resourceType: driftResourceType,
+            resourceId,
+            state: fullState,
+            overwrite: OVERWRITE_DRIFT,
+          });
+          if (drift.message) {
+            if (drift.ok) console.log(drift.message);
+            else console.error(drift.message);
+          }
+          if (!drift.ok) return null;
+        } catch (driftErr) {
+          // A drift check failure should NOT block the push — the existing
+          // PATCH path will surface the real error. Log and move on.
+          console.warn(
+            `   ⚠️  drift check failed for ${resourceLabel} ${resourceId}: ` +
+              (driftErr instanceof Error
+                ? driftErr.message
+                : String(driftErr)) +
+              ". Continuing.",
+          );
         }
-        if (!drift.ok) return null;
-      } catch (driftErr) {
-        // A drift check failure should NOT block the push — the existing
-        // PATCH path will surface the real error. Log and move on.
-        console.warn(
-          `   ⚠️  drift check failed for ${resourceLabel} ${resourceId}: ` +
-            (driftErr instanceof Error ? driftErr.message : String(driftErr)) +
-            ". Continuing.",
-        );
       }
 
       // Snapshot the current platform payload + our outgoing payload to a
@@ -451,6 +474,7 @@ export async function applyTool(
     resourceId,
     existingUuid,
     stateSection: state.tools,
+    fullState: state,
     updateEndpoint: `/tool/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "tools"),
     createEndpoint: "/tool",
@@ -501,6 +525,7 @@ export async function applyStructuredOutput(
     resourceId,
     existingUuid,
     stateSection: state.structuredOutputs,
+    fullState: state,
     updateEndpoint: `/structured-output/${existingUuid}?schemaOverride=true`,
     updatePayload: removeExcludedKeys(payload, "structuredOutputs"),
     createEndpoint: "/structured-output",
@@ -523,6 +548,7 @@ export async function applyAssistant(
     resourceId,
     existingUuid,
     stateSection: state.assistants,
+    fullState: state,
     updateEndpoint: `/assistant/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "assistants"),
     createEndpoint: "/assistant",
@@ -545,6 +571,7 @@ export async function applySquad(
     resourceId,
     existingUuid,
     stateSection: state.squads,
+    fullState: state,
     updateEndpoint: `/squad/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "squads"),
     createEndpoint: "/squad",
@@ -567,6 +594,7 @@ export async function applyPersonality(
     resourceId,
     existingUuid,
     stateSection: state.personalities,
+    fullState: state,
     updateEndpoint: `/eval/simulation/personality/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "personalities"),
     createEndpoint: "/eval/simulation/personality",
@@ -589,6 +617,7 @@ export async function applyScenario(
     resourceId,
     existingUuid,
     stateSection: state.scenarios,
+    fullState: state,
     updateEndpoint: `/eval/simulation/scenario/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "scenarios"),
     createEndpoint: "/eval/simulation/scenario",
@@ -611,6 +640,7 @@ export async function applySimulation(
     resourceId,
     existingUuid,
     stateSection: state.simulations,
+    fullState: state,
     updateEndpoint: `/eval/simulation/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "simulations"),
     createEndpoint: "/eval/simulation",
@@ -633,6 +663,7 @@ export async function applySimulationSuite(
     resourceId,
     existingUuid,
     stateSection: state.simulationSuites,
+    fullState: state,
     updateEndpoint: `/eval/simulation/suite/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "simulationSuites"),
     createEndpoint: "/eval/simulation/suite",

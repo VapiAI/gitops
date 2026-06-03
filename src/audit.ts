@@ -25,12 +25,8 @@ import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { classifyDrift } from "./drift.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
-import {
-  canonicalizeForHash,
-  fetchAllResources,
-  listExistingResourceIds,
-  type VapiResource,
-} from "./pull.ts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import { fetchAllResources, listExistingResourceIds } from "./pull.ts";
 import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState } from "./state.ts";

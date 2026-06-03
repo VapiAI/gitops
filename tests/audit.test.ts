@@ -17,7 +17,7 @@ const { formatFinding, runAudit, summarizeFindings } = await import(
 const { exitCodeForFindings } = await import("../src/audit-cmd.ts");
 
 import type { AuditFinding } from "../src/audit.ts";
-import type { VapiResource } from "../src/pull.ts";
+import type { VapiResource } from "../src/canonical.ts";
 import type { ResourceState, ResourceType, StateFile } from "../src/types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────

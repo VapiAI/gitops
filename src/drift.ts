@@ -19,8 +19,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { vapiGet, VapiApiError } from "./api.ts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import { credentialReverseMap } from "./credentials.ts";
+import { hashLocalResource } from "./resources.ts";
 import { hashPayload } from "./state-serialize.ts";
-import type { ResourceState } from "./types.ts";
+import type { ResourceType, StateFile } from "./types.ts";
 
 export type DriftDirection =
   | "clean"
@@ -84,46 +87,19 @@ async function fetchPlatformPayload(endpoint: string): Promise<unknown | null> {
   }
 }
 
-// Strip server-managed fields before hashing so the platform's payload hash
-// matches the last-pulled-hash basis (which excluded them via cleanResource).
-const SERVER_FIELDS = new Set([
-  "id",
-  "orgId",
-  "createdAt",
-  "updatedAt",
-  "analyticsMetadata",
-  "isDeleted",
-  "isServerUrlSecretSet",
-  "workflowIds",
-]);
-
-function stripServerFields(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return payload;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
-    if (!SERVER_FIELDS.has(k)) out[k] = v;
-  }
-  return out;
-}
-
-export function hashPlatformResource(resource: unknown): string {
-  return hashPayload(stripServerFields(resource));
-}
-
 export async function checkDriftForUpdate(options: {
   endpoint: string; // e.g. "/assistant/<uuid>"
   resourceLabel: string; // for log lines
+  resourceType: ResourceType;
   resourceId: string; // local resource id
-  state: ResourceState;
+  state: StateFile;
   overwrite: boolean;
-  localHash?: string;
 }): Promise<DriftCheckResult> {
-  const { endpoint, resourceLabel, resourceId, state, overwrite, localHash } =
+  const { endpoint, resourceLabel, resourceType, resourceId, state, overwrite } =
     options;
 
-  if (!state.lastPulledHash) {
+  const entry = state[resourceType]?.[resourceId];
+  if (!entry?.lastPulledHash) {
     return {
       ok: true,
       reason: "no-baseline",
@@ -140,15 +116,41 @@ export async function checkDriftForUpdate(options: {
     return { ok: true, reason: "no-baseline" };
   }
 
-  const platformHash = hashPayload(stripServerFields(remote));
-  if (platformHash === state.lastPulledHash) {
+  // Hash all three points (platform, local, baseline) in ONE basis — the
+  // canonical form defined in canonical.ts that pull also uses to write
+  // `lastPulledHash`. Drift previously carried its own field-strip copy that
+  // omitted reference/credential resolution, so any tool- or credential-bearing
+  // resource hashed differently here than at pull time → phantom both-diverged.
+  const credReverse = credentialReverseMap(state);
+  const platformHash = hashPayload(
+    canonicalizeForHash(remote as VapiResource, state, credReverse),
+  );
+  if (platformHash === entry.lastPulledHash) {
     return { ok: true, reason: "match", platformHash };
   }
 
-  const effectiveLocalHash = localHash ?? state.lastPulledHash ?? platformHash;
+  // On-disk hash in the same basis as `lastPulledHash`. Absent a local file
+  // (rare on an update path), fall back to the baseline so the direction is
+  // dashboard-ahead rather than a phantom both-diverged.
+  const localHash =
+    hashLocalResource(resourceType, resourceId) ?? entry.lastPulledHash;
+
+  // Local and platform are byte-identical → there is nothing to reconcile and
+  // the PATCH is a no-op. NEVER block here, even if `lastPulledHash` disagrees
+  // with both (a stale or older-basis baseline must not manufacture a conflict
+  // when the two LIVE sides already agree). `classifyDrift` still reports this
+  // as `both-diverged` by its descriptive contract — that signals the stale
+  // state pointer — but the push *gate* treats agreement between local and
+  // platform as clean. This is the fix for the phantom-drift class: a freshly
+  // upgraded customer repo carries baselines written in an older hash basis,
+  // so every untouched resource hit `both-diverged` on its first push.
+  if (localHash === platformHash) {
+    return { ok: true, reason: "match", platformHash };
+  }
+
   const direction = classifyDrift({
-    localHash: effectiveLocalHash,
-    lastPulledHash: state.lastPulledHash,
+    localHash,
+    lastPulledHash: entry.lastPulledHash,
     platformHash,
   });
   const directionTag = `[${direction}]`;
@@ -171,7 +173,7 @@ export async function checkDriftForUpdate(options: {
     message:
       `   ❌ drift detected on ${resourceLabel} ${resourceId} ${directionTag}: ` +
       `platform hash (${platformHash.slice(0, 8)}...) differs from last-pulled ` +
-      `(${state.lastPulledHash.slice(0, 8)}...). ` +
+      `(${entry.lastPulledHash.slice(0, 8)}...). ` +
       `${formatDriftLabel(direction)} ` +
       `Re-run pull, resolve locally, or push with --overwrite to take ownership.`,
   };
