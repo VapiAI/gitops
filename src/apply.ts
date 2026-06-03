@@ -29,11 +29,31 @@ export async function runApply(): Promise<void> {
   const allArgs = process.argv.slice(3);
   const hasForce = allArgs.includes("--force");
 
-  const pullArgs = allArgs.filter((a) => a !== "--force").join(" ");
-  const pushArgs = allArgs.join(" ");
+  // Apply's job is to push local up; default pull drift resolution to "ours"
+  // unless the operator explicitly passes --resolve=theirs|fail (CI).
+  const pullArgsList = allArgs.filter((a) => a !== "--force");
+  if (!pullArgsList.some((a) => a.startsWith("--resolve="))) {
+    pullArgsList.push("--resolve=ours");
+  }
+  const resolveArg = pullArgsList.find((a) => a.startsWith("--resolve="));
+  const resolveMode = resolveArg?.slice("--resolve=".length) ?? "ours";
+
+  const pullArgs = pullArgsList.join(" ");
+
+  // Pull --resolve=ours means "keep local and push it up" — push needs
+  // --overwrite so its pre-PATCH drift gate doesn't block the same intent.
+  const pushArgsList = [...allArgs];
+  if (
+    resolveMode === "ours" &&
+    !pushArgsList.includes("--overwrite") &&
+    !pushArgsList.includes("--dry-run")
+  ) {
+    pushArgsList.push("--overwrite");
+  }
+  const pushArgs = pushArgsList.join(" ");
 
   if (!env || !SLUG_RE.test(env)) {
-    console.error("Usage: npm run apply <org> [--force] [--allow-new-files]");
+    console.error("Usage: npm run apply <org> [--force] [--allow-new-files] [--resolve=ours|theirs|fail] [<file...>]");
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");
@@ -54,6 +74,15 @@ export async function runApply(): Promise<void> {
     );
     console.error(
       "                     state entry is genuinely new — see src/new-file-gate.ts.",
+    );
+    console.error(
+      "  --resolve=ours     On 3-way drift, keep local and push up (default; adds --overwrite on push).",
+    );
+    console.error(
+      "  --resolve=theirs   On 3-way drift, overwrite local with dashboard.",
+    );
+    console.error(
+      "  --resolve=fail     On 3-way drift, exit without writing (CI mode).",
     );
     process.exit(1);
   }

@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { stringify } from "yaml";
+import { vapiGet, VapiApiError } from "./api.ts";
 import {
   APPLY_FILTER,
   BASE_DIR,
@@ -25,7 +26,7 @@ import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
-import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
+import { FOLDER_MAP, hashLocalResource, resolvePullScopeFromFilePaths } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
@@ -140,40 +141,32 @@ export async function fetchAllResources(
   resourceType: ResourceType,
 ): Promise<VapiResource[]> {
   const endpoint = ENDPOINT_MAP[resourceType];
-  const url = `${VAPI_BASE_URL}${endpoint}`;
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${VAPI_TOKEN}`,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let apiMessage = errorText;
-    try {
-      const parsed = JSON.parse(errorText);
-      if (typeof parsed.message === "string") apiMessage = parsed.message;
-    } catch {}
-    throw new Error(
-      `API GET ${endpoint} failed (${response.status}): ${apiMessage}`,
-    );
-  }
-
-  const data = await response.json();
+  const data = await vapiGet<unknown>(endpoint);
 
   // Handle paginated response format (e.g., structured-output returns { results: [], metadata: {} })
   if (
     data &&
     typeof data === "object" &&
     "results" in data &&
-    Array.isArray(data.results)
+    Array.isArray((data as Record<string, unknown>).results)
   ) {
-    return data.results as VapiResource[];
+    return (data as { results: VapiResource[] }).results;
   }
 
   return data as VapiResource[];
+}
+
+export async function fetchResourceById(
+  resourceType: ResourceType,
+  uuid: string,
+): Promise<VapiResource | null> {
+  const endpoint = `${ENDPOINT_MAP[resourceType]}/${uuid}`;
+  try {
+    return await vapiGet<VapiResource>(endpoint);
+  } catch (error) {
+    if (error instanceof VapiApiError && error.statusCode === 404) return null;
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,25 +181,7 @@ interface VapiCredential {
 }
 
 async function fetchCredentials(): Promise<VapiCredential[]> {
-  const url = `${VAPI_BASE_URL}/credential`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let apiMessage = errorText;
-    try {
-      const parsed = JSON.parse(errorText);
-      if (typeof parsed.message === "string") apiMessage = parsed.message;
-    } catch {}
-    throw new Error(
-      `API GET /credential failed (${response.status}): ${apiMessage}`,
-    );
-  }
-
-  return (await response.json()) as VapiCredential[];
+  return vapiGet<VapiCredential[]>("/credential");
 }
 
 function credentialSlug(cred: VapiCredential): string {
@@ -778,12 +753,14 @@ export async function pullResourceType(
   let skipped = 0;
 
   for (const resource of resources) {
-    // Check if we already have this resource in state (by UUID)
-    let resourceId = reverseMap.get(resource.id);
-    if (resourceId && !resourceIdMatchesName(resourceId, resource)) {
-      delete newStateSection[resourceId];
-      resourceId = undefined;
-    }
+    // Check if we already have this resource in state (by UUID).
+    // The filename slug is a stable local handle, NOT derived from the
+    // dashboard `name`. If this UUID is already tracked in state, keep its
+    // existing resourceId verbatim — a dashboard rename only changes the
+    // resource's content, never its local filename. We only mint a new slug
+    // when the UUID is unknown to state (genuinely new or cross-env adoption).
+    const trackedResourceId = reverseMap.get(resource.id);
+    let resourceId = trackedResourceId;
 
     if (!resourceId) {
       // Reuse an existing file's resourceId if the name matches (cross-env
@@ -805,9 +782,10 @@ export async function pullResourceType(
         : (findExistingResourceId(existingResourceIds, resource, claimView) ??
           generateResourceId(resource));
     }
-    const isNew =
-      !reverseMap.get(resource.id) ||
-      !resourceIdMatchesName(resourceId, resource);
+    // New only when the UUID was not previously tracked. A dashboard rename
+    // of an already-tracked resource is an UPDATE to the existing file, not
+    // a new resource — the local filename stays put.
+    const isNew = !trackedResourceId;
 
     removeUuidMappings(newStateSection, resource.id, resourceId);
 
@@ -1193,11 +1171,13 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
 export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   const force = options.force ?? process.argv.includes("--force");
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
-  const typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
-  const resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
+  const filePathFilter = APPLY_FILTER.filePaths;
+  let typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
+  let resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
   const resolveMode = parseResolveMode(options.resolveMode);
   const driftCounts = emptyDriftCounts();
   const bothDivergedResources: BothDivergedResource[] = [];
+  let idsByType: Map<ResourceType, string[]> | undefined;
 
   if (force && process.env.CI !== "true") {
     console.warn(
@@ -1230,6 +1210,9 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   }
   if (resourceIds?.length) {
     console.log(`   IDs: ${resourceIds.join(", ")}`);
+  }
+  if (filePathFilter?.length) {
+    console.log(`   Files: ${filePathFilter.join(", ")}`);
   }
   if (bootstrap) {
     console.log(
@@ -1280,6 +1263,28 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
 
   const state = loadState();
 
+  if (filePathFilter?.length && !bootstrap) {
+    const scope = resolvePullScopeFromFilePaths(filePathFilter, state);
+    if (scope.unrecognized.length > 0) {
+      console.log(
+        `\n   ⚠️  Unrecognized file path(s): ${scope.unrecognized.join(", ")}`,
+      );
+    }
+    if (scope.skippedWithoutState.length > 0) {
+      console.log(
+        `\n   ℹ️  ${scope.skippedWithoutState.length} selected file(s) have no state UUID yet — skipping pull (push will create):`,
+      );
+      for (const entry of scope.skippedWithoutState) {
+        console.log(`      - ${FOLDER_MAP[entry.type]}/${entry.resourceId}`);
+      }
+    }
+    idsByType = scope.idsByType;
+    typeFilter = scope.types;
+    resourceIds = undefined;
+  }
+
+  const isScopedPull = !!(resourceIds?.length || idsByType?.size);
+
   // Credentials are always pulled first — they're needed to reverse-resolve UUIDs in resource files
   await pullCredentials(state);
 
@@ -1299,44 +1304,64 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   // Pull in reverse-resolution order: pull resources that are referenced by others first,
   // so their state is populated when resolving references (UUID → resourceId) in dependent types.
   // e.g. structuredOutputs reference assistants, so assistants must be pulled first.
-  const shouldPull = (type: ResourceType) =>
-    !typeFilter?.length || typeFilter.includes(type);
+  const shouldPull = (type: ResourceType) => {
+    if (idsByType) {
+      return (idsByType.get(type)?.length ?? 0) > 0;
+    }
+    return !typeFilter?.length || typeFilter.includes(type);
+  };
 
-  const pullOpts = {
+  const pullOptsFor = (type: ResourceType) => ({
     changedFiles,
     force,
     bootstrap,
-    resourceIds,
+    resourceIds: idsByType?.get(type) ?? resourceIds,
     driftCounts,
     bothDiverged: bothDivergedResources,
-  };
+  });
 
   if (shouldPull("tools"))
-    stats.tools = await pullResourceType("tools", state, pullOpts);
+    stats.tools = await pullResourceType("tools", state, pullOptsFor("tools"));
   if (shouldPull("assistants"))
-    stats.assistants = await pullResourceType("assistants", state, pullOpts);
+    stats.assistants = await pullResourceType(
+      "assistants",
+      state,
+      pullOptsFor("assistants"),
+    );
   if (shouldPull("structuredOutputs"))
     stats.structuredOutputs = await pullResourceType(
       "structuredOutputs",
       state,
-      pullOpts,
+      pullOptsFor("structuredOutputs"),
     );
   if (shouldPull("squads"))
-    stats.squads = await pullResourceType("squads", state, pullOpts);
+    stats.squads = await pullResourceType("squads", state, pullOptsFor("squads"));
   if (shouldPull("personalities"))
-    stats.personalities = await pullResourceType("personalities", state, pullOpts);
+    stats.personalities = await pullResourceType(
+      "personalities",
+      state,
+      pullOptsFor("personalities"),
+    );
   if (shouldPull("scenarios"))
-    stats.scenarios = await pullResourceType("scenarios", state, pullOpts);
+    stats.scenarios = await pullResourceType(
+      "scenarios",
+      state,
+      pullOptsFor("scenarios"),
+    );
   if (shouldPull("simulations"))
-    stats.simulations = await pullResourceType("simulations", state, pullOpts);
+    stats.simulations = await pullResourceType(
+      "simulations",
+      state,
+      pullOptsFor("simulations"),
+    );
   if (shouldPull("simulationSuites"))
     stats.simulationSuites = await pullResourceType(
       "simulationSuites",
       state,
-      pullOpts,
+      pullOptsFor("simulationSuites"),
     );
   if (shouldPull("evals"))
-    stats.evals = await pullResourceType("evals", state, pullOpts);
+    stats.evals = await pullResourceType("evals", state, pullOptsFor("evals"));
 
   // Collapse UUID-suffixed state keys back to canonical when the underlying
   // name-collision has resolved (the conflicting twin was deleted, etc.).
@@ -1347,7 +1372,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   // we don't touch sections this pull didn't refresh — preserves the stated
   // safety boundary even though the preconditions themselves are safe.
   // Pull's saveState writes wholesale, so `touched` isn't needed here.
-  if (!bootstrap && !resourceIds?.length) {
+  if (!bootstrap && !isScopedPull) {
     const report = recanonicalizeStateKeys({
       state,
       types: typeFilter?.length ? (typeFilter as ResourceType[]) : undefined,

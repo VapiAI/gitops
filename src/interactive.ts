@@ -1033,13 +1033,35 @@ export async function runInteractiveApply(): Promise<void> {
   }
 
   // ── Execute apply ─────────────────────────────────────────────────────
+  const driftResolve = await select({
+    message:
+      "If local and dashboard both changed since last pull, which version wins?",
+    choices: [
+      {
+        name: "Keep my local version and push it up",
+        value: "ours" as const,
+      },
+      {
+        name: "Take dashboard version (lose my local edits)",
+        value: "theirs" as const,
+      },
+      { name: c.dim("← Cancel"), value: "cancel" as const },
+    ],
+    default: "ours",
+  });
+
+  if (driftResolve === "cancel") {
+    console.log(c.dim("\n  Cancelled.\n"));
+    return;
+  }
+
   const useForce = await confirm({
     message:
       "Enable force mode? (deletions: resources removed locally will also be deleted remotely)",
     default: false,
   });
 
-  const args = ["src/apply.ts", slug];
+  const args = ["src/apply.ts", slug, `--resolve=${driftResolve}`];
   if (useForce) args.push("--force");
 
   if (!applyAll) {

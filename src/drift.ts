@@ -18,7 +18,7 @@
 // has nothing to compare against — only PATCH (update) is drift-sensitive.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
+import { vapiGet, VapiApiError } from "./api.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceState } from "./types.ts";
 
@@ -76,16 +76,12 @@ async function fetchPlatformPayload(endpoint: string): Promise<unknown | null> {
   // was deleted on the dashboard — let the upsert path handle it (the existing
   // 404 → "stale mapping, drop and skip" recovery in
   // upsertResourceWithStateRecovery covers this case).
-  const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Drift GET ${endpoint} → ${response.status}: ${text}`);
+  try {
+    return await vapiGet(endpoint);
+  } catch (error) {
+    if (error instanceof VapiApiError && error.statusCode === 404) return null;
+    throw error;
   }
-  return response.json();
 }
 
 // Strip server-managed fields before hashing so the platform's payload hash

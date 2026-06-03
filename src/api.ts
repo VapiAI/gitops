@@ -152,6 +152,48 @@ export async function vapiRequest<T = VapiResponse>(
   throw new VapiApiError(method, endpoint, 429, "max retries exceeded", "");
 }
 
+export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
+  const url = `${VAPI_BASE_URL}${endpoint}`;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await throttle();
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${VAPI_TOKEN}`,
+      },
+    });
+
+    if (response.ok) {
+      return response.json() as Promise<T>;
+    }
+
+    if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
+      const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
+      const reason =
+        response.status === 429
+          ? "Rate limited"
+          : `Server error ${response.status}`;
+      console.log(
+        `  ⏳ ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`,
+      );
+      await sleep(delay);
+      continue;
+    }
+
+    const errorText = await response.text();
+    throw new VapiApiError(
+      "GET",
+      endpoint,
+      response.status,
+      parseApiMessage(errorText),
+      errorText,
+    );
+  }
+
+  throw new VapiApiError("GET", endpoint, 429, "max retries exceeded", "");
+}
+
 export async function vapiDelete(endpoint: string): Promise<void> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 

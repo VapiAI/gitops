@@ -234,6 +234,24 @@ test("recanonicalize: refuses when canonical local file is missing (would create
   assert.deepEqual(Object.keys(state.squads), ["foo-aaaaaaaa"]);
 });
 
+test("recanonicalize: skips UUID-suffixed keys when only the matching local file exists (normal post-pull layout)", () => {
+  const state = makeStateFile({
+    assistants: {
+      "call-transfer-test-c95f4c6b": makeStateEntry(
+        "c95f4c6b-bfde-4e90-af7e-ea8870b9f2d6",
+      ),
+    },
+  });
+  const report = recanonicalizeStateKeys({
+    state,
+    fileExists: makeFileExists(
+      new Set(["assistants/call-transfer-test-c95f4c6b.md"]),
+    ),
+  });
+  assert.equal(report.rekeys.length, 0);
+  assert.equal(report.conflicts.length, 0);
+});
+
 test("recanonicalize: respects all loader-recognized extensions (.yml/.yaml/.ts/.md) for precondition 4", () => {
   // VALID_EXTENSIONS in src/resources.ts includes `.ts` (TypeScript
   // resources via dynamic import). Without importing the canonical

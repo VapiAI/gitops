@@ -1030,6 +1030,55 @@ RESOLVED 2026-05-11 (#TBD — PR number updates when opened).
 
 ---
 
+## 22. Dashboard rename of a tracked resource recreated the local file (duplicate per UUID)
+
+**[RESOLVED 2026-06-03] (#TBD)**
+
+**Discovered:** during a `vitali-org` pull after renaming an assistant in the
+dashboard ("call-transfer-test" → "call-transfer-test-1"). Pull created a
+second file `call-transfer-test-1-c95f4c6b.md` next to the existing
+`call-transfer-test-c95f4c6b.md` — two files for one UUID.
+
+### Problem
+
+The engine treated the local filename slug as if it had to track the
+dashboard `name`. Renaming a resource on the dashboard caused pull to mint a
+new name-derived slug and write a duplicate file, orphaning the original.
+
+### Current behavior (was)
+
+`pullResourceType` (`src/pull.ts`) looked up the tracked resourceId by UUID,
+then discarded it via `resourceIdMatchesName` whenever the dashboard `name`
+no longer matched the slug — falling through to `generateResourceId` and
+producing a `<name>-<uuid8>` duplicate. The push side mirrored the same
+assumption: `getInvalidStateMappings` (`src/push.ts`) flagged the rename as
+`name_mismatch` and forced a bootstrap that re-keyed state to the
+name-derived slug, so the next push created a duplicate on the dashboard too.
+
+### Risk
+
+Silent duplication: two local files per UUID on pull, and (via apply) a
+duplicate dashboard resource on the subsequent push. Confusing state, lost
+edits, orphan cleanup required.
+
+### Resolution
+
+The filename slug is now a stable local handle, fully decoupled from the
+dashboard `name`. On pull, an already-tracked UUID keeps its existing
+resourceId verbatim — a rename only updates file content, never the filename
+(holds under `--force` too). On push, `name_mismatch` was removed from
+`getInvalidStateMappings`; only `missing_remote` (genuinely stale state) now
+triggers a bootstrap. New slugs are still minted only when the UUID is
+unknown to state (genuinely new resource or cross-env adoption — the
+same-name-twin adoption guard in `findExistingResourceId` is unchanged).
+Regression coverage: `tests/pull-rename-preserves-filename.test.ts`.
+
+### Status
+
+RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally

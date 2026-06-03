@@ -945,16 +945,16 @@ For the **complete schema** of all available properties on each resource type, c
 
 ### Renaming an existing resource
 
-The engine has a `name_mismatch` guard that auto-bootstraps state from the dashboard before applying changes. **Editing `.vapi-state.<org>.json` by hand to repoint a renamed file at the existing dashboard UUID does not work** — the bootstrap runs first, overwrites your manual edit, and the rename gets treated as "delete the old resource + create a new one."
+**The local filename is a stable handle, decoupled from the dashboard `name`.** State maps `<filename-slug> → UUID`. As long as a file exists for a state entry, the engine keeps that filename — you can name a file `blub-blub-blub.md` and it stays put regardless of what the resource is called on the dashboard.
 
 What this means in practice for renames:
 
 | Approach | What happens |
 |---|---|
-| Rename the file locally + `npm run push -- <org>` | New UUID is minted for the renamed file; the old UUID becomes orphaned in the dashboard. Run `npm run cleanup -- <org> --force` (or `npm run push -- <org> --force <file>`) to delete the orphan. |
-| Rename in the dashboard first, then `npm run pull -- <org>` | UUID is preserved. The pulled file lands with the new name and the existing UUID suffix; no orphan. |
+| Rename the resource in the dashboard, then `npm run pull -- <org>` | UUID preserved. The local filename is **unchanged** — pull only updates the file's content (the new `name:` lands in the frontmatter). No second file, no orphan. This holds even under `--force` / "overwrite" — overwrite replaces content, never the filename. |
+| Rename the file locally + `npm run push -- <org>` | The renamed file has no state entry, so the orphan-YAML gate fires (it can't tell a rename from a new resource). Re-key state instead: rename in the dashboard first and pull, or accept a new UUID by pushing with `--allow-new-files` and cleaning up the old orphan via `npm run cleanup -- <org> --force`. |
 
-If preserving the UUID matters (e.g. it's referenced from a phone number, outbound campaign, or external integration), rename via the dashboard first and pull. Otherwise, accept the new UUID and clean up the orphan.
+Because dashboard renames no longer change the local filename, the old "rename in the dashboard to preserve the UUID" dance is unnecessary — the UUID is always preserved on pull for any already-tracked resource.
 
 ---
 

@@ -50,13 +50,13 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
 
 import { credentialForwardMap, replaceCredentialRefs } from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
-import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
+import { fetchAllResources, fetchResourceById, runPull } from "./pull.ts";
 import {
   extractReferencedIds,
   resolveAssistantIds,
   resolveReferences,
 } from "./resolver.ts";
-import { FOLDER_MAP, loadResources, loadSingleResource } from "./resources.ts";
+import { FOLDER_MAP, loadResources, loadSingleResource, pathMatchesFolder } from "./resources.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type {
   LoadedResources,
@@ -288,14 +288,14 @@ async function getInvalidStateMappings(
     type: ResourceType;
     resourceId: string;
     uuid: string;
-    reason: "missing_remote" | "name_mismatch";
+    reason: "missing_remote";
   }>
 > {
   const invalidMappings: Array<{
     type: ResourceType;
     resourceId: string;
     uuid: string;
-    reason: "missing_remote" | "name_mismatch";
+    reason: "missing_remote";
   }> = [];
 
   for (const type of getTargetedResourceTypes(resources)) {
@@ -317,27 +317,36 @@ async function getInvalidStateMappings(
       continue;
     }
 
-    const remoteResources = await fetchAllResources(type);
+    let remoteResources: Awaited<ReturnType<typeof fetchAllResources>>;
+    if (isPartialApply() && trackedResources.length <= 10) {
+      remoteResources = [];
+      for (const trackedResource of trackedResources) {
+        const remoteResource = await fetchResourceById(
+          type,
+          trackedResource.uuid,
+        );
+        if (remoteResource) remoteResources.push(remoteResource);
+      }
+    } else {
+      remoteResources = await fetchAllResources(type);
+    }
     const remoteResourcesById = new Map(
       remoteResources.map((resource) => [resource.id, resource]),
     );
 
     for (const trackedResource of trackedResources) {
       const remoteResource = remoteResourcesById.get(trackedResource.uuid);
+      // Only `missing_remote` is genuinely stale state. A dashboard rename
+      // (remote `name` no longer matches the local filename slug) is NOT a
+      // problem — the filename is a stable local handle, decoupled from the
+      // dashboard name. Flagging renames here used to force a bootstrap that
+      // re-keyed state to a name-derived slug, orphaning the local file and
+      // creating a duplicate on the next push.
       if (!remoteResource) {
         invalidMappings.push({
           type,
           ...trackedResource,
           reason: "missing_remote",
-        });
-        continue;
-      }
-
-      if (!resourceIdMatchesName(trackedResource.resourceId, remoteResource)) {
-        invalidMappings.push({
-          type,
-          ...trackedResource,
-          reason: "name_mismatch",
         });
       }
     }
@@ -350,16 +359,21 @@ async function maybeBootstrapState(
   resources: LoadedResources,
   state: StateFile,
 ): Promise<StateFile> {
-  if (!hasAnyLoadedResources(resources)) {
+  const scopedResources = scopeLoadedResourcesForApply(resources);
+
+  if (!hasAnyLoadedResources(scopedResources)) {
     return state;
   }
 
-  const targetedTypes = getTargetedResourceTypes(resources);
-  const missingCredentialNames = getMissingCredentialNames(resources, state);
+  const targetedTypes = getTargetedResourceTypes(scopedResources);
+  const missingCredentialNames = getMissingCredentialNames(
+    scopedResources,
+    state,
+  );
   const stateUninitialized =
     Object.keys(state.credentials).length === 0 ||
     targetedTypes.every((type) => Object.keys(state[type]).length === 0);
-  const invalidMappings = await getInvalidStateMappings(resources, state);
+  const invalidMappings = await getInvalidStateMappings(scopedResources, state);
 
   if (
     !stateUninitialized &&
@@ -731,27 +745,6 @@ function isPartialApply(): boolean {
   );
 }
 
-// Match a CLI-supplied path against a folder name. Common shapes the user
-// can pass:
-//   - `resources/<org>/assistants/foo.yml`
-//   - `./resources/<org>/assistants/foo.yml`
-//   - `assistants/foo.yml`            ← short form
-//   - `assistants/support/intake.yml` ← short form with subdir
-//   - absolute path
-// The previous version only matched `/<folder>/` (with a leading slash),
-// so the short form silently no-op'd: the type was never loaded into the
-// apply pipeline and the more permissive `filterResourcesByPaths` was
-// never even consulted.
-export function pathMatchesFolder(filePath: string, folder: string): boolean {
-  return (
-    filePath === folder ||
-    filePath.startsWith(`${folder}/`) ||
-    filePath.startsWith(`${folder}\\`) ||
-    filePath.includes(`/${folder}/`) ||
-    filePath.includes(`\\${folder}\\`)
-  );
-}
-
 function shouldApplyResourceType(type: ResourceType): boolean {
   if (APPLY_FILTER.filePaths?.length) {
     const folder = FOLDER_MAP[type];
@@ -791,6 +784,45 @@ function filterResourcesByPaths<T>(
   }
 
   return resources.filter((r) => matchingIds.has(r.resourceId));
+}
+
+function scopeLoadedResourcesForApply(
+  resources: LoadedResources,
+): LoadedResources {
+  if (!isPartialApply()) return resources;
+
+  return {
+    tools: shouldApplyResourceType("tools")
+      ? filterResourcesByPaths(resources.tools, "tools")
+      : [],
+    structuredOutputs: shouldApplyResourceType("structuredOutputs")
+      ? filterResourcesByPaths(resources.structuredOutputs, "structuredOutputs")
+      : [],
+    assistants: shouldApplyResourceType("assistants")
+      ? filterResourcesByPaths(resources.assistants, "assistants")
+      : [],
+    squads: shouldApplyResourceType("squads")
+      ? filterResourcesByPaths(resources.squads, "squads")
+      : [],
+    personalities: shouldApplyResourceType("personalities")
+      ? filterResourcesByPaths(resources.personalities, "personalities")
+      : [],
+    scenarios: shouldApplyResourceType("scenarios")
+      ? filterResourcesByPaths(resources.scenarios, "scenarios")
+      : [],
+    simulations: shouldApplyResourceType("simulations")
+      ? filterResourcesByPaths(resources.simulations, "simulations")
+      : [],
+    simulationSuites: shouldApplyResourceType("simulationSuites")
+      ? filterResourcesByPaths(
+          resources.simulationSuites,
+          "simulationSuites",
+        )
+      : [],
+    evals: shouldApplyResourceType("evals")
+      ? filterResourcesByPaths(resources.evals, "evals")
+      : [],
+  };
 }
 
 // Track which resourceIds were actually written during this apply. On
@@ -1755,6 +1787,25 @@ async function main(): Promise<void> {
         `   Simulation Suites: ${Object.keys(state.simulationSuites).length}`,
       );
       console.log(`   Evals: ${Object.keys(state.evals).length}`);
+    }
+
+    const totalCandidates =
+      tools.length +
+      structuredOutputs.length +
+      assistants.length +
+      squads.length +
+      personalities.length +
+      scenarios.length +
+      simulations.length +
+      simulationSuites.length +
+      evals.length;
+
+    if (partial && !DRY_RUN && totalCandidates > 0 && totalApplied === 0) {
+      console.error(
+        "\n❌ Push finished but applied 0 resource(s). Likely drift-blocked — " +
+          "run with --overwrite or resolve pull conflicts first.",
+      );
+      process.exit(1);
     }
   } finally {
     // Always flush state, even on partial failure — resources that already
