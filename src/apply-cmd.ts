@@ -1,6 +1,6 @@
 // Entry point for `npm run apply`. Detects whether an org slug was provided:
 // - With slug: forwards to apply.ts (existing non-interactive behavior)
-// - Without slug: enters interactive mode (org selection + confirm)
+// - Without slug: enters interactive mode (org selection + resource picker)
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const arg = process.argv[2];
