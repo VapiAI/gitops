@@ -1,0 +1,82 @@
+name: starlight_wrap_up_code
+type: ai
+target: messages
+description: |
+  Classifies a Brent Council Housing Benefits call into the appropriate wrap-up code.
+  This is used for call categorisation in the Starlight project.
+
+  MULTILINGUAL TRANSCRIPTS:
+  The call may be conducted in any language. Classify based on the topic discussed
+  regardless of the language used.
+
+  CLASSIFICATION GUIDANCE:
+  - Analyse the full conversation to determine the primary reason for the call.
+  - If multiple topics were discussed, select the wrap-up code for the PRIMARY enquiry
+    (the main reason the caller rang).
+  - "query" codes are for callers asking questions or seeking information.
+  - "self serve" codes are for callers who could be or were directed to self-service.
+  - "Transfer to CTAX" is for calls that needed to be redirected to Council Tax.
+  - "Transfer to Others" is for calls redirected to any other department.
+
+  SECOND-TIER CLASSIFICATION:
+  A more granular second-tier classification system is pending definition. Use
+  secondary_classification_notes to capture any additional categorisation detail
+  that may be relevant for future second-tier implementation.
+
+  GLOSSARY OF BRENT COUNCIL TERMS:
+  RSF - Resident Support Fund | DHP - Discretionary Housing Payment |
+  CIC/s - Change in Circumstances | CTS - Council Tax Support |
+  HB - Housing Benefit | UC - Universal Credit | Recons - Reconsideration |
+  Portal/My Account/CAS - Citizen Access Service (customer self-service portal) |
+  Non Dep - Non dependants | OP - Overpayments | LHA - Local Housing Allowance |
+  HSF - Household Support Fund | SB - Switchboard |
+  Welfare Benefit - PIP, Disability Allowance, ESA, etc. |
+  CC - Contact Centre | CTAX - Council Tax |
+  Backdate - date of application query | New Claim - wanted to apply |
+  Bedroom Tax - under-occupancy charge | Benefit cap - maximum benefit limit
+model:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0
+assistant_ids: []
+workflow_ids: []
+schema:
+  type: object
+  description: "Wrap-up code classification for Brent Council Housing Benefits calls."
+  properties:
+    wrap_up_code:
+      type: string
+      description: "The primary wrap-up code for this call. Select the single most appropriate code based on the main reason for the call."
+      enum:
+        - "CC - HB - UC - query"
+        - "HB - CIC - query"
+        - "HB - CIC - self serve"
+        - "HB - Council tax Support (CTS)"
+        - "HB - DHP - query"
+        - "HB - DHP - self serve"
+        - "HB - Dispute/Reconsideration - query"
+        - "HB - Dispute/Reconsideration - Self serve"
+        - "HB - Entitlement - query"
+        - "HB - MyAccount/CAS - query"
+        - "HB - Myaccount/CAS - self serve"
+        - "HB - new claim - query"
+        - "HB - new claim - self serve"
+        - "HB - Overpayment - query"
+        - "HB - RSF - query"
+        - "HB - RSF - self serve"
+        - "HB - Transfer to CTAX"
+        - "HB - Transfer to Others"
+        - "Welfare Benefit HB - query"
+    reasoning:
+      type: string
+      description: "Explanation of why this wrap-up code was selected, referencing the key topics and enquiry type discussed in the call."
+    confidence:
+      type: string
+      description: "How confident the classification is. Use 'high' when the call clearly matches one code, 'medium' when there are two plausible codes, 'low' when the call topic is ambiguous or spans multiple categories."
+      enum:
+        - "high"
+        - "medium"
+        - "low"
+    secondary_classification_notes:
+      type: string
+      description: "Any additional categorisation notes for future second-tier classification. Include details such as specific sub-topic (e.g. 'bedroom tax query within CIC'), caller demographic notes, or other granular classification detail that may be useful when the second-tier system is defined."
