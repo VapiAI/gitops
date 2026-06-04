@@ -12,6 +12,7 @@ import {
   loadIgnorePatterns,
   matchesIgnore,
   RESOURCES_DIR,
+  STATE_FILE_PATH,
   VAPI_BASE_URL,
   VAPI_ENV,
   VAPI_TOKEN,
@@ -27,6 +28,8 @@ import {
   formatDriftLabel,
   type DriftDirection,
 } from "./drift.ts";
+import { readBaseline, writeBaseline } from "./hash-store.ts";
+import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
@@ -189,12 +192,7 @@ async function pullCredentials(state: StateFile): Promise<void> {
     if (!slug) {
       slug = credentialSlug(cred);
     }
-    // Preserve existing hash metadata if the slug+uuid pair survives.
-    const prior = state.credentials[slug];
-    newSection[slug] =
-      prior && prior.uuid === cred.id
-        ? prior
-        : { uuid: cred.id, lastPulledAt: new Date().toISOString() };
+    newSection[slug] = { uuid: cred.id };
     console.log(`   🔑 ${slug} -> ${cred.id}`);
   }
 
@@ -602,14 +600,16 @@ export async function pullResourceType(
 
     let skipLegacyPreserveChecks = false;
 
-    // Hash-based drift direction when a lastPulledHash baseline exists.
+    // Hash-based drift direction when a baseline exists in the hash store.
     if (!bootstrap && !force) {
       const stateEntry =
         newStateSection[resourceId] ?? state[resourceType][resourceId];
-      const lastPulledHash = stateEntry?.lastPulledHash;
+      const baseline = stateEntry
+        ? readBaseline(VAPI_ENV, stateEntry.uuid)
+        : undefined;
       const localFile = findLocalResourcePath(folderPath, resourceId);
 
-      if (localFile && lastPulledHash) {
+      if (localFile && baseline) {
         const localHash = hashLocalResource(resourceType, resourceId);
         if (localHash) {
           // Use canonicalizeForHash so platform-default mutation (_platformDefault)
@@ -621,21 +621,16 @@ export async function pullResourceType(
           );
           const direction = classifyDrift({
             localHash,
-            lastPulledHash,
+            lastPulledHash: baseline,
             platformHash,
           });
           if (driftCounts) driftCounts[direction]++;
 
-          // STATE-PRESERVATION INVARIANT: classifier short-circuit branches
-          // MUST carry `lastPulledHash` (and `lastPulledAt`) forward into
-          // `newStateSection`. `newStateSection` starts EMPTY for a full pull
-          // (pull.ts:769); a bare `upsertState(..., { uuid })` merges against
-          // `undefined`, producing `{ uuid }`-only — dropping the baseline.
-          // Then `state[type] = newStateSection` at end-of-loop persists the
-          // loss. Symptom: next pull sees no baseline → `no-baseline`, the
-          // classifier can never detect drift on this resource again until
-          // something else writes a fresh baseline. The both-diverged branch
-          // skipped `upsertState` entirely, dropping the entry outright.
+          // The drift baseline now lives in the hash store, NOT in the state
+          // section that gets wholesale-replaced at end-of-loop. So the
+          // preserve branches just write the `{ uuid }` mapping and leave the
+          // `.vapi-state-hash/<org>/<uuid>` file untouched — the baseline
+          // survives by construction, no carry-forward needed.
           if (direction === "both-diverged") {
             bothDiverged?.push({
               resourceType,
@@ -643,12 +638,12 @@ export async function pullResourceType(
               resource,
               localHash,
               platformHash,
-              lastPulledHash,
+              lastPulledHash: baseline,
             });
-            // Preserve the existing entry verbatim. `resolveBothDivergedResources`
-            // will overwrite it with the resolve-mode-appropriate hash after the
-            // per-type loop completes; if the operator doesn't pass --resolve, we
-            // want the baseline still intact so the next pull can see drift.
+            // Preserve the `{ uuid }` mapping. `resolveBothDivergedResources`
+            // will rewrite the baseline to the resolve-mode-appropriate hash
+            // after the per-type loop; if the operator doesn't pass --resolve,
+            // the baseline file is left intact so the next pull still sees drift.
             const existing = state[resourceType][resourceId];
             if (existing) {
               newStateSection[resourceId] = existing;
@@ -661,11 +656,7 @@ export async function pullResourceType(
             console.log(
               `   ✏️  ${resourceId} (locally modified, preserving) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, {
-              uuid: resource.id,
-              lastPulledHash,
-              lastPulledAt: stateEntry?.lastPulledAt,
-            });
+            upsertState(newStateSection, resourceId, { uuid: resource.id });
             skipped++;
             continue;
           }
@@ -677,18 +668,14 @@ export async function pullResourceType(
             console.log(
               `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, {
-              uuid: resource.id,
-              lastPulledHash,
-              lastPulledAt: stateEntry?.lastPulledAt,
-            });
+            upsertState(newStateSection, resourceId, { uuid: resource.id });
             skipped++;
             continue;
           }
 
           skipLegacyPreserveChecks = true;
         }
-      } else if (localFile && !lastPulledHash && driftCounts) {
+      } else if (localFile && !baseline && driftCounts) {
         driftCounts["no-baseline"]++;
       }
     }
@@ -805,9 +792,10 @@ export async function pullResourceType(
     if (isNew) created++;
     else updated++;
 
-    // Update state with new content hash + timestamp.
+    // Record the `{ uuid }` mapping in state and write the drift baseline into
+    // the hash store.
     //
-    // CRITICAL INVARIANT: `lastPulledHash` MUST equal what `hashLocalResource`
+    // CRITICAL INVARIANT: the baseline hash MUST equal what `hashLocalResource`
     // will return when classifyDrift next inspects this file. The way to
     // guarantee that by construction is to hash the FILE AS WRITTEN TO DISK,
     // not the in-memory payload before YAML/MD serialization. The two diverge
@@ -829,11 +817,12 @@ export async function pullResourceType(
         `   ⚠️  ${resourceType}/${resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(newStateSection, resourceId, {
-      uuid: resource.id,
-      lastPulledHash: diskHash ?? hashPayload(withCredNames),
-      lastPulledAt: new Date().toISOString(),
-    });
+    upsertState(newStateSection, resourceId, { uuid: resource.id });
+    await writeBaseline(
+      VAPI_ENV,
+      resource.id,
+      diskHash ?? hashPayload(withCredNames),
+    );
   }
 
   // Update state with new mappings
@@ -896,15 +885,11 @@ async function resolveBothDivergedResources(options: {
       console.log(
         `   ⬆️  ${entry.resourceId} (both diverged — resolving with --resolve=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
       );
-      // No write — local file is preserved. lastPulledHash = entry.platformHash
-      // marks "the last-pulled baseline was the platform state at resolve time,
-      // even though we kept local," so the next classifyDrift correctly reports
+      // No file write — local is preserved. Set the baseline to the platform
+      // state at resolve time so the next classifyDrift correctly reports
       // `local-ahead` instead of re-flagging `both-diverged`.
-      upsertState(section, entry.resourceId, {
-        uuid: entry.resource.id,
-        lastPulledHash: entry.platformHash,
-        lastPulledAt: new Date().toISOString(),
-      });
+      upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+      await writeBaseline(VAPI_ENV, entry.resource.id, entry.platformHash);
       continue;
     }
 
@@ -925,11 +910,12 @@ async function resolveBothDivergedResources(options: {
         `   ⚠️  ${entry.resourceType}/${entry.resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(section, entry.resourceId, {
-      uuid: entry.resource.id,
-      lastPulledHash: diskHash ?? hashPayload(withCredNames),
-      lastPulledAt: new Date().toISOString(),
-    });
+    upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+    await writeBaseline(
+      VAPI_ENV,
+      entry.resource.id,
+      diskHash ?? hashPayload(withCredNames),
+    );
   }
 
   return { exitCode: 0 };
@@ -965,6 +951,7 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function runPull(options: PullOptions = {}): Promise<PullResult> {
+  assertStateMigrated(STATE_FILE_PATH);
   const force = options.force ?? process.argv.includes("--force");
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
   const filePathFilter = APPLY_FILTER.filePaths;

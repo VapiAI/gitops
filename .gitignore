@@ -27,6 +27,11 @@ tmp/
 # Operator-local; not shared.
 .vapi-state.*.snapshots/
 
+# Per-developer drift baseline store (.vapi-state-hash/<org>/<uuid>).
+# Holds "the last platform state I saw" per resource. Local, not shared —
+# committing it would make one developer's baseline everyone's.
+.vapi-state-hash/
+
 # Local agent state
 .claude/
 .agent/

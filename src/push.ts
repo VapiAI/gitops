@@ -11,6 +11,7 @@ import {
   loadIgnorePatterns,
   OVERWRITE_DRIFT,
   removeExcludedKeys,
+  STATE_FILE_PATH,
   STRICT_VALIDATION,
   VAPI_BASE_URL,
   VAPI_ENV,
@@ -21,6 +22,7 @@ import {
   type RemoteResource,
 } from "./dep-dedup.ts";
 import { checkDriftForUpdate } from "./drift.ts";
+import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
 import {
   formatRecanonicalizeReport,
@@ -65,7 +67,7 @@ import {
   loadSingleResource,
   pathMatchesFolder,
 } from "./resources.ts";
-import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
+import { loadState, saveState, upsertState } from "./state.ts";
 import type {
   LoadedResources,
   ResourceFile,
@@ -149,6 +151,7 @@ async function upsertResourceWithStateRecovery(options: {
             resourceType: driftResourceType,
             resourceId,
             state: fullState,
+            env: VAPI_ENV,
             overwrite: OVERWRITE_DRIFT,
           });
           if (drift.message) {
@@ -1161,7 +1164,6 @@ async function ensureAssistantExists(
       if (!uuid) return;
       upsertState(ctx.state.assistants, assistant.resourceId, {
         uuid,
-        lastPushedHash: hashPayload(assistant.data),
       });
       ctx.applied.assistants++;
       ctx.touched.assistants.add(assistant.resourceId);
@@ -1181,7 +1183,6 @@ async function ensureAssistantExists(
     }
     upsertState(ctx.state.assistants, assistant.resourceId, {
       uuid,
-      lastPushedHash: hashPayload(assistant.data),
     });
     ctx.applied.assistants++;
     ctx.autoApplied.add(`assistants:${assistantId}`);
@@ -1562,7 +1563,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.tools, tool.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(tool.data),
           });
           touched.tools.add(tool.resourceId);
           applied.tools++;
@@ -1581,7 +1581,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.structuredOutputs, output.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(output.data),
           });
           touched.structuredOutputs.add(output.resourceId);
           applied.structuredOutputs++;
@@ -1613,7 +1612,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.assistants, assistant.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(assistant.data),
           });
           touched.assistants.add(assistant.resourceId);
           applied.assistants++;
@@ -1641,7 +1639,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.squads, squad.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(squad.data),
           });
           touched.squads.add(squad.resourceId);
           applied.squads++;
@@ -1660,7 +1657,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.personalities, personality.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(personality.data),
           });
           touched.personalities.add(personality.resourceId);
           applied.personalities++;
@@ -1679,7 +1675,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.scenarios, scenario.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(scenario.data),
           });
           touched.scenarios.add(scenario.resourceId);
           applied.scenarios++;
@@ -1698,7 +1693,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.simulations, simulation.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(simulation.data),
           });
           touched.simulations.add(simulation.resourceId);
           applied.simulations++;
@@ -1717,7 +1711,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.simulationSuites, suite.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(suite.data),
           });
           touched.simulationSuites.add(suite.resourceId);
           applied.simulationSuites++;
@@ -1735,7 +1728,6 @@ async function main(): Promise<void> {
           const uuid = await applyEval(evalResource, state);
           upsertState(state.evals, evalResource.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(evalResource.data),
           });
           touched.evals.add(evalResource.resourceId);
           applied.evals++;
@@ -1874,6 +1866,7 @@ async function main(): Promise<void> {
 }
 
 export async function runPush(): Promise<void> {
+  assertStateMigrated(STATE_FILE_PATH);
   return main();
 }
 

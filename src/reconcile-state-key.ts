@@ -32,7 +32,7 @@ import {
   extractResourceName,
   findExistingResourceByName,
 } from "./dep-dedup.ts";
-import { hashPayload, upsertState } from "./state.ts";
+import { upsertState } from "./state.ts";
 import type { TouchedSets } from "./state-merge.ts";
 import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
 
@@ -174,7 +174,6 @@ export async function reconcileStateKeyForResource(
       if (!uuid) return;
       upsertState(stateSection, resourceId, {
         uuid,
-        lastPushedHash: hashPayload(resource.data),
       });
       applied[resourceType]++;
       pushToAutoAppliedList(resource);
@@ -193,7 +192,6 @@ export async function reconcileStateKeyForResource(
     if (!uuid) return;
     upsertState(stateSection, resourceId, {
       uuid,
-      lastPushedHash: hashPayload(resource.data),
     });
     applied[resourceType]++;
     pushToAutoAppliedList(resource);

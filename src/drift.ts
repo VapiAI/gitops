@@ -21,6 +21,7 @@
 import { vapiGet, VapiApiError } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import { credentialReverseMap } from "./credentials.ts";
+import { readBaseline } from "./hash-store.ts";
 import { hashLocalResource } from "./resources.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceType, StateFile } from "./types.ts";
@@ -93,19 +94,30 @@ export async function checkDriftForUpdate(options: {
   resourceType: ResourceType;
   resourceId: string; // local resource id
   state: StateFile;
+  env: string; // org slug — keys the hash store
   overwrite: boolean;
 }): Promise<DriftCheckResult> {
-  const { endpoint, resourceLabel, resourceType, resourceId, state, overwrite } =
-    options;
+  const {
+    endpoint,
+    resourceLabel,
+    resourceType,
+    resourceId,
+    state,
+    env,
+    overwrite,
+  } = options;
 
+  // The drift baseline ("last platform state I saw") lives in the hash store,
+  // keyed by the resource's UUID, not in the state file anymore.
   const entry = state[resourceType]?.[resourceId];
-  if (!entry?.lastPulledHash) {
+  const baseline = entry ? readBaseline(env, entry.uuid) : undefined;
+  if (!baseline) {
     return {
       ok: true,
       reason: "no-baseline",
       message:
         `   ⚠️  drift check skipped for ${resourceLabel} ${resourceId}: ` +
-        `no lastPulledHash in state. Run \`npm run pull\` to establish a baseline.`,
+        `no baseline in .vapi-state-hash. Run \`npm run pull\` to establish one.`,
     };
   }
 
@@ -125,15 +137,15 @@ export async function checkDriftForUpdate(options: {
   const platformHash = hashPayload(
     canonicalizeForHash(remote as VapiResource, state, credReverse),
   );
-  if (platformHash === entry.lastPulledHash) {
+  if (platformHash === baseline) {
     return { ok: true, reason: "match", platformHash };
   }
 
-  // On-disk hash in the same basis as `lastPulledHash`. Absent a local file
+  // On-disk hash in the same basis as the baseline. Absent a local file
   // (rare on an update path), fall back to the baseline so the direction is
   // dashboard-ahead rather than a phantom both-diverged.
   const localHash =
-    hashLocalResource(resourceType, resourceId) ?? entry.lastPulledHash;
+    hashLocalResource(resourceType, resourceId) ?? baseline;
 
   // Local and platform are byte-identical → there is nothing to reconcile and
   // the PATCH is a no-op. NEVER block here, even if `lastPulledHash` disagrees
@@ -150,7 +162,7 @@ export async function checkDriftForUpdate(options: {
 
   const direction = classifyDrift({
     localHash,
-    lastPulledHash: entry.lastPulledHash,
+    lastPulledHash: baseline,
     platformHash,
   });
   const directionTag = `[${direction}]`;
@@ -172,8 +184,8 @@ export async function checkDriftForUpdate(options: {
     platformHash,
     message:
       `   ❌ drift detected on ${resourceLabel} ${resourceId} ${directionTag}: ` +
-      `platform hash (${platformHash.slice(0, 8)}...) differs from last-pulled ` +
-      `(${entry.lastPulledHash.slice(0, 8)}...). ` +
+      `platform hash (${platformHash.slice(0, 8)}...) differs from baseline ` +
+      `(${baseline.slice(0, 8)}...). ` +
       `${formatDriftLabel(direction)} ` +
       `Re-run pull, resolve locally, or push with --overwrite to take ownership.`,
   };

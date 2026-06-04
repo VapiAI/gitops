@@ -2,37 +2,24 @@
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Per-resource state metadata. State values are a structured ResourceState
-// carrying content hashes, timestamps, and an optional platform version ID
-// for ETag-based optimistic concurrency.
+// Per-resource state metadata. The state file is a pure `name → { uuid }`
+// map: the only thing it records is which platform UUID a local resource
+// file is bound to. Nothing else.
 //
-// Backwards compatibility: legacy state files loaded with bare string values
-// are migrated at load time in `loadState()` — each string becomes
-// { uuid: <string> } with no other fields. The first push or pull after
-// migration populates the hash fields. Until then, drift detection
-// short-circuits cleanly because `lastPulledHash` is undefined.
+// The "last known platform state" content hash that drives drift detection
+// lives OUTSIDE this file, in the gitignored per-developer hash store at
+// `.vapi-state-hash/<org>/<uuid>` (see `hash-store.ts`). Keeping hashes out
+// of the committed state file means the state diff is purely semantic
+// (added/removed/re-bound resources) and the drift baseline is local to each
+// developer's working copy.
 //
-// Why preserve backwards-compat instead of doing a flag-day migration:
-//   - Customer state files are committed to git. A breaking schema change
-//     would require a coordinated merge across every customer fork.
-//   - The fields are all optional except `uuid`, so existing loaders that
-//     only need the UUID work unchanged after going through the helpers
-//     in this module.
+// Legacy state files (bare string values, or objects carrying lastPulledHash /
+// lastPushedHash / lastPulledAt) are NOT loaded by the sync commands — the
+// `assertStateMigrated` guard in `migrate-hash-store.ts` blocks pull/push/apply
+// until `npm run migrate` has slimmed every state file and seeded the hash
+// store from the old hashes.
 export interface ResourceState {
   uuid: string;
-  // sha256 of the canonicalized platform payload at last pull. Set by
-  // `pull.ts` after `cleanResource()` + canonical sort. Used by drift
-  // detection.
-  lastPulledHash?: string;
-  // ISO-8601 timestamp of the last pull. Useful for triage when investigating
-  // "when did this drift?".
-  lastPulledAt?: string;
-  // sha256 of the canonicalized payload that was last sent on PATCH/POST.
-  // Distinct from `lastPulledHash` because we may push without pulling.
-  lastPushedHash?: string;
-  // Platform-provided ETag / version identifier for optimistic concurrency.
-  // Engine populates it from response headers when the platform exposes one.
-  platformVersionId?: string;
 }
 
 // `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. Each section

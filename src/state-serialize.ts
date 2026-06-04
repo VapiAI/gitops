@@ -58,9 +58,13 @@ export function hashPayload(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
-// Wrap a legacy state value (bare string UUID) as a ResourceState. Returns
-// undefined if the value isn't recognized — `loadState()` migrates the
-// shape, so an unrecognized value at load time means a corrupt state file.
+// Normalize a state value to the slim `{ uuid }` shape. Accepts a bare string
+// (oldest legacy form) or an object with a `uuid` field, and discards any other
+// fields a legacy file may still carry (lastPulledHash, lastPulledAt,
+// lastPushedHash). Returns undefined if no uuid can be recovered — at load time
+// that means a corrupt state file. Note: the `assertStateMigrated` guard
+// normally blocks legacy-shaped files before they reach here; this stripping is
+// a belt-and-suspenders so `saveState` can never re-emit a legacy field.
 export function asResourceState(value: unknown): ResourceState | undefined {
   if (typeof value === "string") return { uuid: value };
   if (
@@ -68,25 +72,20 @@ export function asResourceState(value: unknown): ResourceState | undefined {
     typeof value === "object" &&
     typeof (value as { uuid?: unknown }).uuid === "string"
   ) {
-    return value as ResourceState;
+    return { uuid: (value as { uuid: string }).uuid };
   }
   return undefined;
 }
 
-// Update or create the ResourceState entry for a resource with new content
-// hashes. Preserves whichever fields aren't being updated (e.g. setting
-// lastPushedHash leaves lastPulledHash intact). Critical for drift
-// detection — push must not stomp the lastPulledHash that pull populated.
+// Set the `{ uuid }` mapping for a resource. The state file no longer carries
+// any per-resource field beyond the UUID, so this is a plain assignment — the
+// drift baseline now lives in the hash store, not here.
 export function upsertState(
   section: Record<string, ResourceState>,
   resourceId: string,
-  patch: Partial<ResourceState> & { uuid: string },
+  patch: ResourceState,
 ): void {
-  const existing = section[resourceId];
-  section[resourceId] = {
-    ...(existing ?? {}),
-    ...patch,
-  };
+  section[resourceId] = { uuid: patch.uuid };
 }
 
 // Pronunciation-dictionary drop check. Detects when a dictionary attachment
