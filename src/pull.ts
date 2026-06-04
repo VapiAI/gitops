@@ -18,14 +18,26 @@ import {
 import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
 import {
   classifyDrift,
-  formatDriftLabel,
   type DriftDirection,
+  formatDriftLabel,
 } from "./drift.ts";
+import {
+  type DriftResolveMode,
+  type DriftResolveSelection,
+  formatResolveUsage,
+  mergeResourceByPathRules,
+  parseDriftResolveSelection,
+  resourceResolveKey,
+} from "./drift-resolve.ts";
 import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
-import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
+import {
+  FOLDER_MAP,
+  hashLocalResource,
+  loadLocalResourceData,
+} from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
@@ -649,8 +661,6 @@ export interface PullStats {
   skipped: number;
 }
 
-export type DriftResolveMode = "ours" | "theirs" | "fail";
-
 export interface BothDivergedResource {
   resourceType: ResourceType;
   resourceId: string;
@@ -672,15 +682,10 @@ function emptyDriftCounts(): DriftDirectionCounts {
   };
 }
 
-function parseResolveMode(explicit?: DriftResolveMode): DriftResolveMode | undefined {
-  if (explicit) return explicit;
-  const arg = process.argv.find((a) => a.startsWith("--resolve="));
-  if (!arg) return undefined;
-  const mode = arg.slice("--resolve=".length);
-  if (mode === "ours" || mode === "theirs" || mode === "fail") return mode;
-  throw new Error(
-    `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail`,
-  );
+function parseResolveSelection(
+  explicit?: DriftResolveMode,
+): DriftResolveSelection {
+  return parseDriftResolveSelection(process.argv.slice(3), explicit);
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -1071,16 +1076,30 @@ export async function pullResourceType(
 async function resolveBothDivergedResources(options: {
   state: StateFile;
   bothDiverged: BothDivergedResource[];
-  resolveMode?: DriftResolveMode;
+  resolveSelection: DriftResolveSelection;
 }): Promise<{ exitCode: number }> {
-  const { state, bothDiverged, resolveMode } = options;
+  const { state, bothDiverged, resolveSelection } = options;
   if (bothDiverged.length === 0) return { exitCode: 0 };
 
-  if (resolveMode === "fail") {
+  const entriesWithModes = bothDiverged.map((entry) => {
+    const key = resourceResolveKey(entry.resourceType, entry.resourceId);
+    return {
+      entry,
+      key,
+      mode:
+        resolveSelection.perResource.get(key) ?? resolveSelection.defaultMode,
+      pathRules: resolveSelection.perPath.get(key) ?? [],
+    };
+  });
+
+  const explicitFailures = entriesWithModes.filter(
+    ({ mode }) => mode === "fail",
+  );
+  if (explicitFailures.length > 0) {
     console.error(
-      `\n❌ ${bothDiverged.length} resource(s) have 3-way drift (--resolve=fail).`,
+      `\n❌ ${explicitFailures.length} resource(s) have 3-way drift with fail resolution.`,
     );
-    for (const entry of bothDiverged) {
+    for (const { entry } of explicitFailures) {
       console.error(
         `     - ${entry.resourceType}/${entry.resourceId}\n` +
           `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…`,
@@ -1089,14 +1108,13 @@ async function resolveBothDivergedResources(options: {
     return { exitCode: 1 };
   }
 
-  if (!resolveMode) {
+  const unresolved = entriesWithModes.filter(({ mode }) => !mode);
+  if (unresolved.length > 0) {
     console.error(
-      `\n❌ ${bothDiverged.length} resource(s) have 3-way drift (both local and dashboard changed since last pull).`,
+      `\n❌ ${unresolved.length} resource(s) have 3-way drift (both local and dashboard changed since last pull).`,
     );
-    console.error(
-      "   Pass --resolve=ours|theirs|fail to proceed:",
-    );
-    for (const entry of bothDiverged) {
+    console.error(`   ${formatResolveUsage()}:`);
+    for (const { entry } of unresolved) {
       console.error(
         `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}\n` +
           `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…`,
@@ -1111,16 +1129,71 @@ async function resolveBothDivergedResources(options: {
     console.error(
       "     --resolve=fail   exit non-zero without writing anything (CI mode — fail the build so a human investigates)",
     );
+    console.error(
+      "\n     --resolve=assistants/intake=ours        keep git for one resource",
+    );
+    console.error(
+      "     --resolve-path=assistants/intake:voice=theirs   take one dashboard path after choosing a resource base",
+    );
     return { exitCode: 1 };
   }
 
   const credReverse = credentialReverseMap(state);
 
-  for (const entry of bothDiverged) {
+  for (const { entry, key, mode, pathRules } of entriesWithModes) {
     const section = state[entry.resourceType];
-    if (resolveMode === "ours") {
+    if (pathRules.length > 0) {
+      if (mode !== "ours" && mode !== "theirs") {
+        throw new Error(
+          `Path-level resolution for ${key} requires --resolve=${key}=ours|theirs as a base.`,
+        );
+      }
+
+      const localData = loadLocalResourceData(
+        entry.resourceType,
+        entry.resourceId,
+      );
+      if (!localData) {
+        throw new Error(
+          `Path-level resolution for ${key} requires an existing local resource file.`,
+        );
+      }
+      const platformData = canonicalizeForHash(
+        entry.resource,
+        state,
+        credReverse,
+      );
+      const merged = mergeResourceByPathRules({
+        localData,
+        platformData,
+        baseMode: mode,
+        rules: pathRules,
+      });
+
+      await writeResourceFile(entry.resourceType, entry.resourceId, merged);
       console.log(
-        `   ⬆️  ${entry.resourceId} (both diverged — resolving with --resolve=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
+        `   🔀 ${entry.resourceId} (both diverged — resolving ${pathRules.length} path(s) on --resolve=${key}=${mode}) ${formatDriftLabel("both-diverged")}`,
+      );
+      const mergedHash = hashPayload(merged);
+      const diskHash = hashLocalResource(entry.resourceType, entry.resourceId);
+      // If the selected paths reconstruct the full dashboard payload, keep the
+      // usual post-write disk baseline. Otherwise, preserve the observed
+      // platform baseline so the next pull reports the merged file as
+      // local-ahead instead of repeating both-diverged.
+      upsertState(section, entry.resourceId, {
+        uuid: entry.resource.id,
+        lastPulledHash:
+          mergedHash === entry.platformHash && diskHash
+            ? diskHash
+            : entry.platformHash,
+        lastPulledAt: new Date().toISOString(),
+      });
+      continue;
+    }
+
+    if (mode === "ours") {
+      console.log(
+        `   ⬆️  ${entry.resourceId} (both diverged — resolving with --resolve=${key}=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
       );
       // No write — local file is preserved. lastPulledHash = entry.platformHash
       // marks "the last-pulled baseline was the platform state at resolve time,
@@ -1134,7 +1207,11 @@ async function resolveBothDivergedResources(options: {
       continue;
     }
 
-    const withCredNames = canonicalizeForHash(entry.resource, state, credReverse);
+    const withCredNames = canonicalizeForHash(
+      entry.resource,
+      state,
+      credReverse,
+    );
 
     await writeResourceFile(
       entry.resourceType,
@@ -1142,7 +1219,7 @@ async function resolveBothDivergedResources(options: {
       withCredNames,
     );
     console.log(
-      `   ⬇️  ${entry.resourceId} (both diverged — resolving with --resolve=theirs, overwriting local with platform) ${formatDriftLabel("both-diverged")}`,
+      `   ⬇️  ${entry.resourceId} (both diverged — resolving with --resolve=${key}=theirs, overwriting local with platform) ${formatDriftLabel("both-diverged")}`,
     );
     // Hash the post-write disk form (same invariant as the normal pull-write path).
     const diskHash = hashLocalResource(entry.resourceType, entry.resourceId);
@@ -1195,7 +1272,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
   const typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
   const resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
-  const resolveMode = parseResolveMode(options.resolveMode);
+  const resolveSelection = parseResolveSelection(options.resolveMode);
   const driftCounts = emptyDriftCounts();
   const bothDivergedResources: BothDivergedResource[] = [];
 
@@ -1324,7 +1401,11 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   if (shouldPull("squads"))
     stats.squads = await pullResourceType("squads", state, pullOpts);
   if (shouldPull("personalities"))
-    stats.personalities = await pullResourceType("personalities", state, pullOpts);
+    stats.personalities = await pullResourceType(
+      "personalities",
+      state,
+      pullOpts,
+    );
   if (shouldPull("scenarios"))
     stats.scenarios = await pullResourceType("scenarios", state, pullOpts);
   if (shouldPull("simulations"))
@@ -1361,7 +1442,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   const resolveResult = await resolveBothDivergedResources({
     state,
     bothDiverged: bothDivergedResources,
-    resolveMode,
+    resolveSelection,
   });
 
   await saveState(state);
@@ -1393,7 +1474,10 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     console.log("       🚫 = matched .vapi-ignore (not tracked)");
     console.log("       ✏️  = locally modified (preserved)");
     console.log("       ⬆️  = local ahead of dashboard (preserved)");
-    console.log("       ⬇️  = both diverged, --resolve=theirs (overwrote local)");
+    console.log(
+      "       ⬇️  = both diverged, --resolve=theirs (overwrote local)",
+    );
+    console.log("       🔀 = both diverged, path-level mixed resolution");
     console.log("       📝 = engine wrote/updated file on disk");
     console.log("       🗑️  = locally deleted (intent in state)");
     console.log(
@@ -1411,7 +1495,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
         "\n💡 Tip: run plain pull first (this) to see what changed before resorting to --force.",
       );
       console.log(
-        "   --force is for \"I know exactly what I want from the dashboard and I'm overwriting locals\" — rare.",
+        '   --force is for "I know exactly what I want from the dashboard and I\'m overwriting locals" — rare.',
       );
     }
   }

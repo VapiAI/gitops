@@ -99,6 +99,32 @@ Runs the engine's local validators against every YAML/MD file in the org without
 - End-of-pull summary with counts per direction
 - A hard gate (`--resolve` flag) on 3-way conflicts before they silently lose data
 
+When multiple resources are `both-diverged`, you can mix decisions in one pull:
+
+```bash
+# Global mode for every both-diverged resource.
+npm run pull -- <org> --resolve=ours
+npm run pull -- <org> --resolve=theirs
+npm run pull -- <org> --resolve=fail
+
+# Per-resource modes in one command.
+npm run pull -- <org> \
+  --resolve=assistants/intake=ours \
+  --resolve=squads/main=theirs
+
+# Path-level override: choose a resource base, then override selected paths.
+# This keeps the git copy of the assistant except for dashboard voice settings.
+npm run pull -- <org> \
+  --resolve=assistants/intake=ours \
+  --resolve-path=assistants/intake:voice=theirs
+```
+
+Path rules use dot paths, with numeric array indexes supported either as
+`members.0.assistantId` or `members[0].assistantId`. Assistant markdown bodies
+map to `model.messages` because pull parses `.md` resources into the same
+object shape used for hashing. A path-level rule requires a per-resource or
+global `ours` / `theirs` base so unspecified paths have an explicit owner.
+
 `--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
 
 **Pull-output icon legend.** Distinct semantics in a single pulled-resource line:
@@ -110,6 +136,7 @@ Runs the engine's local validators against every YAML/MD file in the org without
 | `✏️`  | Locally modified file detected by git, preserved as-is |
 | `⬆️`  | `local-ahead` — local has unpushed edits, needs to flow UP to dashboard (preserved) |
 | `⬇️`  | `--resolve=theirs` — overwrote local with dashboard (flowed DOWN) |
+| `🔀` | Mixed path resolution — one resource merged dashboard and git-selected paths |
 | `🔒` | Platform-default resource (read-only, immutable) |
 | `🚫` | Matched `.vapi-ignore` (not tracked locally) |
 | `🗑️`  | Locally deleted (deletion intent recorded in state) |
@@ -992,4 +1019,3 @@ When transferring to human:
 3. Create simulations (pair personality + scenario)
 4. Create suites (batch simulations together)
 5. Run via Vapi dashboard or API
-
