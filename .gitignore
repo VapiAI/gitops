@@ -32,6 +32,10 @@ tmp/
 # committing it would make one developer's baseline everyone's.
 .vapi-state-hash/
 
+# Dashboard-backup copies written by the push conflict prompt for manual
+# merging (<name>.<TIMESTAMP>.bkp.md|yml). Scratch material, never committed.
+*.bkp.*
+
 # Local agent state
 .claude/
 .agent/

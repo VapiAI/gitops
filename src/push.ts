@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import {
@@ -21,7 +21,10 @@ import {
   findExistingResourceByName,
   type RemoteResource,
 } from "./dep-dedup.ts";
-import { checkDriftForUpdate } from "./drift.ts";
+import { select } from "@inquirer/prompts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
+import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
 import {
@@ -52,10 +55,16 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
 
 import {
   credentialForwardMap,
+  credentialReverseMap,
   replaceCredentialRefs,
 } from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
-import { fetchAllResources, fetchResourceById, runPull } from "./pull.ts";
+import {
+  fetchAllResources,
+  fetchResourceById,
+  runPull,
+  writeDashboardBackup,
+} from "./pull.ts";
 import {
   extractReferencedIds,
   resolveAssistantIds,
@@ -67,7 +76,7 @@ import {
   loadSingleResource,
   pathMatchesFolder,
 } from "./resources.ts";
-import { loadState, saveState, upsertState } from "./state.ts";
+import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type {
   LoadedResources,
   ResourceFile,
@@ -90,6 +99,69 @@ function formatApiError(resourceId: string, error: unknown): string {
   }
   const msg = error instanceof Error ? error.message : String(error);
   return `  ❌ Failed: ${resourceId}\n     ${msg}`;
+}
+
+// A drift conflict is only ever resolved per resource, at the moment the push
+// is about to touch it — never via an umbrella flag answered up front. The
+// prompt fires only in a real terminal; CI/piped runs keep the hard block
+// (or --overwrite) semantics.
+function isInteractiveSession(): boolean {
+  return !!(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+type DriftResolutionChoice = "push-local" | "keep-dashboard" | "dashboard-copy";
+
+async function promptDriftResolution(
+  resourceLabel: string,
+  resourceId: string,
+): Promise<DriftResolutionChoice> {
+  console.log(
+    `\n   ⚠️  ${resourceLabel} "${resourceId}": the dashboard version changed since your last pull/push — someone else published changes.`,
+  );
+  return select<DriftResolutionChoice>({
+    message: `Conflict on ${resourceLabel} "${resourceId}" — what do you want to do?`,
+    choices: [
+      {
+        name: "Push my local version (overwrite the dashboard change)",
+        value: "push-local",
+      },
+      {
+        name: "Keep the dashboard version (skip pushing this resource)",
+        value: "keep-dashboard",
+      },
+      {
+        name: "Save a dashboard copy beside my file for manual merge (skip push)",
+        value: "dashboard-copy",
+      },
+    ],
+  });
+}
+
+// Refresh the per-resource drift baseline from an API response — the full
+// resource as the platform stored it after our POST/PATCH. Hashed in the same
+// canonical basis pull and drift use, so the very next push of a further local
+// edit compares clean ("my change is the natural next step") without a pull in
+// between. Skipped in dry-run (the response is synthetic). Failures are logged
+// but never block the push — the baseline is a drift hint, not a precondition.
+async function writeBaselineFromResponse(
+  uuid: string,
+  response: unknown,
+  state: StateFile,
+): Promise<void> {
+  if (DRY_RUN) return;
+  if (!response || typeof response !== "object") return;
+  try {
+    const credReverse = credentialReverseMap(state);
+    const hash = hashPayload(
+      canonicalizeForHash(response as VapiResource, state, credReverse),
+    );
+    await writeBaseline(VAPI_ENV, uuid, hash);
+  } catch (err) {
+    console.warn(
+      `   ⚠️  failed to update drift baseline for ${uuid}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
 }
 
 async function upsertResourceWithStateRecovery(options: {
@@ -123,6 +195,7 @@ async function upsertResourceWithStateRecovery(options: {
   if (!existingUuid) {
     console.log(`  ✨ Creating ${resourceLabel}: ${resourceId}`);
     const result = await vapiRequest("POST", createEndpoint, createPayload);
+    await writeBaselineFromResponse(result.id, result, fullState);
     return result.id;
   }
 
@@ -140,12 +213,16 @@ async function upsertResourceWithStateRecovery(options: {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {
       const driftResourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
+      // Platform payload fetched by the drift check, reused for the rollback
+      // snapshot below so we don't fire a second GET at the same endpoint.
+      let platformPayloadForSnapshot: unknown;
       // The drift check now owns the full hash computation (platform, local,
       // and baseline all canonicalized via canonical.ts). Push just hands it
       // the full state + resource type — no hash plumbing at the call site.
       if (driftResourceType) {
+        let drift: DriftCheckResult | undefined;
         try {
-          const drift = await checkDriftForUpdate({
+          drift = await checkDriftForUpdate({
             endpoint: updateEndpoint,
             resourceLabel,
             resourceType: driftResourceType,
@@ -154,11 +231,6 @@ async function upsertResourceWithStateRecovery(options: {
             env: VAPI_ENV,
             overwrite: OVERWRITE_DRIFT,
           });
-          if (drift.message) {
-            if (drift.ok) console.log(drift.message);
-            else console.error(drift.message);
-          }
-          if (!drift.ok) return null;
         } catch (driftErr) {
           // A drift check failure should NOT block the push — the existing
           // PATCH path will surface the real error. Log and move on.
@@ -170,26 +242,73 @@ async function upsertResourceWithStateRecovery(options: {
               ". Continuing.",
           );
         }
+
+        if (drift) {
+          platformPayloadForSnapshot = drift.platformPayload;
+
+          if (drift.ok) {
+            // Baseline matches the dashboard (or --overwrite / no baseline):
+            // the local edit is the natural next step — push silently.
+            if (drift.message) console.log(drift.message);
+          } else if (!isInteractiveSession()) {
+            // CI / piped run: keep the hard block-or---overwrite behavior.
+            if (drift.message) console.error(drift.message);
+            return null;
+          } else {
+            // Real terminal: per-resource 3-way resolution. Deliberately
+            // OUTSIDE the try/catch above — Ctrl+C in the prompt must abort
+            // the push, not be swallowed as "drift check failed, continuing".
+            const choice = await promptDriftResolution(
+              resourceLabel,
+              resourceId,
+            );
+            if (choice === "keep-dashboard") {
+              console.log(
+                `   ⏭️  ${resourceId}: keeping dashboard version — push skipped, local file untouched.`,
+              );
+              return null;
+            }
+            if (choice === "dashboard-copy") {
+              const copyPath = await writeDashboardBackup(
+                driftResourceType,
+                resourceId,
+                drift.platformPayload as VapiResource,
+                fullState,
+              );
+              console.log(
+                `   📄 ${resourceId}: dashboard version saved to ${relative(BASE_DIR, copyPath)} — merge manually, then push again. Push skipped.`,
+              );
+              return null;
+            }
+            console.log(
+              `   ⬆️  ${resourceId}: pushing local version (taking ownership of the conflict).`,
+            );
+          }
+        }
       }
 
       // Snapshot the current platform payload + our outgoing payload to a
-      // per-push directory so rollback can revert. Costs one extra GET per
-      // resource — acceptable for the safety guarantee. (Follow-up: plumb
-      // drift's GET result through to avoid the duplicate fetch.)
+      // per-push directory so rollback can revert. Reuses the drift check's
+      // GET when available; falls back to its own fetch when the check
+      // short-circuited (no baseline) or failed.
       try {
         const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
         if (resourceType) {
-          const platformResponse = await fetch(
-            `${VAPI_BASE_URL}${updateEndpoint}`,
-            {
-              method: "GET",
-              headers: {
-                Authorization: `Bearer ${process.env.VAPI_TOKEN}`,
+          if (platformPayloadForSnapshot === undefined) {
+            const platformResponse = await fetch(
+              `${VAPI_BASE_URL}${updateEndpoint}`,
+              {
+                method: "GET",
+                headers: {
+                  Authorization: `Bearer ${process.env.VAPI_TOKEN}`,
+                },
               },
-            },
-          );
-          if (platformResponse.ok) {
-            const platformPayloadForSnapshot = await platformResponse.json();
+            );
+            if (platformResponse.ok) {
+              platformPayloadForSnapshot = await platformResponse.json();
+            }
+          }
+          if (platformPayloadForSnapshot !== undefined) {
             await writeSnapshot({
               baseDir: BASE_DIR,
               env: VAPI_ENV,
@@ -216,7 +335,11 @@ async function upsertResourceWithStateRecovery(options: {
   }
 
   try {
-    await vapiRequest("PATCH", updateEndpoint, updatePayload);
+    const result = await vapiRequest("PATCH", updateEndpoint, updatePayload);
+    // The PATCH response is the full resource as the platform now stores it —
+    // the freshest possible "last known platform state." Hash it as the new
+    // drift baseline so the next push of a further local edit is clean.
+    await writeBaselineFromResponse(existingUuid, result, fullState);
     return existingUuid;
   } catch (error) {
     if (!(error instanceof VapiApiError) || error.statusCode !== 404) {
@@ -227,6 +350,7 @@ async function upsertResourceWithStateRecovery(options: {
       `  ⚠️  State entry for ${resourceLabel} "${resourceId}" points to missing remote ID ${existingUuid}. Removing the stale mapping from state and skipping this resource for the current run.`,
     );
     delete stateSection[resourceId];
+    await deleteBaseline(VAPI_ENV, existingUuid);
     return null;
   }
 }
@@ -686,11 +810,13 @@ export async function applyEval(
   if (existingUuid) {
     const updatePayload = removeExcludedKeys(payload, "evals");
     console.log(`  🔄 Updating eval: ${resourceId} (${existingUuid})`);
-    await vapiRequest("PATCH", `/eval/${existingUuid}`, updatePayload);
+    const result = await vapiRequest("PATCH", `/eval/${existingUuid}`, updatePayload);
+    await writeBaselineFromResponse(existingUuid, result, state);
     return existingUuid;
   } else {
     console.log(`  ✨ Creating eval: ${resourceId}`);
     const result = await vapiRequest("POST", "/eval", payload);
+    await writeBaselineFromResponse(result.id, result, state);
     return result.id;
   }
 }
@@ -725,9 +851,13 @@ export async function updateToolAssistantRefs(
     const resolved = resolveReferences(rawData, state);
 
     console.log(`  🔗 Linking tool ${resourceId} to assistant destinations`);
-    await vapiRequest("PATCH", `/tool/${uuid}`, {
+    const result = await vapiRequest("PATCH", `/tool/${uuid}`, {
       destinations: resolved.destinations,
     });
+    // This PATCH mutates the platform AFTER the main upsert wrote its
+    // baseline — refresh it from the linking response, or the next push would
+    // see drift we caused ourselves.
+    await writeBaselineFromResponse(uuid, result, state);
   }
 }
 
@@ -762,9 +892,12 @@ export async function updateStructuredOutputAssistantRefs(
 
     if (assistantIds.length > 0) {
       console.log(`  🔗 Linking structured output ${resourceId} to assistants`);
-      await vapiRequest("PATCH", `/structured-output/${uuid}`, {
+      const result = await vapiRequest("PATCH", `/structured-output/${uuid}`, {
         assistantIds,
       });
+      // Same post-upsert mutation as the tool-linking PATCH above — refresh
+      // the baseline from the response to avoid self-inflicted drift.
+      await writeBaselineFromResponse(uuid, result, state);
     }
   }
 }
@@ -1198,6 +1331,10 @@ async function ensureAssistantExists(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // Guard here (not only in runPush): apply spawns `tsx src/push.ts` directly,
+  // which enters via the isMainModule block below and never calls runPush.
+  assertStateMigrated(STATE_FILE_PATH);
+
   const partial = isPartialApply();
 
   console.log(
@@ -1866,7 +2003,6 @@ async function main(): Promise<void> {
 }
 
 export async function runPush(): Promise<void> {
-  assertStateMigrated(STATE_FILE_PATH);
   return main();
 }
 

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
-import { dirname, extname, join, relative, resolve } from "path";
+import { basename, dirname, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { isBackupCopyFile } from "./slug-utils.ts";
 import { stateUuid } from "./state.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
@@ -163,6 +164,14 @@ async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
   for (const entry of entries) {
     // Skip hidden files and directories (e.g., .DS_Store, .gitkeep)
     if (entry.startsWith(".")) {
+      continue;
+    }
+
+    // Skip dashboard-backup siblings written by the push conflict prompt
+    // ("create local copy + manual merge"). They're reference material for a
+    // hand-merge, not resources — loading one would re-create it on the
+    // platform as a duplicate.
+    if (isBackupCopyFile(entry)) {
       continue;
     }
 
@@ -386,6 +395,14 @@ export function resolvePullScopeFromFilePaths(
   const unrecognized: string[] = [];
 
   for (const filePath of filePaths) {
+    // Dashboard-backup siblings are merge scratch material, never resources —
+    // refuse them even when passed explicitly.
+    if (isBackupCopyFile(basename(filePath))) {
+      console.log(
+        `  🚫 ${filePath} (dashboard-backup copy — merge reference only, not pullable)`,
+      );
+      continue;
+    }
     const parsed = parseResourceFilePath(filePath);
     if (!parsed) {
       unrecognized.push(filePath);
@@ -453,6 +470,16 @@ export async function loadSingleResource(
 
   if (!existsSync(absolutePath)) {
     console.error(`  ❌ File not found: ${filePath}`);
+    return null;
+  }
+
+  // Dashboard-backup siblings are merge scratch material, never resources —
+  // refuse them even when passed explicitly, or a selective push would
+  // re-create the backup on the platform as a duplicate.
+  if (isBackupCopyFile(basename(absolutePath))) {
+    console.log(
+      `  🚫 ${filePath} (dashboard-backup copy — merge reference only, not pushable)`,
+    );
     return null;
   }
 

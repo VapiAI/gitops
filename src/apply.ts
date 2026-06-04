@@ -36,19 +36,24 @@ export async function runApply(): Promise<void> {
     assertStateMigrated(join(BASE_DIR, `.vapi-state.${env}.json`));
   }
 
-  // Apply's job is to push local up; default pull drift resolution to "ours"
-  // unless the operator explicitly passes --resolve=theirs|fail (CI).
+  // Default drift resolution is "defer": pull preserves the local file AND
+  // the drift baseline for conflicted resources, and the push stage asks a
+  // per-resource question for exactly the resources that actually diverged
+  // (its stdio is inherited, so the prompt reaches the operator). No umbrella
+  // decision is made up front. Explicit --resolve=ours|theirs|fail keeps the
+  // non-interactive (CI) semantics — including ours → push --overwrite.
   const pullArgsList = allArgs.filter((a) => a !== "--force");
   if (!pullArgsList.some((a) => a.startsWith("--resolve="))) {
-    pullArgsList.push("--resolve=ours");
+    pullArgsList.push("--resolve=defer");
   }
   const resolveArg = pullArgsList.find((a) => a.startsWith("--resolve="));
-  const resolveMode = resolveArg?.slice("--resolve=".length) ?? "ours";
+  const resolveMode = resolveArg?.slice("--resolve=".length) ?? "defer";
 
   const pullArgs = pullArgsList.join(" ");
 
-  // Pull --resolve=ours means "keep local and push it up" — push needs
-  // --overwrite so its pre-PATCH drift gate doesn't block the same intent.
+  // Explicit --resolve=ours means "keep local and push it up, no questions" —
+  // push needs --overwrite so its pre-PATCH drift gate doesn't block (or
+  // re-ask about) the same intent.
   const pushArgsList = [...allArgs];
   if (
     resolveMode === "ours" &&
@@ -60,7 +65,7 @@ export async function runApply(): Promise<void> {
   const pushArgs = pushArgsList.join(" ");
 
   if (!env || !SLUG_RE.test(env)) {
-    console.error("Usage: npm run apply <org> [--force] [--allow-new-files] [--resolve=ours|theirs|fail] [<file...>]");
+    console.error("Usage: npm run apply <org> [--force] [--allow-new-files] [--resolve=defer|ours|theirs|fail] [<file...>]");
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");
@@ -83,7 +88,10 @@ export async function runApply(): Promise<void> {
       "                     state entry is genuinely new — see src/new-file-gate.ts.",
     );
     console.error(
-      "  --resolve=ours     On 3-way drift, keep local and push up (default; adds --overwrite on push).",
+      "  --resolve=defer    On 3-way drift, ask per resource at push time (default).",
+    );
+    console.error(
+      "  --resolve=ours     On 3-way drift, keep local and push up, no questions (adds --overwrite on push).",
     );
     console.error(
       "  --resolve=theirs   On 3-way drift, overwrite local with dashboard.",

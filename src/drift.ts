@@ -69,10 +69,13 @@ export interface DriftCheckResult {
   ok: boolean;
   reason: "no-baseline" | "match" | "drift-overwritten" | "drift-blocked";
   message?: string;
-  // Hash of the *current* platform payload — caller may want to update
-  // state's `lastPulledHash` after a successful push so subsequent pushes
-  // start from the platform's current state, not the stale pre-overwrite hash.
+  // Hash of the *current* platform payload in the canonical baseline basis.
   platformHash?: string;
+  // The raw platform payload fetched for the check. Returned so the caller
+  // can reuse it (e.g. for the pre-push rollback snapshot) instead of firing
+  // a second GET against the same endpoint. Undefined when the check
+  // short-circuited before fetching (no baseline) or the resource 404'd.
+  platformPayload?: unknown;
 }
 
 async function fetchPlatformPayload(endpoint: string): Promise<unknown | null> {
@@ -138,7 +141,7 @@ export async function checkDriftForUpdate(options: {
     canonicalizeForHash(remote as VapiResource, state, credReverse),
   );
   if (platformHash === baseline) {
-    return { ok: true, reason: "match", platformHash };
+    return { ok: true, reason: "match", platformHash, platformPayload: remote };
   }
 
   // On-disk hash in the same basis as the baseline. Absent a local file
@@ -157,7 +160,7 @@ export async function checkDriftForUpdate(options: {
   // upgraded customer repo carries baselines written in an older hash basis,
   // so every untouched resource hit `both-diverged` on its first push.
   if (localHash === platformHash) {
-    return { ok: true, reason: "match", platformHash };
+    return { ok: true, reason: "match", platformHash, platformPayload: remote };
   }
 
   const direction = classifyDrift({
@@ -172,6 +175,7 @@ export async function checkDriftForUpdate(options: {
       ok: true,
       reason: "drift-overwritten",
       platformHash,
+      platformPayload: remote,
       message:
         `   ⚠️  drift on ${resourceLabel} ${resourceId} ${directionTag}: platform changed since last pull, ` +
         `overwriting (--overwrite). ${formatDriftLabel(direction)}`,
@@ -182,6 +186,7 @@ export async function checkDriftForUpdate(options: {
     ok: false,
     reason: "drift-blocked",
     platformHash,
+    platformPayload: remote,
     message:
       `   ❌ drift detected on ${resourceLabel} ${resourceId} ${directionTag}: ` +
       `platform hash (${platformHash.slice(0, 8)}...) differs from baseline ` +

@@ -34,8 +34,12 @@ import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
-import { FOLDER_MAP, hashLocalResource, resolvePullScopeFromFilePaths } from "./resources.ts";
-import { extractBaseSlug, slugify } from "./slug-utils.ts";
+import {
+  FOLDER_MAP,
+  hashLocalResource,
+  resolvePullScopeFromFilePaths,
+} from "./resources.ts";
+import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
@@ -243,6 +247,11 @@ export function listExistingResourceIds(resourceType: ResourceType): string[] {
         continue;
       }
 
+      // Dashboard-backup siblings are merge reference material, not resources.
+      if (isBackupCopyFile(entry.name)) {
+        continue;
+      }
+
       const relativePath = relative(dir, fullPath);
       ids.push(relativePath.replace(/\.(yml|yaml|md)$/, ""));
     }
@@ -408,6 +417,34 @@ async function writeResourceFile(
   return filePath;
 }
 
+// Write the dashboard version of a resource as a sibling
+// `<resourceId>.<TIMESTAMP>.bkp.<ext>` next to the local file, in the same
+// serialized form a pull would produce — so a hand-merge diffs cleanly
+// against the local file. The timestamp keeps repeated conflicts from
+// overwriting earlier copies; the `.bkp.` infix keeps the file invisible to
+// all resource discovery (see `isBackupCopyFile`) and gitignored (`*.bkp.*`).
+// Used by the push conflict prompt's "create local copy + manual merge"
+// choice.
+export async function writeDashboardBackup(
+  resourceType: ResourceType,
+  resourceId: string,
+  platformPayload: VapiResource,
+  state: StateFile,
+): Promise<string> {
+  const credReverse = credentialReverseMap(state);
+  const withCredNames = canonicalizeForHash(platformPayload, state, credReverse);
+  // Filesystem-safe ISO timestamp: 2026-06-04T19-22-33 (no colons, no ms).
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "")
+    .replace(/:/g, "-");
+  return writeResourceFile(
+    resourceType,
+    `${resourceId}.${timestamp}.bkp`,
+    withCredNames,
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pull Functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,7 +455,11 @@ export interface PullStats {
   skipped: number;
 }
 
-export type DriftResolveMode = "ours" | "theirs" | "fail";
+// `defer` preserves the local file AND the drift baseline (no rewrite, no
+// error): the conflict evidence survives the pull so push's per-resource
+// interactive prompt can ask about exactly the resources that diverged.
+// `ours`/`theirs`/`fail` keep their non-interactive (CI) semantics.
+export type DriftResolveMode = "ours" | "theirs" | "fail" | "defer";
 
 export interface BothDivergedResource {
   resourceType: ResourceType;
@@ -446,9 +487,10 @@ function parseResolveMode(explicit?: DriftResolveMode): DriftResolveMode | undef
   const arg = process.argv.find((a) => a.startsWith("--resolve="));
   if (!arg) return undefined;
   const mode = arg.slice("--resolve=".length);
-  if (mode === "ours" || mode === "theirs" || mode === "fail") return mode;
+  if (mode === "ours" || mode === "theirs" || mode === "fail" || mode === "defer")
+    return mode;
   throw new Error(
-    `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail`,
+    `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail|defer`,
   );
 }
 
@@ -838,6 +880,21 @@ async function resolveBothDivergedResources(options: {
 }): Promise<{ exitCode: number }> {
   const { state, bothDiverged, resolveMode } = options;
   if (bothDiverged.length === 0) return { exitCode: 0 };
+
+  if (resolveMode === "defer") {
+    // Leave everything as-is: local file preserved (the per-type loop already
+    // skipped the write), baseline untouched. Push's per-resource drift
+    // prompt will ask about exactly these resources.
+    console.log(
+      `\n   ⏳ ${bothDiverged.length} resource(s) have 3-way drift — deferred to push's per-resource prompt:`,
+    );
+    for (const entry of bothDiverged) {
+      console.log(
+        `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}`,
+      );
+    }
+    return { exitCode: 0 };
+  }
 
   if (resolveMode === "fail") {
     console.error(

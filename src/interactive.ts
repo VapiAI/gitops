@@ -4,6 +4,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { dirname, extname, join, relative } from "path";
 import { fileURLToPath } from "url";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
+// slug-utils is config-free (no config.ts side effects) — safe to import in
+// the launcher, which runs before any org/token is selected.
+import { isBackupCopyFile } from "./slug-utils.ts";
 import type { StateFile } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,6 +317,9 @@ function scanLocalResources(slug: string): LocalResource[] {
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.name.startsWith(".")) continue;
+        // Dashboard-backup copies are merge scratch material, never
+        // selectable resources.
+        if (isBackupCopyFile(entry.name)) continue;
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
           walk(fullPath);
@@ -1033,35 +1039,17 @@ export async function runInteractiveApply(): Promise<void> {
   }
 
   // ── Execute apply ─────────────────────────────────────────────────────
-  const driftResolve = await select({
-    message:
-      "If local and dashboard both changed since last pull, which version wins?",
-    choices: [
-      {
-        name: "Keep my local version and push it up",
-        value: "ours" as const,
-      },
-      {
-        name: "Take dashboard version (lose my local edits)",
-        value: "theirs" as const,
-      },
-      { name: c.dim("← Cancel"), value: "cancel" as const },
-    ],
-    default: "ours",
-  });
-
-  if (driftResolve === "cancel") {
-    console.log(c.dim("\n  Cancelled.\n"));
-    return;
-  }
-
+  // No umbrella "which version wins?" question here. Apply runs with
+  // --resolve=defer (its default): conflicts are detected per resource via
+  // the hash-store baseline, and the push stage prompts for exactly the
+  // resources that actually diverged — clean ones push silently.
   const useForce = await confirm({
     message:
       "Enable force mode? (deletions: resources removed locally will also be deleted remotely)",
     default: false,
   });
 
-  const args = ["src/apply.ts", slug, `--resolve=${driftResolve}`];
+  const args = ["src/apply.ts", slug];
   if (useForce) args.push("--force");
 
   if (!applyAll) {
