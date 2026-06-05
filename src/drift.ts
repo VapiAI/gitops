@@ -53,7 +53,7 @@ export function classifyDrift(input: ClassifyDriftInput): DriftDirection {
 export function formatDriftLabel(direction: DriftDirection): string {
   switch (direction) {
     case "dashboard-ahead":
-      return "[dashboard-ahead — sync down via plain pull (preserves local) or push --overwrite to take ownership]";
+      return "[dashboard-ahead — dashboard changed, local unchanged; run npm run pull to sync it down]";
     case "local-ahead":
       return "[local-ahead — run npm run push to propagate local edits up]";
     case "both-diverged":

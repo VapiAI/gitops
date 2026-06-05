@@ -661,11 +661,20 @@ export async function pullResourceType(
           const platformHash = hashPayload(
             canonicalizeForHash(resource, state, credReverse),
           );
-          const direction = classifyDrift({
-            localHash,
-            lastPulledHash: baseline,
-            platformHash,
-          });
+          // Local and platform already agreeing means there is nothing to
+          // reconcile, whatever the (possibly stale) baseline says — treat as
+          // clean and fall through to the write path: the rewrite is a
+          // content no-op that re-seeds the baseline from the disk form,
+          // self-healing the stale pointer. Mirrors the same guard in
+          // drift.ts's push gate.
+          const direction =
+            localHash === platformHash
+              ? "clean"
+              : classifyDrift({
+                  localHash,
+                  lastPulledHash: baseline,
+                  platformHash,
+                });
           if (driftCounts) driftCounts[direction]++;
 
           // The drift baseline now lives in the hash store, NOT in the state
@@ -695,12 +704,16 @@ export async function pullResourceType(
           }
 
           if (direction === "dashboard-ahead") {
+            // ⬇️ — local is UNCHANGED since the last sync and the dashboard
+            // moved ahead: the dashboard version is the natural next step
+            // down. Sync it without ceremony (mirror of push's silent-push
+            // rule for local-ahead). Nothing is lost — local had no edits.
+            // Fall through to the write path, which overwrites the file and
+            // re-seeds the baseline from the disk form.
             console.log(
-              `   ✏️  ${resourceId} (locally modified, preserving) ${formatDriftLabel(direction)}`,
+              `   ⬇️  ${resourceId} (dashboard ahead, local unchanged — syncing down)`,
             );
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
-            skipped++;
-            continue;
+            skipLegacyPreserveChecks = true;
           }
 
           if (direction === "local-ahead") {
