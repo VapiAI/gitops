@@ -73,6 +73,10 @@ you which stack PR closes the row.**
 | 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Partial — Stack D heuristic       |
 | 21  | `.vapi-ignore` was pull-only (push could silently delete) | `--force` push DELETEd dashboard-only opt-outs    | None       | RESOLVED 2026-05-11 (#TBD)        |
+| 22  | Dashboard rename recreated the local file (duplicate per UUID) | Duplicate files after dashboard renames       | None       | RESOLVED (see entry)              |
+| 23  | Phantom `both-diverged` (canonicalization + agree-gate)  | Untouched resources blocked on first push          | None       | RESOLVED 2026-06-03 (#TBD)        |
+| 24  | Bare `push` is too easy to use as the deploy path        | Raw push skips apply's validate+pull safety        | None       | Open — mitigated by per-resource drift gate |
+| 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
 
 ---
 
@@ -1153,6 +1157,72 @@ push-gate changes with a real (idempotent) push or the e2e harness.
 ### Status
 
 RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
+
+---
+
+## 24. Bare `push` is too easy to use as the deploy path
+
+**Problem.** PR #41 review (dhruva-reddy): operators shouldn't have to memorize
+"`validate` && `apply` && avoid `push`". Raw `push` skips apply's
+validate-then-pull safety yet reads like the natural deploy verb, so it keeps
+getting used as one.
+
+**Current behavior.** `npm run push -- <org>` (`src/push.ts`) runs the raw
+push directly. Apply now embeds validation (`src/apply.ts` runs
+`validate-cmd` before its pull stage) and defaults conflict handling to the
+per-resource prompt, but bare push remains a single flag-less command.
+
+**Risk.** Lower than when the review was written — push now has the
+per-resource drift gate (`src/push.ts`, `checkDriftForUpdate` +
+`promptDriftResolution`), so out-of-band dashboard edits prompt or block
+instead of being clobbered. Remaining gap: push skips schema validation and
+the pull/merge pass, so it can still 400 mid-run or PATCH from a stale local
+view (one-sided, detectable, but avoidable).
+
+**Current mitigation.** Docs hierarchy (`AGENTS.md` "Choosing a sync
+command"), the orphan-YAML gate, and the drift gate/prompt.
+
+**Possible fix.** Reviewer's suggested shape: make raw local→dashboard push
+explicit/advanced via `npm run push -- <org> --direct`; bare `push` either
+delegates to safe apply or prints guidance telling the operator to use
+`apply` unless `--direct` is intended. Backwards-incompatible for automation
+that calls bare `push` — needs a deprecation window.
+
+**Status.** Open (mitigated 2026-06-04 by the per-resource drift gate and
+apply's built-in validate).
+
+---
+
+## 25. Interactive flows lack automated coverage
+
+**Problem.** PR #41 review (dhruva-reddy): the interactive picker
+(`src/interactive.ts` — Back/Cancel/empty-selection states) and the
+local-wins-apply-stays-clean invariant have no automated tests, and these are
+exactly the paths that regress while unit tests for path parsing still pass.
+
+**Current behavior.** No tests cover: (a) the picker's step machine
+(org → scope → pick → confirm → execute, including Back/Cancel/empty), (b)
+the push conflict prompt's three choices, (c) the regression "apply the same
+resource twice → second run is clean, not `both-diverged`" (root cause fixed
+by response-hash baselines in `src/push.ts` `writeBaselineFromResponse` and
+the `classifyDrift` live-agreement invariant in `src/drift.ts`, but
+unguarded by tests).
+
+**Risk.** Silent regressions in the most operator-visible surfaces; the
+existing suite also predates the hash-store refactor and will fail until
+reconciled.
+
+**Current mitigation.** Manual run-throughs per stage (see
+`docs/superpowers/specs/2026-06-03-state-hash-store-design.md`).
+
+**Possible fix.** The planned test-update iteration for the hash-store
+refactor must include, by name: picker smoke test (Back/Cancel/empty),
+conflict-prompt choice handling (mock TTY + select), and the
+double-apply-stays-clean regression (`localHash=B, platformHash=B,
+baseline=A → clean` plus baseline refresh after push).
+
+**Status.** Open — scheduled as part of the test-update iteration that
+reconciles the suite with the slim-state/hash-store engine.
 
 ---
 

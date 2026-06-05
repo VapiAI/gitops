@@ -1391,9 +1391,18 @@ async function main(): Promise<void> {
     // a `--force` push can't silently delete a dashboard resource the repo
     // has explicitly opted out of managing. Bootstrap-pull paths read their
     // own patterns directly and are unaffected by this constant.
-    console.log("\n📂 Loading resources...\n");
+    if (partial) {
+      console.log(
+        "\n📂 Loading resources (scoped run — full set loaded quietly for reference resolution; only the selection below is applied)...\n",
+      );
+    } else {
+      console.log("\n📂 Loading resources...\n");
+    }
     const ignorePatterns = FORCE_DELETE ? [] : loadIgnorePatterns();
-    const loadOpts = { ignorePatterns };
+    // In a scoped run, suppress the per-file "Loaded" chatter — printing every
+    // local resource makes the blast radius look larger than it is. The scoped
+    // selection is printed explicitly after filtering instead.
+    const loadOpts = { ignorePatterns, quiet: partial };
     const allToolsRaw = await loadResources<Record<string, unknown>>(
       "tools",
       loadOpts,
@@ -1620,6 +1629,31 @@ async function main(): Promise<void> {
     const evals = shouldApplyResourceType("evals")
       ? filterResourcesByPaths(allEvals, "evals")
       : [];
+
+    // Scoped run: print exactly what's in scope (the load above was quiet).
+    if (partial) {
+      const scoped: Array<[string, ResourceFile<Record<string, unknown>>[]]> = [
+        ["tools", tools],
+        ["structuredOutputs", structuredOutputs],
+        ["assistants", assistants],
+        ["squads", squads],
+        ["personalities", personalities],
+        ["scenarios", scenarios],
+        ["simulations", simulations],
+        ["simulationSuites", simulationSuites],
+        ["evals", evals],
+      ];
+      let any = false;
+      for (const [label, list] of scoped) {
+        for (const r of list) {
+          console.log(`  📦 In scope: ${label}/${r.resourceId}`);
+          any = true;
+        }
+      }
+      if (!any) {
+        console.log("  ⚠️  Nothing matched the requested scope.");
+      }
+    }
 
     // Auto-dependency resolution context
     const autoApplied = new Set<string>();

@@ -106,13 +106,26 @@ export async function runApply(): Promise<void> {
     "═══════════════════════════════════════════════════════════════",
   );
   console.log(`🔄 Vapi GitOps Apply - Environment: ${env}`);
-  console.log("   Pull → Merge → Push");
+  console.log("   Validate → Pull → Merge → Push");
   if (hasForce) {
     console.log("   ⚠️  Deletions enabled (--force)");
   }
   console.log(
     "═══════════════════════════════════════════════════════════════\n",
   );
+
+  // Apply is the one-shot safe deploy verb: run the local schema validators
+  // first so a shape error never burns a pull/push cycle. No network call —
+  // this is the same check as `npm run validate`, just built in. It stays
+  // available standalone for CI / pre-flight use.
+  const validateCmd = `npx tsx src/validate-cmd.ts ${env}`;
+  const validateExit = runPassthrough(validateCmd);
+  if (validateExit !== 0) {
+    console.error(
+      "\n❌ Validation failed — fix the schema errors above before applying.",
+    );
+    process.exit(1);
+  }
 
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
   const pullExit = runPassthrough(pullCmd);

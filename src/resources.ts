@@ -15,6 +15,11 @@ import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
 // preserve the pre-change behavior.
 export interface LoadOptions {
   ignorePatterns?: string[];
+  // Suppress per-file "📦 Loaded" / "📁 No <type> directory" chatter. Used by
+  // scoped (single-file / --type) pushes: the FULL set is still loaded for
+  // reference resolution, but printing every file makes the blast radius look
+  // larger than it is — the caller prints the scoped selection instead.
+  quiet?: boolean;
 }
 
 // Map resource types to their folder paths (relative to resources/)
@@ -208,7 +213,7 @@ export async function loadResources<T>(
   const ignorePatterns = options.ignorePatterns ?? [];
 
   if (!existsSync(resourceDir)) {
-    console.log(`📁 No ${type} directory found, skipping...`);
+    if (!options.quiet) console.log(`📁 No ${type} directory found, skipping...`);
     return [];
   }
 
@@ -309,7 +314,7 @@ export async function loadResources<T>(
     }
 
     resources.push({ resourceId, filePath, data });
-    console.log(`  📦 Loaded ${resourceId}`);
+    if (!options.quiet) console.log(`  📦 Loaded ${resourceId}`);
   }
 
   return resources;
