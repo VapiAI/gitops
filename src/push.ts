@@ -1343,7 +1343,7 @@ async function main(): Promise<void> {
   console.log(`🚀 Vapi GitOps Apply - Environment: ${VAPI_ENV}`);
   console.log(`   API: ${VAPI_BASE_URL}`);
   console.log(
-    `   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (dry-run)"}`,
+    `   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (pass --force to enable)"}`,
   );
   if (DRY_RUN) {
     console.log("   Mode: 🧪 DRY-RUN (no API mutations, no state file write)");

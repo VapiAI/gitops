@@ -661,20 +661,15 @@ export async function pullResourceType(
           const platformHash = hashPayload(
             canonicalizeForHash(resource, state, credReverse),
           );
-          // Local and platform already agreeing means there is nothing to
-          // reconcile, whatever the (possibly stale) baseline says — treat as
-          // clean and fall through to the write path: the rewrite is a
-          // content no-op that re-seeds the baseline from the disk form,
-          // self-healing the stale pointer. Mirrors the same guard in
-          // drift.ts's push gate.
-          const direction =
-            localHash === platformHash
-              ? "clean"
-              : classifyDrift({
-                  localHash,
-                  lastPulledHash: baseline,
-                  platformHash,
-                });
+          // Note: classifyDrift treats live local + platform agreement as
+          // `clean` whatever the (possibly stale) baseline says — the clean
+          // fall-through to the write path re-seeds the baseline from the
+          // disk form, self-healing the stale pointer.
+          const direction = classifyDrift({
+            localHash,
+            lastPulledHash: baseline,
+            platformHash,
+          });
           if (driftCounts) driftCounts[direction]++;
 
           // The drift baseline now lives in the hash store, NOT in the state

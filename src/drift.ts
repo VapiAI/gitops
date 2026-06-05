@@ -42,6 +42,12 @@ export interface ClassifyDriftInput {
 export function classifyDrift(input: ClassifyDriftInput): DriftDirection {
   const { localHash, lastPulledHash, platformHash } = input;
   if (!lastPulledHash) return "no-baseline";
+  // INVARIANT: live local + platform agreement is NEVER drift, whatever the
+  // (possibly stale) baseline says. A stale baseline happens legitimately —
+  // e.g. a push made the dashboard match local while the baseline still held
+  // the previous pull's hash. Callers treat `clean` as "refresh the baseline
+  // and move on", which self-heals the stale pointer.
+  if (localHash === platformHash) return "clean";
   const localMatches = localHash === lastPulledHash;
   const platformMatches = platformHash === lastPulledHash;
   if (localMatches && platformMatches) return "clean";
@@ -151,12 +157,11 @@ export async function checkDriftForUpdate(options: {
     hashLocalResource(resourceType, resourceId) ?? baseline;
 
   // Local and platform are byte-identical → there is nothing to reconcile and
-  // the PATCH is a no-op. NEVER block here, even if `lastPulledHash` disagrees
+  // the PATCH is a no-op. NEVER block here, even if the baseline disagrees
   // with both (a stale or older-basis baseline must not manufacture a conflict
-  // when the two LIVE sides already agree). `classifyDrift` still reports this
-  // as `both-diverged` by its descriptive contract — that signals the stale
-  // state pointer — but the push *gate* treats agreement between local and
-  // platform as clean. This is the fix for the phantom-drift class: a freshly
+  // when the two LIVE sides already agree). `classifyDrift` encodes the same
+  // invariant, but this early return also short-circuits before the direction
+  // bookkeeping. This is the fix for the phantom-drift class: a freshly
   // upgraded customer repo carries baselines written in an older hash basis,
   // so every untouched resource hit `both-diverged` on its first push.
   if (localHash === platformHash) {
