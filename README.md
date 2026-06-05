@@ -80,6 +80,7 @@ Every command works in two modes:
 | `npm run rollback` | — | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore from a snapshot in `.vapi-state.<org>.snapshots/` (one is written before every push/apply). |
 | `npm run call` | ✅ | `npm run call -- <org> -a <name>` or `-s <squad>` | Start an interactive WebSocket call against an assistant or squad. |
 | `npm run sim` | — | `npm run sim -- <org> --suite <name> --target <name>` | Run a simulation suite (or specific simulations) against a deployed assistant/squad. |
+| `npm run migrate` | — | `npm run migrate` | One-time, all orgs at once: slim legacy state files to pure `name → uuid` and seed the per-developer `.vapi-state-hash/` baseline store from the old hashes. Required once after upgrading to the hash-store engine — `pull`/`push`/`apply` refuse legacy-shaped state until it runs. Idempotent. |
 | `npm run build` | — | — | Type-check the codebase (`tsc --noEmit`). |
 | `npm test` | — | — | Run regression tests (`node:test`). |
 
@@ -290,7 +291,8 @@ npm run push -- <org> --dry-run
 Resources are scoped by organization (not fixed `dev`/`stg`/`prod` names). Each org gets:
 
 - `.env.<org>` — API token and base URL
-- `.vapi-state.<org>.json` — resource ID ↔ UUID mappings
+- `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
+- `.vapi-state-hash/<org>/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
 - `resources/<org>/` — all resource files
 
 ```
@@ -365,12 +367,20 @@ npm run pull -- my-org
 # ✨  new-tool -> resources/my-org/tools/new-tool.yml
 ```
 
-Detection works in two layers, so it covers both day-to-day and fresh-clone
+Detection works in three layers, so it covers both day-to-day and fresh-clone
 workflows:
 
-1. **Git-tracked changes** — files that show up in `git status` (modified,
-   deleted, or individually untracked) are preserved.
-2. **mtime fallback** — if git can't help (no commits yet, the resource tree
+1. **Content baseline (primary)** — each resource's last-seen platform hash
+   lives in the per-developer `.vapi-state-hash/<org>/<uuid>` store
+   (gitignored). Comparing local / baseline / dashboard hashes classifies
+   every resource as clean, local-ahead (preserved ⬆️), dashboard-ahead
+   (synced down ⬇️ — local was unchanged, nothing to lose), or both-diverged
+   (gated behind `--resolve=ours|theirs|fail|defer`). See
+   `docs/learnings/sync-behavior.md` for the full matrix.
+2. **Git-tracked changes** — when no baseline exists yet, files that show up
+   in `git status` (modified, deleted, or individually untracked) are
+   preserved.
+3. **mtime fallback** — if git can't help (no commits yet, the resource tree
    isn't tracked at all, or git just had nothing to say), files that are
    newer than `.vapi-state.<org>.json` are still preserved. This is the safety
    net for the "fresh clone, edit a file, run pull again" case.

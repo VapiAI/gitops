@@ -65,6 +65,7 @@ See `docs/learnings/voice-providers.md` for related "property X should not exist
    - Call time limits / graceful ending → `docs/learnings/call-duration.md`
    - Voice provider field cheat-sheet → `docs/learnings/voice-providers.md`
    - YAML authoring conventions, .vapi-ignore lifecycle → `docs/learnings/yaml-conventions.md`
+   - Pull/push/apply behavior per drift & existence scenario → `docs/learnings/sync-behavior.md`
 
 This list mirrors the "Learnings & recipes" table in `AGENTS.md`. Keep both in sync — if you add a new learnings file, update both files plus `docs/learnings/README.md`.
 
