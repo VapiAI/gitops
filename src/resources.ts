@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
-import { dirname, extname, join, relative, resolve } from "path";
+import { basename, dirname, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { isBackupCopyFile } from "./slug-utils.ts";
+import { stateUuid } from "./state.ts";
 import { hashPayload } from "./state-serialize.ts";
-import type { ResourceFile, ResourceType } from "./types.ts";
+import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
 
 // Options bag for the load functions. `ignorePatterns` is the symmetric
 // counterpart to pull's filter: when present, ids matching any pattern are
@@ -13,6 +15,11 @@ import type { ResourceFile, ResourceType } from "./types.ts";
 // preserve the pre-change behavior.
 export interface LoadOptions {
   ignorePatterns?: string[];
+  // Suppress per-file "📦 Loaded" / "📁 No <type> directory" chatter. Used by
+  // scoped (single-file / --type) pushes: the FULL set is still loaded for
+  // reference resolution, but printing every file makes the blast radius look
+  // larger than it is — the caller prints the scoped selection instead.
+  quiet?: boolean;
 }
 
 // Map resource types to their folder paths (relative to resources/)
@@ -165,6 +172,14 @@ async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
       continue;
     }
 
+    // Skip dashboard-backup siblings written by the push conflict prompt
+    // ("create local copy + manual merge"). They're reference material for a
+    // hand-merge, not resources — loading one would re-create it on the
+    // platform as a duplicate.
+    if (isBackupCopyFile(entry)) {
+      continue;
+    }
+
     const fullPath = join(dir, entry);
     const stats = await stat(fullPath);
     const relativePath = relative(baseDir, fullPath);
@@ -198,7 +213,7 @@ export async function loadResources<T>(
   const ignorePatterns = options.ignorePatterns ?? [];
 
   if (!existsSync(resourceDir)) {
-    console.log(`📁 No ${type} directory found, skipping...`);
+    if (!options.quiet) console.log(`📁 No ${type} directory found, skipping...`);
     return [];
   }
 
@@ -299,10 +314,125 @@ export async function loadResources<T>(
     }
 
     resources.push({ resourceId, filePath, data });
-    console.log(`  📦 Loaded ${resourceId}`);
+    if (!options.quiet) console.log(`  📦 Loaded ${resourceId}`);
   }
 
   return resources;
+}
+
+// Match a CLI-supplied path against a folder name. Shared by push (load
+// filter) and pull (scoped apply) so short forms like `assistants/foo.md`
+// behave the same in both directions.
+export function pathMatchesFolder(filePath: string, folder: string): boolean {
+  return (
+    filePath === folder ||
+    filePath.startsWith(`${folder}/`) ||
+    filePath.startsWith(`${folder}\\`) ||
+    filePath.includes(`/${folder}/`) ||
+    filePath.includes(`\\${folder}\\`)
+  );
+}
+
+function resourceIdFromFolderPath(
+  filePath: string,
+  folder: string,
+): string | null {
+  const normalized = filePath.replace(/\\/g, "/");
+  const folderPrefix = `${folder}/`;
+  const idx = normalized.lastIndexOf(folderPrefix);
+  if (idx === -1) return null;
+  const tail = normalized.slice(idx + folderPrefix.length);
+  if (!tail) return null;
+  return tail.replace(/\.(yml|yaml|md|ts)$/, "");
+}
+
+/**
+ * Parse a resource file path into type + local resourceId.
+ * Accepts long form (`resources/<org>/assistants/foo.md`) and short form
+ * (`assistants/foo.md`).
+ */
+export function parseResourceFilePath(
+  filePath: string,
+): { type: ResourceType; resourceId: string } | null {
+  const absolutePath = resolve(BASE_DIR, filePath);
+  const typeFromResourcesDir = getResourceTypeFromPath(absolutePath);
+  if (typeFromResourcesDir) {
+    const folderPath = FOLDER_MAP[typeFromResourcesDir];
+    const resourceDir = join(RESOURCES_DIR, folderPath);
+    const ext = extname(absolutePath);
+    const relativePath = relative(resourceDir, absolutePath);
+    return {
+      type: typeFromResourcesDir,
+      resourceId: relativePath.slice(0, -ext.length),
+    };
+  }
+
+  for (const [type, folder] of Object.entries(FOLDER_MAP)) {
+    if (!pathMatchesFolder(filePath, folder)) continue;
+    const resourceId = resourceIdFromFolderPath(filePath, folder);
+    if (!resourceId) continue;
+    return { type: type as ResourceType, resourceId };
+  }
+
+  return null;
+}
+
+export interface PullFileScope {
+  types: ResourceType[];
+  idsByType: Map<ResourceType, string[]>;
+  skippedWithoutState: Array<{
+    type: ResourceType;
+    resourceId: string;
+    filePath: string;
+  }>;
+  unrecognized: string[];
+}
+
+// Map selective-apply file paths to dashboard UUIDs via state. Resources
+// without a state entry are push-only creates and skip the pull phase.
+export function resolvePullScopeFromFilePaths(
+  filePaths: string[],
+  state: StateFile,
+): PullFileScope {
+  const idsByType = new Map<ResourceType, string[]>();
+  const types = new Set<ResourceType>();
+  const skippedWithoutState: PullFileScope["skippedWithoutState"] = [];
+  const unrecognized: string[] = [];
+
+  for (const filePath of filePaths) {
+    // Dashboard-backup siblings are merge scratch material, never resources —
+    // refuse them even when passed explicitly.
+    if (isBackupCopyFile(basename(filePath))) {
+      console.log(
+        `  🚫 ${filePath} (dashboard-backup copy — merge reference only, not pullable)`,
+      );
+      continue;
+    }
+    const parsed = parseResourceFilePath(filePath);
+    if (!parsed) {
+      unrecognized.push(filePath);
+      continue;
+    }
+
+    const { type, resourceId } = parsed;
+    types.add(type);
+    const uuid = stateUuid(state[type], resourceId);
+    if (!uuid) {
+      skippedWithoutState.push({ type, resourceId, filePath });
+      continue;
+    }
+
+    const ids = idsByType.get(type) ?? [];
+    if (!ids.includes(uuid)) ids.push(uuid);
+    idsByType.set(type, ids);
+  }
+
+  return {
+    types: [...types].filter((type) => (idsByType.get(type)?.length ?? 0) > 0),
+    idsByType,
+    skippedWithoutState,
+    unrecognized,
+  };
 }
 
 /**
@@ -345,6 +475,16 @@ export async function loadSingleResource(
 
   if (!existsSync(absolutePath)) {
     console.error(`  ❌ File not found: ${filePath}`);
+    return null;
+  }
+
+  // Dashboard-backup siblings are merge scratch material, never resources —
+  // refuse them even when passed explicitly, or a selective push would
+  // re-create the backup on the platform as a duplicate.
+  if (isBackupCopyFile(basename(absolutePath))) {
+    console.log(
+      `  🚫 ${filePath} (dashboard-backup copy — merge reference only, not pushable)`,
+    );
     return null;
   }
 

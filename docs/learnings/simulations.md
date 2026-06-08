@@ -145,7 +145,7 @@ If your post-call analytics structured output uses `type: object` with nested sc
 
 ## Simulation File Names After Push
 
-Simulation resource files use placeholder UUIDs (`a0000000`) locally. After the first push, the gitops engine creates platform resources and maps local filenames to platform UUIDs in `.vapi-state.<env>.json`. On subsequent state syncs (bootstrap), filenames may be updated to include the platform name — this triggers `name_mismatch` warnings that are resolved automatically by re-running bootstrap.
+Simulation resource files use placeholder UUIDs (`a0000000`) locally. After the first push, the gitops engine creates platform resources and maps local filenames to platform UUIDs in `.vapi-state.<env>.json`. The local filename is a stable handle and is **not** rewritten to match the platform `name` — once a UUID is tracked in state, pull and bootstrap preserve the existing filename and only update file content. (Older engine versions renamed files to match the platform name and emitted `name_mismatch` warnings; that behavior was removed — see `improvements.md` #22.)
 
 ---
 

@@ -18,9 +18,13 @@
 // has nothing to compare against — only PATCH (update) is drift-sensitive.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
+import { vapiGet, VapiApiError } from "./api.ts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import { credentialReverseMap } from "./credentials.ts";
+import { readBaseline } from "./hash-store.ts";
+import { hashLocalResource } from "./resources.ts";
 import { hashPayload } from "./state-serialize.ts";
-import type { ResourceState } from "./types.ts";
+import type { ResourceType, StateFile } from "./types.ts";
 
 export type DriftDirection =
   | "clean"
@@ -38,6 +42,12 @@ export interface ClassifyDriftInput {
 export function classifyDrift(input: ClassifyDriftInput): DriftDirection {
   const { localHash, lastPulledHash, platformHash } = input;
   if (!lastPulledHash) return "no-baseline";
+  // INVARIANT: live local + platform agreement is NEVER drift, whatever the
+  // (possibly stale) baseline says. A stale baseline happens legitimately —
+  // e.g. a push made the dashboard match local while the baseline still held
+  // the previous pull's hash. Callers treat `clean` as "refresh the baseline
+  // and move on", which self-heals the stale pointer.
+  if (localHash === platformHash) return "clean";
   const localMatches = localHash === lastPulledHash;
   const platformMatches = platformHash === lastPulledHash;
   if (localMatches && platformMatches) return "clean";
@@ -49,7 +59,7 @@ export function classifyDrift(input: ClassifyDriftInput): DriftDirection {
 export function formatDriftLabel(direction: DriftDirection): string {
   switch (direction) {
     case "dashboard-ahead":
-      return "[dashboard-ahead — sync down via plain pull (preserves local) or push --overwrite to take ownership]";
+      return "[dashboard-ahead — dashboard changed, local unchanged; run npm run pull to sync it down]";
     case "local-ahead":
       return "[local-ahead — run npm run push to propagate local edits up]";
     case "both-diverged":
@@ -65,10 +75,13 @@ export interface DriftCheckResult {
   ok: boolean;
   reason: "no-baseline" | "match" | "drift-overwritten" | "drift-blocked";
   message?: string;
-  // Hash of the *current* platform payload — caller may want to update
-  // state's `lastPulledHash` after a successful push so subsequent pushes
-  // start from the platform's current state, not the stale pre-overwrite hash.
+  // Hash of the *current* platform payload in the canonical baseline basis.
   platformHash?: string;
+  // The raw platform payload fetched for the check. Returned so the caller
+  // can reuse it (e.g. for the pre-push rollback snapshot) instead of firing
+  // a second GET against the same endpoint. Undefined when the check
+  // short-circuited before fetching (no baseline) or the resource 404'd.
+  platformPayload?: unknown;
 }
 
 async function fetchPlatformPayload(endpoint: string): Promise<unknown | null> {
@@ -76,64 +89,44 @@ async function fetchPlatformPayload(endpoint: string): Promise<unknown | null> {
   // was deleted on the dashboard — let the upsert path handle it (the existing
   // 404 → "stale mapping, drop and skip" recovery in
   // upsertResourceWithStateRecovery covers this case).
-  const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
-  });
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Drift GET ${endpoint} → ${response.status}: ${text}`);
+  try {
+    return await vapiGet(endpoint);
+  } catch (error) {
+    if (error instanceof VapiApiError && error.statusCode === 404) return null;
+    throw error;
   }
-  return response.json();
-}
-
-// Strip server-managed fields before hashing so the platform's payload hash
-// matches the last-pulled-hash basis (which excluded them via cleanResource).
-const SERVER_FIELDS = new Set([
-  "id",
-  "orgId",
-  "createdAt",
-  "updatedAt",
-  "analyticsMetadata",
-  "isDeleted",
-  "isServerUrlSecretSet",
-  "workflowIds",
-]);
-
-function stripServerFields(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return payload;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
-    if (!SERVER_FIELDS.has(k)) out[k] = v;
-  }
-  return out;
-}
-
-export function hashPlatformResource(resource: unknown): string {
-  return hashPayload(stripServerFields(resource));
 }
 
 export async function checkDriftForUpdate(options: {
   endpoint: string; // e.g. "/assistant/<uuid>"
   resourceLabel: string; // for log lines
+  resourceType: ResourceType;
   resourceId: string; // local resource id
-  state: ResourceState;
+  state: StateFile;
+  env: string; // org slug — keys the hash store
   overwrite: boolean;
-  localHash?: string;
 }): Promise<DriftCheckResult> {
-  const { endpoint, resourceLabel, resourceId, state, overwrite, localHash } =
-    options;
+  const {
+    endpoint,
+    resourceLabel,
+    resourceType,
+    resourceId,
+    state,
+    env,
+    overwrite,
+  } = options;
 
-  if (!state.lastPulledHash) {
+  // The drift baseline ("last platform state I saw") lives in the hash store,
+  // keyed by the resource's UUID, not in the state file anymore.
+  const entry = state[resourceType]?.[resourceId];
+  const baseline = entry ? readBaseline(env, entry.uuid) : undefined;
+  if (!baseline) {
     return {
       ok: true,
       reason: "no-baseline",
       message:
         `   ⚠️  drift check skipped for ${resourceLabel} ${resourceId}: ` +
-        `no lastPulledHash in state. Run \`npm run pull\` to establish a baseline.`,
+        `no baseline in .vapi-state-hash. Run \`npm run pull\` to establish one.`,
     };
   }
 
@@ -144,15 +137,40 @@ export async function checkDriftForUpdate(options: {
     return { ok: true, reason: "no-baseline" };
   }
 
-  const platformHash = hashPayload(stripServerFields(remote));
-  if (platformHash === state.lastPulledHash) {
-    return { ok: true, reason: "match", platformHash };
+  // Hash all three points (platform, local, baseline) in ONE basis — the
+  // canonical form defined in canonical.ts that pull also uses to write
+  // `lastPulledHash`. Drift previously carried its own field-strip copy that
+  // omitted reference/credential resolution, so any tool- or credential-bearing
+  // resource hashed differently here than at pull time → phantom both-diverged.
+  const credReverse = credentialReverseMap(state);
+  const platformHash = hashPayload(
+    canonicalizeForHash(remote as VapiResource, state, credReverse),
+  );
+  if (platformHash === baseline) {
+    return { ok: true, reason: "match", platformHash, platformPayload: remote };
   }
 
-  const effectiveLocalHash = localHash ?? state.lastPulledHash ?? platformHash;
+  // On-disk hash in the same basis as the baseline. Absent a local file
+  // (rare on an update path), fall back to the baseline so the direction is
+  // dashboard-ahead rather than a phantom both-diverged.
+  const localHash =
+    hashLocalResource(resourceType, resourceId) ?? baseline;
+
+  // Local and platform are byte-identical → there is nothing to reconcile and
+  // the PATCH is a no-op. NEVER block here, even if the baseline disagrees
+  // with both (a stale or older-basis baseline must not manufacture a conflict
+  // when the two LIVE sides already agree). `classifyDrift` encodes the same
+  // invariant, but this early return also short-circuits before the direction
+  // bookkeeping. This is the fix for the phantom-drift class: a freshly
+  // upgraded customer repo carries baselines written in an older hash basis,
+  // so every untouched resource hit `both-diverged` on its first push.
+  if (localHash === platformHash) {
+    return { ok: true, reason: "match", platformHash, platformPayload: remote };
+  }
+
   const direction = classifyDrift({
-    localHash: effectiveLocalHash,
-    lastPulledHash: state.lastPulledHash,
+    localHash,
+    lastPulledHash: baseline,
     platformHash,
   });
   const directionTag = `[${direction}]`;
@@ -162,6 +180,7 @@ export async function checkDriftForUpdate(options: {
       ok: true,
       reason: "drift-overwritten",
       platformHash,
+      platformPayload: remote,
       message:
         `   ⚠️  drift on ${resourceLabel} ${resourceId} ${directionTag}: platform changed since last pull, ` +
         `overwriting (--overwrite). ${formatDriftLabel(direction)}`,
@@ -172,10 +191,11 @@ export async function checkDriftForUpdate(options: {
     ok: false,
     reason: "drift-blocked",
     platformHash,
+    platformPayload: remote,
     message:
       `   ❌ drift detected on ${resourceLabel} ${resourceId} ${directionTag}: ` +
-      `platform hash (${platformHash.slice(0, 8)}...) differs from last-pulled ` +
-      `(${state.lastPulledHash.slice(0, 8)}...). ` +
+      `platform hash (${platformHash.slice(0, 8)}...) differs from baseline ` +
+      `(${baseline.slice(0, 8)}...). ` +
       `${formatDriftLabel(direction)} ` +
       `Re-run pull, resolve locally, or push with --overwrite to take ownership.`,
   };

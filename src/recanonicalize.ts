@@ -182,6 +182,15 @@ export function recanonicalizeStateKeys(
         fileExists,
       );
       if (!canonicalFileExists) {
+        // Post-pull layout: only the UUID-suffixed file exists and its name
+        // matches the state key — already consistent, nothing to collapse.
+        const uuidSuffixedOnly = localFileExistsForId(
+          type,
+          stateKey,
+          fileExists,
+        );
+        if (uuidSuffixedOnly) continue;
+
         conflicts.push({
           type,
           uuidSuffixedKey: stateKey,

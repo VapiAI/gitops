@@ -4,6 +4,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { dirname, extname, join, relative } from "path";
 import { fileURLToPath } from "url";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
+// slug-utils is config-free (no config.ts side effects) — safe to import in
+// the launcher, which runs before any org/token is selected.
+import { isBackupCopyFile } from "./slug-utils.ts";
 import type { StateFile } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,6 +317,9 @@ function scanLocalResources(slug: string): LocalResource[] {
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.name.startsWith(".")) continue;
+        // Dashboard-backup copies are merge scratch material, never
+        // selectable resources.
+        if (isBackupCopyFile(entry.name)) continue;
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
           walk(fullPath);
@@ -879,8 +885,164 @@ export async function runInteractiveApply(): Promise<void> {
   );
   console.log("");
 
-  const slug = await selectOrg("apply");
+  type Step = "org" | "scope" | "pick" | "confirm" | "execute";
+  let step: Step = "org";
 
+  let slug = "";
+  let resources: LocalResource[] = [];
+  let gitStatuses = new Map<string, GitStatusCode>();
+  let picked: string[] = [];
+  let applyAll = false;
+
+  while (step !== "execute") {
+    switch (step) {
+      // ── Org selection ───────────────────────────────────────────────
+      case "org": {
+        slug = await selectOrg("apply");
+        resources = scanLocalResources(slug);
+
+        if (resources.length === 0) {
+          console.log(
+            c.yellow(`  No local resources found in resources/${slug}/.\n`),
+          );
+          return;
+        }
+
+        gitStatuses = getGitFileStatuses(slug);
+        const modifiedCount = [...gitStatuses.values()].filter(
+          (s) => s === "M",
+        ).length;
+        const newCount = [...gitStatuses.values()].filter(
+          (s) => s === "A",
+        ).length;
+
+        if (modifiedCount > 0 || newCount > 0) {
+          const parts: string[] = [];
+          if (modifiedCount > 0) parts.push(`${modifiedCount} modified`);
+          if (newCount > 0) parts.push(`${newCount} new`);
+          console.log(c.dim(`  Git status: ${parts.join(", ")}\n`));
+        }
+
+        step = "scope";
+        break;
+      }
+
+      // ── All / Pick scope ────────────────────────────────────────────
+      case "scope": {
+        const scope = await select({
+          message: "Which resources to apply?",
+          choices: [
+            {
+              name: `All (${resources.length} resources)`,
+              value: "all" as const,
+            },
+            { name: "Let me pick…", value: "pick" as const },
+            { name: c.dim("← Back"), value: "back" as const },
+          ],
+        });
+
+        if (scope === "back") {
+          step = "org";
+          break;
+        }
+
+        if (scope === "all") {
+          applyAll = true;
+          step = "execute";
+          break;
+        }
+
+        applyAll = false;
+        step = "pick";
+        break;
+      }
+
+      // ── Individual resource picker ──────────────────────────────────
+      case "pick": {
+        const allChoices = resources.map((r) => {
+          const status = gitStatuses.get(r.filePath);
+          const statusTag = status ? ` ${gitStatusLabel(status)}` : "";
+          return {
+            value: r.filePath,
+            name: `${r.displayName}${statusTag}`,
+            group: r.typeLabel,
+            checked: false,
+          };
+        });
+
+        allChoices.sort((a, b) => {
+          if (a.group !== b.group) return 0;
+          const aStatus = gitStatuses.get(a.value) || "";
+          const bStatus = gitStatuses.get(b.value) || "";
+          if (aStatus && !bStatus) return -1;
+          if (!aStatus && bStatus) return 1;
+          return 0;
+        });
+
+        picked = await searchableCheckbox({
+          message: "Select resources to apply",
+          choices: allChoices,
+          pageSize: 20,
+        });
+
+        if (isBack(picked)) {
+          step = "scope";
+          break;
+        }
+
+        if (picked.length === 0) {
+          console.log(c.dim("\n  Nothing selected.\n"));
+          return;
+        }
+
+        step = "confirm";
+        break;
+      }
+
+      // ── Confirm ─────────────────────────────────────────────────────
+      case "confirm": {
+        const selectedSet = new Set(picked);
+        const byGroup = new Map<string, number>();
+        for (const r of resources) {
+          if (!selectedSet.has(r.filePath)) continue;
+          byGroup.set(r.typeLabel, (byGroup.get(r.typeLabel) ?? 0) + 1);
+        }
+
+        console.log("\n  Apply list:");
+        for (const [group, count] of byGroup) {
+          console.log(`    ${c.green("✓")} ${group} (${count})`);
+        }
+        console.log("");
+
+        const action = await select({
+          message: `Apply ${picked.length} resource(s)?`,
+          choices: [
+            { name: "Yes, apply", value: "yes" as const },
+            { name: "No, cancel", value: "no" as const },
+            { name: c.dim("← Back to selection"), value: "back" as const },
+          ],
+        });
+
+        if (action === "back") {
+          step = "pick";
+          break;
+        }
+        if (action === "no") {
+          console.log(c.dim("\n  Cancelled.\n"));
+          return;
+        }
+
+        step = "execute";
+        break;
+      }
+    }
+  }
+
+  // ── Execute apply ─────────────────────────────────────────────────────
+  // No umbrella "which version wins?" question here. Apply runs with
+  // --resolve=defer (its default): conflicts are detected per resource via
+  // the hash-store baseline, and the push stage prompts for exactly the
+  // resources that actually diverged — clean ones push silently.
   const useForce = await confirm({
     message:
       "Enable force mode? (deletions: resources removed locally will also be deleted remotely)",
@@ -889,6 +1051,11 @@ export async function runInteractiveApply(): Promise<void> {
 
   const args = ["src/apply.ts", slug];
   if (useForce) args.push("--force");
+
+  if (!applyAll) {
+    const relPaths = picked.map((p) => relative(BASE_DIR, p));
+    args.push(...relPaths);
+  }
 
   console.log(c.dim("\n  Running pull → push...\n"));
   spawnScript(args);

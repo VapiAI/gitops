@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { stringify } from "yaml";
+import { vapiGet, VapiApiError } from "./api.ts";
 import {
   APPLY_FILTER,
   BASE_DIR,
@@ -11,47 +12,36 @@ import {
   loadIgnorePatterns,
   matchesIgnore,
   RESOURCES_DIR,
+  STATE_FILE_PATH,
   VAPI_BASE_URL,
   VAPI_ENV,
   VAPI_TOKEN,
 } from "./config.ts";
-import { credentialReverseMap, replaceCredentialRefs } from "./credentials.ts";
+import {
+  buildReverseMap,
+  canonicalizeForHash,
+  type VapiResource,
+} from "./canonical.ts";
+import { credentialReverseMap } from "./credentials.ts";
 import {
   classifyDrift,
   formatDriftLabel,
   type DriftDirection,
 } from "./drift.ts";
+import { readBaseline, writeBaseline } from "./hash-store.ts";
+import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
-import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
-import { extractBaseSlug, slugify } from "./slug-utils.ts";
+import {
+  FOLDER_MAP,
+  hashLocalResource,
+  resolvePullScopeFromFilePaths,
+} from "./resources.ts";
+import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface VapiResource {
-  id: string;
-  name?: string;
-  [key: string]: unknown;
-}
-
-// Fields to remove from resources before saving (server-managed or computed fields)
-const EXCLUDED_FIELDS = [
-  "id",
-  "orgId",
-  "createdAt",
-  "updatedAt",
-  "analyticsMetadata",
-  "isDeleted",
-  // Computed/derived fields that shouldn't be synced back
-  "isServerUrlSecretSet", // Computed: indicates if server URL secret is set
-  "workflowIds", // Server-managed: workflows are a separate resource type
-];
 
 // Map resource types to their API endpoints
 const ENDPOINT_MAP: Record<ResourceType, string> = {
@@ -140,40 +130,32 @@ export async function fetchAllResources(
   resourceType: ResourceType,
 ): Promise<VapiResource[]> {
   const endpoint = ENDPOINT_MAP[resourceType];
-  const url = `${VAPI_BASE_URL}${endpoint}`;
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${VAPI_TOKEN}`,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let apiMessage = errorText;
-    try {
-      const parsed = JSON.parse(errorText);
-      if (typeof parsed.message === "string") apiMessage = parsed.message;
-    } catch {}
-    throw new Error(
-      `API GET ${endpoint} failed (${response.status}): ${apiMessage}`,
-    );
-  }
-
-  const data = await response.json();
+  const data = await vapiGet<unknown>(endpoint);
 
   // Handle paginated response format (e.g., structured-output returns { results: [], metadata: {} })
   if (
     data &&
     typeof data === "object" &&
     "results" in data &&
-    Array.isArray(data.results)
+    Array.isArray((data as Record<string, unknown>).results)
   ) {
-    return data.results as VapiResource[];
+    return (data as { results: VapiResource[] }).results;
   }
 
   return data as VapiResource[];
+}
+
+export async function fetchResourceById(
+  resourceType: ResourceType,
+  uuid: string,
+): Promise<VapiResource | null> {
+  const endpoint = `${ENDPOINT_MAP[resourceType]}/${uuid}`;
+  try {
+    return await vapiGet<VapiResource>(endpoint);
+  } catch (error) {
+    if (error instanceof VapiApiError && error.statusCode === 404) return null;
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,25 +170,7 @@ interface VapiCredential {
 }
 
 async function fetchCredentials(): Promise<VapiCredential[]> {
-  const url = `${VAPI_BASE_URL}/credential`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    let apiMessage = errorText;
-    try {
-      const parsed = JSON.parse(errorText);
-      if (typeof parsed.message === "string") apiMessage = parsed.message;
-    } catch {}
-    throw new Error(
-      `API GET /credential failed (${response.status}): ${apiMessage}`,
-    );
-  }
-
-  return (await response.json()) as VapiCredential[];
+  return vapiGet<VapiCredential[]>("/credential");
 }
 
 function credentialSlug(cred: VapiCredential): string {
@@ -232,12 +196,7 @@ async function pullCredentials(state: StateFile): Promise<void> {
     if (!slug) {
       slug = credentialSlug(cred);
     }
-    // Preserve existing hash metadata if the slug+uuid pair survives.
-    const prior = state.credentials[slug];
-    newSection[slug] =
-      prior && prior.uuid === cred.id
-        ? prior
-        : { uuid: cred.id, lastPulledAt: new Date().toISOString() };
+    newSection[slug] = { uuid: cred.id };
     console.log(`   🔑 ${slug} -> ${cred.id}`);
   }
 
@@ -285,6 +244,11 @@ export function listExistingResourceIds(resourceType: ResourceType): string[] {
       }
 
       if (!/\.(yml|yaml|md)$/.test(entry.name)) {
+        continue;
+      }
+
+      // Dashboard-backup siblings are merge reference material, not resources.
+      if (isBackupCopyFile(entry.name)) {
         continue;
       }
 
@@ -356,192 +320,6 @@ function removeUuidMappings(
 // ─────────────────────────────────────────────────────────────────────────────
 // Resource Processing
 // ─────────────────────────────────────────────────────────────────────────────
-
-export function cleanResource(resource: VapiResource): Record<string, unknown> {
-  const cleaned: Record<string, unknown> = {};
-
-  // Preserve `null` values: the API uses `null` to represent an intentionally
-  // cleared field (e.g. `voicemailMessage: null`), which is semantically
-  // different from an absent field. Stripping it on pull would cause the next
-  // push to drop the clear and re-apply any prior value still on the server.
-  for (const [key, value] of Object.entries(resource)) {
-    if (!EXCLUDED_FIELDS.includes(key) && value !== undefined) {
-      cleaned[key] = value;
-    }
-  }
-
-  return cleaned;
-}
-
-function buildReverseMap(
-  state: StateFile,
-  resourceType: ResourceType,
-): Map<string, string> {
-  // uuid -> resourceId
-  const map = new Map<string, string>();
-  const stateSection = state[resourceType];
-
-  for (const [resourceId, entry] of Object.entries(stateSection)) {
-    map.set(entry.uuid, resourceId);
-  }
-
-  return map;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Reference Resolution (UUID -> resourceId)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function resolveReferencesToResourceIds(
-  resource: Record<string, unknown>,
-  state: StateFile,
-): Record<string, unknown> {
-  const toolsMap = buildReverseMap(state, "tools");
-  const assistantsMap = buildReverseMap(state, "assistants");
-  const structuredOutputsMap = buildReverseMap(state, "structuredOutputs");
-  const personalitiesMap = buildReverseMap(state, "personalities");
-  const scenariosMap = buildReverseMap(state, "scenarios");
-  const simulationsMap = buildReverseMap(state, "simulations");
-
-  const resolved = { ...resource };
-
-  // Resolve toolIds in model
-  if (resolved.model && typeof resolved.model === "object") {
-    const model = { ...(resolved.model as Record<string, unknown>) };
-    if (Array.isArray(model.toolIds)) {
-      model.toolIds = model.toolIds.map(
-        (uuid: string) => toolsMap.get(uuid) ?? uuid,
-      );
-    }
-    resolved.model = model;
-  }
-
-  // Resolve structuredOutputIds in artifactPlan
-  if (resolved.artifactPlan && typeof resolved.artifactPlan === "object") {
-    const artifactPlan = {
-      ...(resolved.artifactPlan as Record<string, unknown>),
-    };
-    if (Array.isArray(artifactPlan.structuredOutputIds)) {
-      artifactPlan.structuredOutputIds = artifactPlan.structuredOutputIds.map(
-        (uuid: string) => structuredOutputsMap.get(uuid) ?? uuid,
-      );
-    }
-    resolved.artifactPlan = artifactPlan;
-  }
-
-  // Resolve assistantIds in structured outputs (API returns camelCase)
-  if (Array.isArray(resolved.assistantIds)) {
-    resolved.assistant_ids = (resolved.assistantIds as string[]).map(
-      (uuid: string) => assistantsMap.get(uuid) ?? uuid,
-    );
-    delete resolved.assistantIds;
-  }
-
-  // Resolve assistantId in tool destinations (handoff tools)
-  if (Array.isArray(resolved.destinations)) {
-    resolved.destinations = (
-      resolved.destinations as Record<string, unknown>[]
-    ).map((dest) => {
-      if (typeof dest.assistantId === "string") {
-        return {
-          ...dest,
-          assistantId: assistantsMap.get(dest.assistantId) ?? dest.assistantId,
-        };
-      }
-      return dest;
-    });
-  }
-
-  // Resolve members[].assistantId in squads
-  if (Array.isArray(resolved.members)) {
-    resolved.members = (resolved.members as Record<string, unknown>[]).map(
-      (member) => {
-        const resolvedMember = { ...member };
-        if (typeof member.assistantId === "string") {
-          resolvedMember.assistantId =
-            assistantsMap.get(member.assistantId) ?? member.assistantId;
-        }
-        // Resolve assistantDestinations[].assistantId
-        if (Array.isArray(member.assistantDestinations)) {
-          resolvedMember.assistantDestinations = (
-            member.assistantDestinations as Record<string, unknown>[]
-          ).map((dest) => {
-            if (typeof dest.assistantId === "string") {
-              return {
-                ...dest,
-                assistantId:
-                  assistantsMap.get(dest.assistantId) ?? dest.assistantId,
-              };
-            }
-            return dest;
-          });
-        }
-        return resolvedMember;
-      },
-    );
-  }
-
-  // Resolve personalityId in simulations
-  if (typeof resolved.personalityId === "string") {
-    resolved.personalityId =
-      personalitiesMap.get(resolved.personalityId) ?? resolved.personalityId;
-  }
-
-  // Resolve scenarioId in simulations
-  if (typeof resolved.scenarioId === "string") {
-    resolved.scenarioId =
-      scenariosMap.get(resolved.scenarioId) ?? resolved.scenarioId;
-  }
-
-  // Resolve simulationIds in simulation suites
-  if (Array.isArray(resolved.simulationIds)) {
-    resolved.simulationIds = (resolved.simulationIds as string[]).map(
-      (uuid: string) => simulationsMap.get(uuid) ?? uuid,
-    );
-  }
-
-  return resolved;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Canonicalization for content-hashing
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Single source of truth for the canonical hash basis of a platform resource.
- *
- * Encodes the full pipeline: `cleanResource → resolveReferencesToResourceIds
- * → replaceCredentialRefs → _platformDefault marker injection`.
- *
- * ALL hash sites MUST use this helper. The classifier (pull.ts), the audit
- * (audit.ts/checkContentDrift), and the pull-write fallback all need the
- * same transformation applied in the same order — any divergence (a missing
- * step, a different mutation order) makes the recomputed `platformHash`
- * disagree with the stored `lastPulledHash` from a prior pull, producing
- * permanent phantom `both-diverged` reports that only `--overwrite` can clear.
- *
- * Note: this is the *pre-write* canonical form (in-memory). At write sites,
- * `lastPulledHash` should still be sourced from `hashLocalResource(...)` after
- * the file is on disk, because YAML round-trip / MD frontmatter serialization
- * is not guaranteed to be identity-preserving. This helper is the correct
- * fallback when no file write happened (bootstrap mode) or when reading a
- * platform payload for classifier/audit purposes.
- */
-export function canonicalizeForHash(
-  resource: VapiResource,
-  state: StateFile,
-  credReverse: Map<string, string>,
-): Record<string, unknown> {
-  const cleaned = cleanResource(resource);
-  const resolved = resolveReferencesToResourceIds(cleaned, state);
-  const withCredNames = replaceCredentialRefs(resolved, credReverse);
-  const isPlatformDefault =
-    resource.orgId === null || resource.orgId === undefined;
-  if (isPlatformDefault) {
-    withCredNames._platformDefault = true;
-  }
-  return withCredNames;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // File Writing
@@ -639,6 +417,34 @@ async function writeResourceFile(
   return filePath;
 }
 
+// Write the dashboard version of a resource as a sibling
+// `<resourceId>.<TIMESTAMP>.bkp.<ext>` next to the local file, in the same
+// serialized form a pull would produce — so a hand-merge diffs cleanly
+// against the local file. The timestamp keeps repeated conflicts from
+// overwriting earlier copies; the `.bkp.` infix keeps the file invisible to
+// all resource discovery (see `isBackupCopyFile`) and gitignored (`*.bkp.*`).
+// Used by the push conflict prompt's "create local copy + manual merge"
+// choice.
+export async function writeDashboardBackup(
+  resourceType: ResourceType,
+  resourceId: string,
+  platformPayload: VapiResource,
+  state: StateFile,
+): Promise<string> {
+  const credReverse = credentialReverseMap(state);
+  const withCredNames = canonicalizeForHash(platformPayload, state, credReverse);
+  // Filesystem-safe ISO timestamp: 2026-06-04T19-22-33 (no colons, no ms).
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "")
+    .replace(/:/g, "-");
+  return writeResourceFile(
+    resourceType,
+    `${resourceId}.${timestamp}.bkp`,
+    withCredNames,
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pull Functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -649,7 +455,11 @@ export interface PullStats {
   skipped: number;
 }
 
-export type DriftResolveMode = "ours" | "theirs" | "fail";
+// `defer` preserves the local file AND the drift baseline (no rewrite, no
+// error): the conflict evidence survives the pull so push's per-resource
+// interactive prompt can ask about exactly the resources that diverged.
+// `ours`/`theirs`/`fail` keep their non-interactive (CI) semantics.
+export type DriftResolveMode = "ours" | "theirs" | "fail" | "defer";
 
 export interface BothDivergedResource {
   resourceType: ResourceType;
@@ -677,9 +487,10 @@ function parseResolveMode(explicit?: DriftResolveMode): DriftResolveMode | undef
   const arg = process.argv.find((a) => a.startsWith("--resolve="));
   if (!arg) return undefined;
   const mode = arg.slice("--resolve=".length);
-  if (mode === "ours" || mode === "theirs" || mode === "fail") return mode;
+  if (mode === "ours" || mode === "theirs" || mode === "fail" || mode === "defer")
+    return mode;
   throw new Error(
-    `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail`,
+    `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail|defer`,
   );
 }
 
@@ -778,12 +589,14 @@ export async function pullResourceType(
   let skipped = 0;
 
   for (const resource of resources) {
-    // Check if we already have this resource in state (by UUID)
-    let resourceId = reverseMap.get(resource.id);
-    if (resourceId && !resourceIdMatchesName(resourceId, resource)) {
-      delete newStateSection[resourceId];
-      resourceId = undefined;
-    }
+    // Check if we already have this resource in state (by UUID).
+    // The filename slug is a stable local handle, NOT derived from the
+    // dashboard `name`. If this UUID is already tracked in state, keep its
+    // existing resourceId verbatim — a dashboard rename only changes the
+    // resource's content, never its local filename. We only mint a new slug
+    // when the UUID is unknown to state (genuinely new or cross-env adoption).
+    const trackedResourceId = reverseMap.get(resource.id);
+    let resourceId = trackedResourceId;
 
     if (!resourceId) {
       // Reuse an existing file's resourceId if the name matches (cross-env
@@ -805,9 +618,10 @@ export async function pullResourceType(
         : (findExistingResourceId(existingResourceIds, resource, claimView) ??
           generateResourceId(resource));
     }
-    const isNew =
-      !reverseMap.get(resource.id) ||
-      !resourceIdMatchesName(resourceId, resource);
+    // New only when the UUID was not previously tracked. A dashboard rename
+    // of an already-tracked resource is an UPDATE to the existing file, not
+    // a new resource — the local filename stays put.
+    const isNew = !trackedResourceId;
 
     removeUuidMappings(newStateSection, resource.id, resourceId);
 
@@ -828,14 +642,16 @@ export async function pullResourceType(
 
     let skipLegacyPreserveChecks = false;
 
-    // Hash-based drift direction when a lastPulledHash baseline exists.
+    // Hash-based drift direction when a baseline exists in the hash store.
     if (!bootstrap && !force) {
       const stateEntry =
         newStateSection[resourceId] ?? state[resourceType][resourceId];
-      const lastPulledHash = stateEntry?.lastPulledHash;
+      const baseline = stateEntry
+        ? readBaseline(VAPI_ENV, stateEntry.uuid)
+        : undefined;
       const localFile = findLocalResourcePath(folderPath, resourceId);
 
-      if (localFile && lastPulledHash) {
+      if (localFile && baseline) {
         const localHash = hashLocalResource(resourceType, resourceId);
         if (localHash) {
           // Use canonicalizeForHash so platform-default mutation (_platformDefault)
@@ -845,23 +661,22 @@ export async function pullResourceType(
           const platformHash = hashPayload(
             canonicalizeForHash(resource, state, credReverse),
           );
+          // Note: classifyDrift treats live local + platform agreement as
+          // `clean` whatever the (possibly stale) baseline says — the clean
+          // fall-through to the write path re-seeds the baseline from the
+          // disk form, self-healing the stale pointer.
           const direction = classifyDrift({
             localHash,
-            lastPulledHash,
+            lastPulledHash: baseline,
             platformHash,
           });
           if (driftCounts) driftCounts[direction]++;
 
-          // STATE-PRESERVATION INVARIANT: classifier short-circuit branches
-          // MUST carry `lastPulledHash` (and `lastPulledAt`) forward into
-          // `newStateSection`. `newStateSection` starts EMPTY for a full pull
-          // (pull.ts:769); a bare `upsertState(..., { uuid })` merges against
-          // `undefined`, producing `{ uuid }`-only — dropping the baseline.
-          // Then `state[type] = newStateSection` at end-of-loop persists the
-          // loss. Symptom: next pull sees no baseline → `no-baseline`, the
-          // classifier can never detect drift on this resource again until
-          // something else writes a fresh baseline. The both-diverged branch
-          // skipped `upsertState` entirely, dropping the entry outright.
+          // The drift baseline now lives in the hash store, NOT in the state
+          // section that gets wholesale-replaced at end-of-loop. So the
+          // preserve branches just write the `{ uuid }` mapping and leave the
+          // `.vapi-state-hash/<org>/<uuid>` file untouched — the baseline
+          // survives by construction, no carry-forward needed.
           if (direction === "both-diverged") {
             bothDiverged?.push({
               resourceType,
@@ -869,12 +684,12 @@ export async function pullResourceType(
               resource,
               localHash,
               platformHash,
-              lastPulledHash,
+              lastPulledHash: baseline,
             });
-            // Preserve the existing entry verbatim. `resolveBothDivergedResources`
-            // will overwrite it with the resolve-mode-appropriate hash after the
-            // per-type loop completes; if the operator doesn't pass --resolve, we
-            // want the baseline still intact so the next pull can see drift.
+            // Preserve the `{ uuid }` mapping. `resolveBothDivergedResources`
+            // will rewrite the baseline to the resolve-mode-appropriate hash
+            // after the per-type loop; if the operator doesn't pass --resolve,
+            // the baseline file is left intact so the next pull still sees drift.
             const existing = state[resourceType][resourceId];
             if (existing) {
               newStateSection[resourceId] = existing;
@@ -884,16 +699,16 @@ export async function pullResourceType(
           }
 
           if (direction === "dashboard-ahead") {
+            // ⬇️ — local is UNCHANGED since the last sync and the dashboard
+            // moved ahead: the dashboard version is the natural next step
+            // down. Sync it without ceremony (mirror of push's silent-push
+            // rule for local-ahead). Nothing is lost — local had no edits.
+            // Fall through to the write path, which overwrites the file and
+            // re-seeds the baseline from the disk form.
             console.log(
-              `   ✏️  ${resourceId} (locally modified, preserving) ${formatDriftLabel(direction)}`,
+              `   ⬇️  ${resourceId} (dashboard ahead, local unchanged — syncing down)`,
             );
-            upsertState(newStateSection, resourceId, {
-              uuid: resource.id,
-              lastPulledHash,
-              lastPulledAt: stateEntry?.lastPulledAt,
-            });
-            skipped++;
-            continue;
+            skipLegacyPreserveChecks = true;
           }
 
           if (direction === "local-ahead") {
@@ -903,18 +718,14 @@ export async function pullResourceType(
             console.log(
               `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, {
-              uuid: resource.id,
-              lastPulledHash,
-              lastPulledAt: stateEntry?.lastPulledAt,
-            });
+            upsertState(newStateSection, resourceId, { uuid: resource.id });
             skipped++;
             continue;
           }
 
           skipLegacyPreserveChecks = true;
         }
-      } else if (localFile && !lastPulledHash && driftCounts) {
+      } else if (localFile && !baseline && driftCounts) {
         driftCounts["no-baseline"]++;
       }
     }
@@ -1031,9 +842,10 @@ export async function pullResourceType(
     if (isNew) created++;
     else updated++;
 
-    // Update state with new content hash + timestamp.
+    // Record the `{ uuid }` mapping in state and write the drift baseline into
+    // the hash store.
     //
-    // CRITICAL INVARIANT: `lastPulledHash` MUST equal what `hashLocalResource`
+    // CRITICAL INVARIANT: the baseline hash MUST equal what `hashLocalResource`
     // will return when classifyDrift next inspects this file. The way to
     // guarantee that by construction is to hash the FILE AS WRITTEN TO DISK,
     // not the in-memory payload before YAML/MD serialization. The two diverge
@@ -1055,11 +867,12 @@ export async function pullResourceType(
         `   ⚠️  ${resourceType}/${resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(newStateSection, resourceId, {
-      uuid: resource.id,
-      lastPulledHash: diskHash ?? hashPayload(withCredNames),
-      lastPulledAt: new Date().toISOString(),
-    });
+    upsertState(newStateSection, resourceId, { uuid: resource.id });
+    await writeBaseline(
+      VAPI_ENV,
+      resource.id,
+      diskHash ?? hashPayload(withCredNames),
+    );
   }
 
   // Update state with new mappings
@@ -1075,6 +888,21 @@ async function resolveBothDivergedResources(options: {
 }): Promise<{ exitCode: number }> {
   const { state, bothDiverged, resolveMode } = options;
   if (bothDiverged.length === 0) return { exitCode: 0 };
+
+  if (resolveMode === "defer") {
+    // Leave everything as-is: local file preserved (the per-type loop already
+    // skipped the write), baseline untouched. Push's per-resource drift
+    // prompt will ask about exactly these resources.
+    console.log(
+      `\n   ⏳ ${bothDiverged.length} resource(s) have 3-way drift — deferred to push's per-resource prompt:`,
+    );
+    for (const entry of bothDiverged) {
+      console.log(
+        `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}`,
+      );
+    }
+    return { exitCode: 0 };
+  }
 
   if (resolveMode === "fail") {
     console.error(
@@ -1122,15 +950,11 @@ async function resolveBothDivergedResources(options: {
       console.log(
         `   ⬆️  ${entry.resourceId} (both diverged — resolving with --resolve=ours, preserving local) ${formatDriftLabel("both-diverged")}`,
       );
-      // No write — local file is preserved. lastPulledHash = entry.platformHash
-      // marks "the last-pulled baseline was the platform state at resolve time,
-      // even though we kept local," so the next classifyDrift correctly reports
+      // No file write — local is preserved. Set the baseline to the platform
+      // state at resolve time so the next classifyDrift correctly reports
       // `local-ahead` instead of re-flagging `both-diverged`.
-      upsertState(section, entry.resourceId, {
-        uuid: entry.resource.id,
-        lastPulledHash: entry.platformHash,
-        lastPulledAt: new Date().toISOString(),
-      });
+      upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+      await writeBaseline(VAPI_ENV, entry.resource.id, entry.platformHash);
       continue;
     }
 
@@ -1151,11 +975,12 @@ async function resolveBothDivergedResources(options: {
         `   ⚠️  ${entry.resourceType}/${entry.resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(section, entry.resourceId, {
-      uuid: entry.resource.id,
-      lastPulledHash: diskHash ?? hashPayload(withCredNames),
-      lastPulledAt: new Date().toISOString(),
-    });
+    upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+    await writeBaseline(
+      VAPI_ENV,
+      entry.resource.id,
+      diskHash ?? hashPayload(withCredNames),
+    );
   }
 
   return { exitCode: 0 };
@@ -1191,13 +1016,16 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function runPull(options: PullOptions = {}): Promise<PullResult> {
+  assertStateMigrated(STATE_FILE_PATH);
   const force = options.force ?? process.argv.includes("--force");
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
-  const typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
-  const resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
+  const filePathFilter = APPLY_FILTER.filePaths;
+  let typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
+  let resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
   const resolveMode = parseResolveMode(options.resolveMode);
   const driftCounts = emptyDriftCounts();
   const bothDivergedResources: BothDivergedResource[] = [];
+  let idsByType: Map<ResourceType, string[]> | undefined;
 
   if (force && process.env.CI !== "true") {
     console.warn(
@@ -1230,6 +1058,9 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   }
   if (resourceIds?.length) {
     console.log(`   IDs: ${resourceIds.join(", ")}`);
+  }
+  if (filePathFilter?.length) {
+    console.log(`   Files: ${filePathFilter.join(", ")}`);
   }
   if (bootstrap) {
     console.log(
@@ -1280,6 +1111,28 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
 
   const state = loadState();
 
+  if (filePathFilter?.length && !bootstrap) {
+    const scope = resolvePullScopeFromFilePaths(filePathFilter, state);
+    if (scope.unrecognized.length > 0) {
+      console.log(
+        `\n   ⚠️  Unrecognized file path(s): ${scope.unrecognized.join(", ")}`,
+      );
+    }
+    if (scope.skippedWithoutState.length > 0) {
+      console.log(
+        `\n   ℹ️  ${scope.skippedWithoutState.length} selected file(s) have no state UUID yet — skipping pull (push will create):`,
+      );
+      for (const entry of scope.skippedWithoutState) {
+        console.log(`      - ${FOLDER_MAP[entry.type]}/${entry.resourceId}`);
+      }
+    }
+    idsByType = scope.idsByType;
+    typeFilter = scope.types;
+    resourceIds = undefined;
+  }
+
+  const isScopedPull = !!(resourceIds?.length || idsByType?.size);
+
   // Credentials are always pulled first — they're needed to reverse-resolve UUIDs in resource files
   await pullCredentials(state);
 
@@ -1299,44 +1152,64 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   // Pull in reverse-resolution order: pull resources that are referenced by others first,
   // so their state is populated when resolving references (UUID → resourceId) in dependent types.
   // e.g. structuredOutputs reference assistants, so assistants must be pulled first.
-  const shouldPull = (type: ResourceType) =>
-    !typeFilter?.length || typeFilter.includes(type);
+  const shouldPull = (type: ResourceType) => {
+    if (idsByType) {
+      return (idsByType.get(type)?.length ?? 0) > 0;
+    }
+    return !typeFilter?.length || typeFilter.includes(type);
+  };
 
-  const pullOpts = {
+  const pullOptsFor = (type: ResourceType) => ({
     changedFiles,
     force,
     bootstrap,
-    resourceIds,
+    resourceIds: idsByType?.get(type) ?? resourceIds,
     driftCounts,
     bothDiverged: bothDivergedResources,
-  };
+  });
 
   if (shouldPull("tools"))
-    stats.tools = await pullResourceType("tools", state, pullOpts);
+    stats.tools = await pullResourceType("tools", state, pullOptsFor("tools"));
   if (shouldPull("assistants"))
-    stats.assistants = await pullResourceType("assistants", state, pullOpts);
+    stats.assistants = await pullResourceType(
+      "assistants",
+      state,
+      pullOptsFor("assistants"),
+    );
   if (shouldPull("structuredOutputs"))
     stats.structuredOutputs = await pullResourceType(
       "structuredOutputs",
       state,
-      pullOpts,
+      pullOptsFor("structuredOutputs"),
     );
   if (shouldPull("squads"))
-    stats.squads = await pullResourceType("squads", state, pullOpts);
+    stats.squads = await pullResourceType("squads", state, pullOptsFor("squads"));
   if (shouldPull("personalities"))
-    stats.personalities = await pullResourceType("personalities", state, pullOpts);
+    stats.personalities = await pullResourceType(
+      "personalities",
+      state,
+      pullOptsFor("personalities"),
+    );
   if (shouldPull("scenarios"))
-    stats.scenarios = await pullResourceType("scenarios", state, pullOpts);
+    stats.scenarios = await pullResourceType(
+      "scenarios",
+      state,
+      pullOptsFor("scenarios"),
+    );
   if (shouldPull("simulations"))
-    stats.simulations = await pullResourceType("simulations", state, pullOpts);
+    stats.simulations = await pullResourceType(
+      "simulations",
+      state,
+      pullOptsFor("simulations"),
+    );
   if (shouldPull("simulationSuites"))
     stats.simulationSuites = await pullResourceType(
       "simulationSuites",
       state,
-      pullOpts,
+      pullOptsFor("simulationSuites"),
     );
   if (shouldPull("evals"))
-    stats.evals = await pullResourceType("evals", state, pullOpts);
+    stats.evals = await pullResourceType("evals", state, pullOptsFor("evals"));
 
   // Collapse UUID-suffixed state keys back to canonical when the underlying
   // name-collision has resolved (the conflicting twin was deleted, etc.).
@@ -1347,7 +1220,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   // we don't touch sections this pull didn't refresh — preserves the stated
   // safety boundary even though the preconditions themselves are safe.
   // Pull's saveState writes wholesale, so `touched` isn't needed here.
-  if (!bootstrap && !resourceIds?.length) {
+  if (!bootstrap && !isScopedPull) {
     const report = recanonicalizeStateKeys({
       state,
       types: typeFilter?.length ? (typeFilter as ResourceType[]) : undefined,

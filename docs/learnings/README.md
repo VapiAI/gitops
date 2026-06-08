@@ -27,6 +27,8 @@ Each file targets a specific topic so you can load only the context you need.
 | Voicemail detection / VM vs human classification | [voicemail-detection.md](voicemail-detection.md) |
 | Enforcing call time limits / graceful call ending | [call-duration.md](call-duration.md) |
 | Voice provider field cheat-sheet (Cartesia vs 11labs vs others) | [voice-providers.md](voice-providers.md) |
+| YAML authoring conventions, .vapi-ignore lifecycle | [yaml-conventions.md](yaml-conventions.md) |
+| What will pull/push/apply do in situation X? | [sync-behavior.md](sync-behavior.md) |
 
 ---
 
@@ -69,3 +71,12 @@ Proven patterns and setup guides:
 | [multilingual.md](multilingual.md) | Three approaches to multilingual agents, provider recommendations, tool message patterns, common pitfalls |
 | [websocket.md](websocket.md) | Audio formats, timing rules, silence values, control messages, connection management, error codes |
 | [call-duration.md](call-duration.md) | Call time limits, `maxDurationSeconds`, `call.timeElapsed` hooks, graceful shutdown recipes, wrap-up patterns |
+
+### Engine Behavior
+
+How the gitops sync engine itself behaves:
+
+| File | What it covers |
+|------|----------------|
+| [sync-behavior.md](sync-behavior.md) | The full pull/push/apply scenario matrix: state file vs hash-store baseline vs dashboard, drift directions (clean / local-ahead / dashboard-ahead / both-diverged), per-resource conflict prompt, existence cases (local-only file, dashboard-only resource, deletions either side, fresh clone, renames, legacy-state migration), `.bkp` backup copies, flag cheat sheet |
+| [yaml-conventions.md](yaml-conventions.md) | YAML authoring conventions, `.vapi-ignore` lifecycle |

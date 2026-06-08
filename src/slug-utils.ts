@@ -75,3 +75,16 @@ export function isEngineSuffixedSlug(
   if (capturedSuffix.toLowerCase() !== uuidPrefix) return null;
   return { base, suffix: capturedSuffix.toLowerCase() };
 }
+
+// Dashboard-backup sibling files (`<name>.<TIMESTAMP>.bkp.yml|.yaml|.md`) are
+// written by the push conflict prompt for manual merging. Every discovery
+// path (resource loader, orphan gate, audit, interactive picker, explicit
+// CLI paths) must treat them as invisible — they are never resources, and
+// loading one would re-create it on the platform as a duplicate.
+// `.dashboard.` is the legacy pre-timestamp naming; keep excluding it so
+// leftover copies can't be loaded either. Lives here (not resources.ts)
+// because the interactive launcher is config-free and can't import modules
+// that pull in config.ts.
+export function isBackupCopyFile(fileName: string): boolean {
+  return /\.(bkp|dashboard)\.(yml|yaml|md)$/.test(fileName);
+}

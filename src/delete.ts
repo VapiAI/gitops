@@ -1,5 +1,6 @@
 import { VapiApiError, vapiDelete } from "./api.ts";
-import { FORCE_DELETE, loadIgnorePatterns, matchesIgnore } from "./config.ts";
+import { FORCE_DELETE, loadIgnorePatterns, matchesIgnore, VAPI_ENV } from "./config.ts";
+import { deleteBaseline } from "./hash-store.ts";
 import { extractReferencedIds } from "./resolver.ts";
 import { FOLDER_MAP } from "./resources.ts";
 import type {
@@ -435,6 +436,7 @@ export async function deleteOrphanedResources(
       console.log(`  🗑️  Deleting ${type}: ${resourceId} (${uuid})`);
       await vapiDelete(`${DELETE_ENDPOINT_MAP[stateKey]}/${uuid}`);
       delete state[stateKey][resourceId];
+      await deleteBaseline(VAPI_ENV, uuid);
       deleted++;
     } catch (error) {
       const msg =

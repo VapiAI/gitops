@@ -9,7 +9,7 @@ import test from "node:test";
 process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
-const { pathMatchesFolder } = await import("../src/push.ts");
+const { pathMatchesFolder } = await import("../src/resources.ts");
 
 // The bug:
 //   shouldApplyResourceType used `fp.includes("/" + folder + "/")`, which

@@ -9,7 +9,7 @@ import test from "node:test";
 process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
-const { cleanResource } = await import("../src/pull.ts");
+const { cleanResource } = await import("../src/canonical.ts");
 
 test("cleanResource strips the EXCLUDED_FIELDS (id, orgId, createdAt, etc.)", () => {
   const out = cleanResource({

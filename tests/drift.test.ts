@@ -54,7 +54,8 @@ process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
 const driftModule = await import("../src/drift.ts");
-const { classifyDrift, formatDriftLabel, checkDriftForUpdate } = driftModule as {
+const { classifyDrift, formatDriftLabel, checkDriftForUpdate } =
+  driftModule as unknown as {
   classifyDrift?: (input: {
     localHash: string;
     lastPulledHash?: string;
@@ -64,8 +65,12 @@ const { classifyDrift, formatDriftLabel, checkDriftForUpdate } = driftModule as 
   checkDriftForUpdate?: (options: {
     endpoint: string;
     resourceLabel: string;
+    resourceType: string;
     resourceId: string;
-    state: { uuid: string; lastPulledHash?: string };
+    state: Record<
+      string,
+      Record<string, { uuid: string; lastPulledHash?: string }>
+    >;
     overwrite: boolean;
   }) => Promise<{
     ok: boolean;
@@ -74,6 +79,32 @@ const { classifyDrift, formatDriftLabel, checkDriftForUpdate } = driftModule as 
     platformHash?: string;
   }>;
 };
+
+// Full StateFile shape (all sections present) — `canonicalizeForHash` walks
+// every resource-type section via buildReverseMap and `credentialReverseMap`
+// reads `.credentials`, so a partial object throws. `inject` seeds one section.
+function driftState(
+  inject: Partial<
+    Record<string, Record<string, { uuid: string; lastPulledHash?: string }>>
+  > = {},
+): Record<string, Record<string, { uuid: string; lastPulledHash?: string }>> {
+  return {
+    tools: {},
+    structuredOutputs: {},
+    assistants: {},
+    squads: {},
+    personalities: {},
+    scenarios: {},
+    simulations: {},
+    simulationSuites: {},
+    evals: {},
+    credentials: {},
+    ...inject,
+  } as Record<
+    string,
+    Record<string, { uuid: string; lastPulledHash?: string }>
+  >;
+}
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {
   const prior = {
@@ -468,13 +499,14 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
     "checkDriftForUpdate export missing from src/drift.ts",
   );
 
-  // Build a remote payload whose hash we can predict.
-  // `stripServerFields` (private) removes id/orgId/etc — our fixture has
-  // none of them, so hashPayload(remote) == platformHash inside the engine.
+  // Remote payload with no id/orgId → canonicalizeForHash adds the
+  // `_platformDefault` marker, then hashes. The resourceId "intake-bot" has no
+  // local file, so the engine's internal `hashLocalResource` returns null and
+  // localHash falls back to the baseline → direction resolves to
+  // dashboard-ahead (local clean, platform moved).
   const remote = { name: "intake-bot", systemPrompt: "hello" };
-  const platformHash = hashPayload(remote);
-  // Different baseline hash → drift detected.
-  const lastPulledHash = `${platformHash}-stale`;
+  // A baseline that cannot equal the canonicalized platform hash → drift.
+  const lastPulledHash = "stale-baseline-hash-deadbeef";
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = makeFetchStub(remote) as typeof globalThis.fetch;
@@ -482,8 +514,11 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
     const result = await checkDriftForUpdate!({
       endpoint: "/assistant/test-uuid",
       resourceLabel: "assistants",
+      resourceType: "assistants",
       resourceId: "intake-bot",
-      state: { uuid: "test-uuid", lastPulledHash },
+      state: driftState({
+        assistants: { "intake-bot": { uuid: "test-uuid", lastPulledHash } },
+      }),
       overwrite: false,
     });
     assert.equal(result.ok, false, "drift should be blocked");
@@ -499,10 +534,73 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
   }
 });
 
-test("checkDriftForUpdate: no-baseline path is unaffected by the new direction label", async () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: cross-basis phantom both-diverged.
+//
+// `lastPulledHash` is written by pull in the canonicalized basis (resourceId
+// references, credential names, prompt-in-body). The push drift check used to
+// hash the raw platform payload (a private field-strip) — an incompatible
+// basis — so any resource referencing a tool / credential phantom-reported
+// `both-diverged` on every push.
+//
+// The fix: `checkDriftForUpdate` now canonicalizes the platform payload itself
+// via the SHARED `canonicalizeForHash` (canonical.ts). This test proves it:
+// a clean resource whose tool UUID resolves (through the supplied state) to the
+// same resourceId slug used in the baseline classifies as `match` and push
+// proceeds — the raw-UUID payload alone would never have matched the slug-based
+// baseline.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("checkDriftForUpdate: canonicalizes the platform payload (tool UUID → resourceId) so a clean resource matches its baseline", async () => {
+  assert.ok(checkDriftForUpdate);
+
+  // Platform returns the tool reference as a UUID; state maps that UUID to the
+  // resourceId slug, which is the basis the baseline was hashed in.
+  const remoteRaw = {
+    id: "assistant-uuid",
+    orgId: "org-1",
+    name: "intake-bot",
+    model: { provider: "openai", toolIds: ["tool-uuid-xyz"] },
+  };
+  // Baseline = the canonical form the engine should reconstruct internally:
+  // cleaned (id/orgId stripped) + tool UUID resolved to slug. orgId is present
+  // so no _platformDefault marker.
+  const canonicalForm = {
+    name: "intake-bot",
+    model: { provider: "openai", toolIds: ["my-tool-abc12345"] },
+  };
+  const baseline = hashPayload(canonicalForm);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = makeFetchStub(remoteRaw) as typeof globalThis.fetch;
+  try {
+    const result = await checkDriftForUpdate!({
+      endpoint: "/assistant/assistant-uuid",
+      resourceLabel: "assistants",
+      resourceType: "assistants",
+      resourceId: "intake-bot",
+      state: driftState({
+        assistants: {
+          "intake-bot": { uuid: "assistant-uuid", lastPulledHash: baseline },
+        },
+        tools: { "my-tool-abc12345": { uuid: "tool-uuid-xyz" } },
+      }),
+      overwrite: false,
+    });
+    assert.equal(
+      result.reason,
+      "match",
+      `canonicalized platform hash must match baseline (no phantom drift); got ${result.reason}`,
+    );
+    assert.equal(result.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("checkDriftForUpdate: no-baseline path returns early without fetching", async () => {
   // Regression guard — when there's no lastPulledHash, the function returns
-  // early without fetching. The new direction-label work should not break
-  // the existing no-baseline contract.
+  // early without fetching.
   assert.ok(
     checkDriftForUpdate,
     "checkDriftForUpdate export missing from src/drift.ts",
@@ -518,8 +616,11 @@ test("checkDriftForUpdate: no-baseline path is unaffected by the new direction l
     const result = await checkDriftForUpdate!({
       endpoint: "/assistant/test-uuid",
       resourceLabel: "assistants",
+      resourceType: "assistants",
       resourceId: "new-bot",
-      state: { uuid: "test-uuid" }, // no lastPulledHash
+      state: driftState({
+        assistants: { "new-bot": { uuid: "test-uuid" } }, // no lastPulledHash
+      }),
       overwrite: false,
     });
     assert.equal(result.ok, true);
@@ -543,8 +644,8 @@ test("checkDriftForUpdate: no-baseline path is unaffected by the new direction l
 // review on the drift-direction-classifier PR.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const pullModule = await import("../src/pull.ts");
-const { canonicalizeForHash } = pullModule as {
+const canonicalModule = await import("../src/canonical.ts");
+const { canonicalizeForHash } = canonicalModule as unknown as {
   canonicalizeForHash?: (
     resource: { id: string; orgId?: string | null; [key: string]: unknown },
     state: Record<string, Record<string, { uuid: string }>>,
@@ -567,7 +668,10 @@ const emptyState = {
 const emptyCredReverse = new Map<string, string>();
 
 test("canonicalizeForHash: applies _platformDefault when orgId === null", () => {
-  assert.ok(canonicalizeForHash, "canonicalizeForHash export missing from src/pull.ts");
+  assert.ok(
+    canonicalizeForHash,
+    "canonicalizeForHash export missing from src/canonical.ts",
+  );
   const result = canonicalizeForHash!(
     { id: "abc", orgId: null, name: "Default Voice" },
     emptyState,

@@ -21,16 +21,13 @@
 
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import { matchesIgnore, RESOURCES_DIR, VAPI_ENV } from "./config.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { classifyDrift } from "./drift.ts";
+import { readBaseline } from "./hash-store.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
-import {
-  canonicalizeForHash,
-  fetchAllResources,
-  listExistingResourceIds,
-  type VapiResource,
-} from "./pull.ts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import { fetchAllResources, listExistingResourceIds } from "./pull.ts";
 import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState } from "./state.ts";
@@ -249,7 +246,7 @@ function checkContentIdentical(
 ): { findings: AuditFinding[]; identicalSlugs: Set<string> } {
   const byHash = new Map<string, string[]>();
   for (const [resourceId, entry] of Object.entries(state[type])) {
-    const hash = entry.lastPulledHash;
+    const hash = readBaseline(VAPI_ENV, entry.uuid);
     if (!hash) continue;
     const slugs = byHash.get(hash) ?? [];
     slugs.push(resourceId);
@@ -387,13 +384,13 @@ function checkContentDrift(
     if (!remoteResource) continue;
 
     // canonicalizeForHash centralizes the 3-step pipeline + _platformDefault
-    // mutation so the hash agrees with pull-write's lastPulledHash basis.
+    // mutation so the hash agrees with the pull-write baseline basis.
     const platformHash = hashPayload(
       canonicalizeForHash(remoteResource, state, credReverse),
     );
     const direction = classifyDrift({
       localHash,
-      lastPulledHash: entry.lastPulledHash,
+      lastPulledHash: readBaseline(VAPI_ENV, entry.uuid),
       platformHash,
     });
     if (direction === "clean") continue;

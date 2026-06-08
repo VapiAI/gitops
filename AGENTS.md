@@ -34,6 +34,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Enforcing call time limits / graceful call ending | `docs/learnings/call-duration.md` |
 | Voice provider field cheat-sheet (Cartesia vs 11labs vs OpenAI etc.) | `docs/learnings/voice-providers.md` |
 | YAML authoring conventions, .vapi-ignore lifecycle | `docs/learnings/yaml-conventions.md` |
+| What pull/push/apply do in every drift & existence scenario | `docs/learnings/sync-behavior.md` |
 
 **Where new knowledge goes:**
 
@@ -71,6 +72,7 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 | Push with new resources             | `npm run push -- <org> --allow-new-files` — bypass orphan-YAML gate. **AI agents**: do NOT auto-pass this flag; confirm with the human first (see push section below) |
 | Test a call                         | `npm run call -- <org> -a <assistant-name>` or `-s <squad-name>`                  |
 | Run a simulation suite              | `npm run sim -- <org> --suite <name> --target <assistant-name>`                   |
+| Migrate a legacy state file         | `npm run migrate` — one-shot, all orgs; required once after upgrading to the hash-store engine |
 
 ---
 
@@ -81,6 +83,8 @@ Three commands deploy changes to the Vapi platform. Pick the safest one that fit
 ### `npm run apply -- <org>` — DEFAULT deploy verb
 
 Pulls the platform's current state, merges with your local files, then pushes the merged result. This protects you from racing dashboard edits made between your last pull and your push. Use this for ~99% of deployments.
+
+Conflict handling is **per resource, never umbrella**: apply defaults to `--resolve=defer`, so the pull stage preserves local files and the drift baselines for genuinely conflicted resources, and the push stage then asks one interactive question per conflicted resource (push mine / keep dashboard / save a `.bkp` copy for manual merge). Clean and one-sided changes flow silently in their obvious direction. The full scenario matrix lives in `docs/learnings/sync-behavior.md`. Explicit `--resolve=ours|theirs|fail` keep non-interactive (CI) semantics.
 
 ```bash
 npm run validate -- <org>             # schema check first, no network call
@@ -94,10 +98,12 @@ Runs the engine's local validators against every YAML/MD file in the org without
 
 ### `npm run pull -- <org>` — refresh from dashboard (default: plain pull)
 
-**Default to plain pull, NOT --force.** Plain `npm run pull -- <org>` shows:
-- Per-resource direction labels (dashboard-ahead / local-ahead / both-diverged / clean)
-- End-of-pull summary with counts per direction
-- A hard gate (`--resolve` flag) on 3-way conflicts before they silently lose data
+**Default to plain pull, NOT --force.** Plain `npm run pull -- <org>`:
+- Syncs one-sided changes in their obvious direction: `dashboard-ahead` (local unchanged, dashboard edited) is written down ⬇️; `local-ahead` (you edited, dashboard unchanged) is preserved ⬆️ for the next push
+- Prints an end-of-pull summary with counts per drift direction
+- Hard-gates true 3-way conflicts behind `--resolve=ours|theirs|fail|defer` before they silently lose data (`defer` leaves the conflict for push's per-resource prompt — apply's default)
+
+Drift direction is computed against the per-developer baseline store `.vapi-state-hash/<org>/<uuid>` (gitignored) — the hash of the last platform content *you* pulled or pushed. The committed state file holds only `name → uuid`. See `docs/learnings/sync-behavior.md` for every scenario.
 
 `--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
 
@@ -107,24 +113,34 @@ Runs the engine's local validators against every YAML/MD file in the org without
 |------|---------|
 | `📝` | Engine wrote/updated a file on disk (clean / no-baseline path) |
 | `✨` | Engine created a NEW file on disk (first-time pull of this resource) |
-| `✏️`  | Locally modified file detected by git, preserved as-is |
+| `✏️`  | Locally modified file detected by git, preserved as-is (no-baseline path) |
 | `⬆️`  | `local-ahead` — local has unpushed edits, needs to flow UP to dashboard (preserved) |
-| `⬇️`  | `--resolve=theirs` — overwrote local with dashboard (flowed DOWN) |
+| `⬇️`  | Dashboard version flowed DOWN over local: `dashboard-ahead` sync-down (local was unchanged) or `--resolve=theirs` (local edits lost) |
+| `⏳` | `--resolve=defer` — 3-way conflict left intact for push's per-resource prompt |
 | `🔒` | Platform-default resource (read-only, immutable) |
-| `🚫` | Matched `.vapi-ignore` (not tracked locally) |
+| `🚫` | Matched `.vapi-ignore` (not tracked locally), or a `.bkp` backup copy refused as a resource |
 | `🗑️`  | Locally deleted (deletion intent recorded in state) |
 
-Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull-overwrite), `📝` is the engine doing routine file I/O.
+Push adds two more: `⏭️` (conflict prompt → kept dashboard, push skipped) and `📄` (conflict prompt → dashboard copy saved as `<name>.<TIMESTAMP>.bkp.<ext>` for manual merge).
 
-**First-adoption noise on customer repos.** The first `npm run audit -- <org>` after upgrading to a version with the content-drift rule will surface `[content-drift] [no-baseline]` info findings for every resource whose state row predates `lastPulledHash` tracking. These are info-severity (do NOT block CI), but the noise is real. Two ways to clear:
-- `npm run pull -- <org> --bootstrap` — refreshes state with the current platform-hash baseline, no resource materialization. One-shot fix for the whole fleet.
-- Or just let them sit — each plain `npm run pull` after this writes `lastPulledHash` for whichever resources it touches, so the no-baseline rows naturally drain over the next few sync cycles.
+Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull), `📝` is the engine doing routine file I/O.
+
+**One-time migration on engine upgrade.** Repos that predate the hash-store engine carry `lastPulledHash`/`lastPushedHash`/timestamps inside `.vapi-state.<org>.json`. `pull`, `push`, and `apply` refuse to run on that legacy shape — run `npm run migrate` once (no org argument, no token needed): it slims every state file to pure `name → uuid` and seeds each org's `.vapi-state-hash/` baselines from the legacy hashes, so drift detection keeps working without a re-pull. Idempotent. Fresh clones / new developers have no baselines yet (the store is per-dev and gitignored) — run a plain `pull` first to seed them; until then drift checks log a no-baseline warning and proceed.
 
 ### `npm run push -- <org>` — raw push, no pre-pull
 
 Skips the merge pass. Only use when (a) you literally just ran `pull` and (b) you're certain no one has touched the dashboard since. In a multi-developer environment or when dashboard editors are in play, default to `apply` instead. Stale local state can clobber recent dashboard edits or PATCH against UUIDs that no longer exist.
 
 If you do use `push`, dry-run first: `npm run push -- <org> --dry-run`.
+
+#### Per-resource drift gate (before every PATCH)
+
+Before updating a resource, push GETs its current dashboard payload, hashes it, and compares against the stored baseline (`.vapi-state-hash/<org>/<uuid>`):
+
+- **Hashes match** → your local edit is the natural next step in the change chain → pushed silently, and the baseline is refreshed from the PATCH **response** (what the platform actually stored).
+- **Hashes differ** → someone else published changes since your last sync. In a terminal, push asks **for that resource only**: ① push my local version (take ownership) ② keep the dashboard version (skip, local untouched) ③ save the dashboard version as `<name>.<TIMESTAMP>.bkp.<ext>` beside your file and skip, for a manual merge. In CI / piped runs the resource is blocked instead (use `--overwrite` to push unconditionally).
+
+Backup copies (`*.bkp.*`, gitignored) are merge reference material only — invisible to the loader, the orphan gate, audit, the interactive picker, and explicit CLI paths.
 
 #### Orphan-YAML gate (default-on, refuses ambiguous pushes)
 
@@ -157,7 +173,7 @@ The same gate fires inside `apply` (which runs pull → merge → push). If pull
 4. Verify with `npm run call -- <org> -a <name>` and/or `npm run sim -- <org> --suite <name> --target <name>`
 5. If something looks wrong: `npm run rollback -- <org> --list` → `--to <timestamp>`
 
-**Why this matters:** the gitops engine tracks resource UUIDs in `.vapi-state.<org>.json`. Bare `push` trusts that file is current. If the dashboard has changed since your last pull — someone edited an assistant in the UI, a teammate ran a different push, a structured output got linked via another path — your local state can be stale by minutes. `apply` refreshes state before mutating, eliminating that entire class of race.
+**Why this matters:** the gitops engine tracks resource UUIDs in `.vapi-state.<org>.json` (pure `name → uuid`) and the last-seen platform content hash per resource in the per-developer `.vapi-state-hash/<org>/<uuid>` store. The pre-PATCH drift gate compares that baseline against the live dashboard, so out-of-band edits — someone edited an assistant in the UI, a teammate ran a different push, a structured output got linked via another path — are detected per resource and surfaced as a per-resource question instead of being silently clobbered. `apply` additionally refreshes local files before mutating, eliminating the stale-state race entirely.
 
 ---
 
@@ -945,16 +961,16 @@ For the **complete schema** of all available properties on each resource type, c
 
 ### Renaming an existing resource
 
-The engine has a `name_mismatch` guard that auto-bootstraps state from the dashboard before applying changes. **Editing `.vapi-state.<org>.json` by hand to repoint a renamed file at the existing dashboard UUID does not work** — the bootstrap runs first, overwrites your manual edit, and the rename gets treated as "delete the old resource + create a new one."
+**The local filename is a stable handle, decoupled from the dashboard `name`.** State maps `<filename-slug> → UUID`. As long as a file exists for a state entry, the engine keeps that filename — you can name a file `blub-blub-blub.md` and it stays put regardless of what the resource is called on the dashboard.
 
 What this means in practice for renames:
 
 | Approach | What happens |
 |---|---|
-| Rename the file locally + `npm run push -- <org>` | New UUID is minted for the renamed file; the old UUID becomes orphaned in the dashboard. Run `npm run cleanup -- <org> --force` (or `npm run push -- <org> --force <file>`) to delete the orphan. |
-| Rename in the dashboard first, then `npm run pull -- <org>` | UUID is preserved. The pulled file lands with the new name and the existing UUID suffix; no orphan. |
+| Rename the resource in the dashboard, then `npm run pull -- <org>` | UUID preserved. The local filename is **unchanged** — pull only updates the file's content (the new `name:` lands in the frontmatter). No second file, no orphan. This holds even under `--force` / "overwrite" — overwrite replaces content, never the filename. |
+| Rename the file locally + `npm run push -- <org>` | The renamed file has no state entry, so the orphan-YAML gate fires (it can't tell a rename from a new resource). Re-key state instead: rename in the dashboard first and pull, or accept a new UUID by pushing with `--allow-new-files` and cleaning up the old orphan via `npm run cleanup -- <org> --force`. |
 
-If preserving the UUID matters (e.g. it's referenced from a phone number, outbound campaign, or external integration), rename via the dashboard first and pull. Otherwise, accept the new UUID and clean up the orphan.
+Because dashboard renames no longer change the local filename, the old "rename in the dashboard to preserve the UUID" dance is unnecessary — the UUID is always preserved on pull for any already-tracked resource.
 
 ---
 

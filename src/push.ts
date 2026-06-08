@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import {
@@ -11,6 +11,7 @@ import {
   loadIgnorePatterns,
   OVERWRITE_DRIFT,
   removeExcludedKeys,
+  STATE_FILE_PATH,
   STRICT_VALIDATION,
   VAPI_BASE_URL,
   VAPI_ENV,
@@ -20,7 +21,11 @@ import {
   findExistingResourceByName,
   type RemoteResource,
 } from "./dep-dedup.ts";
-import { checkDriftForUpdate } from "./drift.ts";
+import { select } from "@inquirer/prompts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
+import { deleteBaseline, writeBaseline } from "./hash-store.ts";
+import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
 import {
   formatRecanonicalizeReport,
@@ -48,15 +53,29 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   "simulation suite": "simulationSuites",
 };
 
-import { credentialForwardMap, replaceCredentialRefs } from "./credentials.ts";
+import {
+  credentialForwardMap,
+  credentialReverseMap,
+  replaceCredentialRefs,
+} from "./credentials.ts";
 import { deleteOrphanedResources } from "./delete.ts";
-import { fetchAllResources, resourceIdMatchesName, runPull } from "./pull.ts";
+import {
+  fetchAllResources,
+  fetchResourceById,
+  runPull,
+  writeDashboardBackup,
+} from "./pull.ts";
 import {
   extractReferencedIds,
   resolveAssistantIds,
   resolveReferences,
 } from "./resolver.ts";
-import { FOLDER_MAP, loadResources, loadSingleResource } from "./resources.ts";
+import {
+  FOLDER_MAP,
+  loadResources,
+  loadSingleResource,
+  pathMatchesFolder,
+} from "./resources.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type {
   LoadedResources,
@@ -82,6 +101,69 @@ function formatApiError(resourceId: string, error: unknown): string {
   return `  ❌ Failed: ${resourceId}\n     ${msg}`;
 }
 
+// A drift conflict is only ever resolved per resource, at the moment the push
+// is about to touch it — never via an umbrella flag answered up front. The
+// prompt fires only in a real terminal; CI/piped runs keep the hard block
+// (or --overwrite) semantics.
+function isInteractiveSession(): boolean {
+  return !!(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+type DriftResolutionChoice = "push-local" | "keep-dashboard" | "dashboard-copy";
+
+async function promptDriftResolution(
+  resourceLabel: string,
+  resourceId: string,
+): Promise<DriftResolutionChoice> {
+  console.log(
+    `\n   ⚠️  ${resourceLabel} "${resourceId}": the dashboard version changed since your last pull/push — someone else published changes.`,
+  );
+  return select<DriftResolutionChoice>({
+    message: `Conflict on ${resourceLabel} "${resourceId}" — what do you want to do?`,
+    choices: [
+      {
+        name: "Push my local version (overwrite the dashboard change)",
+        value: "push-local",
+      },
+      {
+        name: "Keep the dashboard version (skip pushing this resource)",
+        value: "keep-dashboard",
+      },
+      {
+        name: "Save a dashboard copy beside my file for manual merge (skip push)",
+        value: "dashboard-copy",
+      },
+    ],
+  });
+}
+
+// Refresh the per-resource drift baseline from an API response — the full
+// resource as the platform stored it after our POST/PATCH. Hashed in the same
+// canonical basis pull and drift use, so the very next push of a further local
+// edit compares clean ("my change is the natural next step") without a pull in
+// between. Skipped in dry-run (the response is synthetic). Failures are logged
+// but never block the push — the baseline is a drift hint, not a precondition.
+async function writeBaselineFromResponse(
+  uuid: string,
+  response: unknown,
+  state: StateFile,
+): Promise<void> {
+  if (DRY_RUN) return;
+  if (!response || typeof response !== "object") return;
+  try {
+    const credReverse = credentialReverseMap(state);
+    const hash = hashPayload(
+      canonicalizeForHash(response as VapiResource, state, credReverse),
+    );
+    await writeBaseline(VAPI_ENV, uuid, hash);
+  } catch (err) {
+    console.warn(
+      `   ⚠️  failed to update drift baseline for ${uuid}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+}
+
 async function upsertResourceWithStateRecovery(options: {
   resourceLabel: string;
   resourceId: string;
@@ -91,6 +173,12 @@ async function upsertResourceWithStateRecovery(options: {
   updatePayload: Record<string, unknown>;
   createEndpoint: string;
   createPayload: Record<string, unknown>;
+  // Full state file — needed so drift detection can canonicalize the platform
+  // payload into the same basis as `lastPulledHash` (resolves UUID refs back
+  // to resourceId slugs + credential names). Without it the drift check
+  // compares incompatible hash bases and phantom-reports `both-diverged` on
+  // every resource that references a tool, credential, or has a prompt.
+  fullState: StateFile;
 }): Promise<string | null> {
   const {
     resourceLabel,
@@ -101,11 +189,13 @@ async function upsertResourceWithStateRecovery(options: {
     updatePayload,
     createEndpoint,
     createPayload,
+    fullState,
   } = options;
 
   if (!existingUuid) {
     console.log(`  ✨ Creating ${resourceLabel}: ${resourceId}`);
     const result = await vapiRequest("POST", createEndpoint, createPayload);
+    await writeBaselineFromResponse(result.id, result, fullState);
     return result.id;
   }
 
@@ -122,48 +212,103 @@ async function upsertResourceWithStateRecovery(options: {
   if (!DRY_RUN) {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {
-      try {
-        const drift = await checkDriftForUpdate({
-          endpoint: updateEndpoint,
-          resourceLabel,
-          resourceId,
-          state: stateEntry,
-          overwrite: OVERWRITE_DRIFT,
-          localHash: hashPayload(updatePayload),
-        });
-        if (drift.message) {
-          if (drift.ok) console.log(drift.message);
-          else console.error(drift.message);
+      const driftResourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
+      // Platform payload fetched by the drift check, reused for the rollback
+      // snapshot below so we don't fire a second GET at the same endpoint.
+      let platformPayloadForSnapshot: unknown;
+      // The drift check now owns the full hash computation (platform, local,
+      // and baseline all canonicalized via canonical.ts). Push just hands it
+      // the full state + resource type — no hash plumbing at the call site.
+      if (driftResourceType) {
+        let drift: DriftCheckResult | undefined;
+        try {
+          drift = await checkDriftForUpdate({
+            endpoint: updateEndpoint,
+            resourceLabel,
+            resourceType: driftResourceType,
+            resourceId,
+            state: fullState,
+            env: VAPI_ENV,
+            overwrite: OVERWRITE_DRIFT,
+          });
+        } catch (driftErr) {
+          // A drift check failure should NOT block the push — the existing
+          // PATCH path will surface the real error. Log and move on.
+          console.warn(
+            `   ⚠️  drift check failed for ${resourceLabel} ${resourceId}: ` +
+              (driftErr instanceof Error
+                ? driftErr.message
+                : String(driftErr)) +
+              ". Continuing.",
+          );
         }
-        if (!drift.ok) return null;
-      } catch (driftErr) {
-        // A drift check failure should NOT block the push — the existing
-        // PATCH path will surface the real error. Log and move on.
-        console.warn(
-          `   ⚠️  drift check failed for ${resourceLabel} ${resourceId}: ` +
-            (driftErr instanceof Error ? driftErr.message : String(driftErr)) +
-            ". Continuing.",
-        );
+
+        if (drift) {
+          platformPayloadForSnapshot = drift.platformPayload;
+
+          if (drift.ok) {
+            // Baseline matches the dashboard (or --overwrite / no baseline):
+            // the local edit is the natural next step — push silently.
+            if (drift.message) console.log(drift.message);
+          } else if (!isInteractiveSession()) {
+            // CI / piped run: keep the hard block-or---overwrite behavior.
+            if (drift.message) console.error(drift.message);
+            return null;
+          } else {
+            // Real terminal: per-resource 3-way resolution. Deliberately
+            // OUTSIDE the try/catch above — Ctrl+C in the prompt must abort
+            // the push, not be swallowed as "drift check failed, continuing".
+            const choice = await promptDriftResolution(
+              resourceLabel,
+              resourceId,
+            );
+            if (choice === "keep-dashboard") {
+              console.log(
+                `   ⏭️  ${resourceId}: keeping dashboard version — push skipped, local file untouched.`,
+              );
+              return null;
+            }
+            if (choice === "dashboard-copy") {
+              const copyPath = await writeDashboardBackup(
+                driftResourceType,
+                resourceId,
+                drift.platformPayload as VapiResource,
+                fullState,
+              );
+              console.log(
+                `   📄 ${resourceId}: dashboard version saved to ${relative(BASE_DIR, copyPath)} — merge manually, then push again. Push skipped.`,
+              );
+              return null;
+            }
+            console.log(
+              `   ⬆️  ${resourceId}: pushing local version (taking ownership of the conflict).`,
+            );
+          }
+        }
       }
 
       // Snapshot the current platform payload + our outgoing payload to a
-      // per-push directory so rollback can revert. Costs one extra GET per
-      // resource — acceptable for the safety guarantee. (Follow-up: plumb
-      // drift's GET result through to avoid the duplicate fetch.)
+      // per-push directory so rollback can revert. Reuses the drift check's
+      // GET when available; falls back to its own fetch when the check
+      // short-circuited (no baseline) or failed.
       try {
         const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
         if (resourceType) {
-          const platformResponse = await fetch(
-            `${VAPI_BASE_URL}${updateEndpoint}`,
-            {
-              method: "GET",
-              headers: {
-                Authorization: `Bearer ${process.env.VAPI_TOKEN}`,
+          if (platformPayloadForSnapshot === undefined) {
+            const platformResponse = await fetch(
+              `${VAPI_BASE_URL}${updateEndpoint}`,
+              {
+                method: "GET",
+                headers: {
+                  Authorization: `Bearer ${process.env.VAPI_TOKEN}`,
+                },
               },
-            },
-          );
-          if (platformResponse.ok) {
-            const platformPayloadForSnapshot = await platformResponse.json();
+            );
+            if (platformResponse.ok) {
+              platformPayloadForSnapshot = await platformResponse.json();
+            }
+          }
+          if (platformPayloadForSnapshot !== undefined) {
             await writeSnapshot({
               baseDir: BASE_DIR,
               env: VAPI_ENV,
@@ -190,7 +335,11 @@ async function upsertResourceWithStateRecovery(options: {
   }
 
   try {
-    await vapiRequest("PATCH", updateEndpoint, updatePayload);
+    const result = await vapiRequest("PATCH", updateEndpoint, updatePayload);
+    // The PATCH response is the full resource as the platform now stores it —
+    // the freshest possible "last known platform state." Hash it as the new
+    // drift baseline so the next push of a further local edit is clean.
+    await writeBaselineFromResponse(existingUuid, result, fullState);
     return existingUuid;
   } catch (error) {
     if (!(error instanceof VapiApiError) || error.statusCode !== 404) {
@@ -201,6 +350,7 @@ async function upsertResourceWithStateRecovery(options: {
       `  ⚠️  State entry for ${resourceLabel} "${resourceId}" points to missing remote ID ${existingUuid}. Removing the stale mapping from state and skipping this resource for the current run.`,
     );
     delete stateSection[resourceId];
+    await deleteBaseline(VAPI_ENV, existingUuid);
     return null;
   }
 }
@@ -288,14 +438,14 @@ async function getInvalidStateMappings(
     type: ResourceType;
     resourceId: string;
     uuid: string;
-    reason: "missing_remote" | "name_mismatch";
+    reason: "missing_remote";
   }>
 > {
   const invalidMappings: Array<{
     type: ResourceType;
     resourceId: string;
     uuid: string;
-    reason: "missing_remote" | "name_mismatch";
+    reason: "missing_remote";
   }> = [];
 
   for (const type of getTargetedResourceTypes(resources)) {
@@ -317,27 +467,36 @@ async function getInvalidStateMappings(
       continue;
     }
 
-    const remoteResources = await fetchAllResources(type);
+    let remoteResources: Awaited<ReturnType<typeof fetchAllResources>>;
+    if (isPartialApply() && trackedResources.length <= 10) {
+      remoteResources = [];
+      for (const trackedResource of trackedResources) {
+        const remoteResource = await fetchResourceById(
+          type,
+          trackedResource.uuid,
+        );
+        if (remoteResource) remoteResources.push(remoteResource);
+      }
+    } else {
+      remoteResources = await fetchAllResources(type);
+    }
     const remoteResourcesById = new Map(
       remoteResources.map((resource) => [resource.id, resource]),
     );
 
     for (const trackedResource of trackedResources) {
       const remoteResource = remoteResourcesById.get(trackedResource.uuid);
+      // Only `missing_remote` is genuinely stale state. A dashboard rename
+      // (remote `name` no longer matches the local filename slug) is NOT a
+      // problem — the filename is a stable local handle, decoupled from the
+      // dashboard name. Flagging renames here used to force a bootstrap that
+      // re-keyed state to a name-derived slug, orphaning the local file and
+      // creating a duplicate on the next push.
       if (!remoteResource) {
         invalidMappings.push({
           type,
           ...trackedResource,
           reason: "missing_remote",
-        });
-        continue;
-      }
-
-      if (!resourceIdMatchesName(trackedResource.resourceId, remoteResource)) {
-        invalidMappings.push({
-          type,
-          ...trackedResource,
-          reason: "name_mismatch",
         });
       }
     }
@@ -350,16 +509,21 @@ async function maybeBootstrapState(
   resources: LoadedResources,
   state: StateFile,
 ): Promise<StateFile> {
-  if (!hasAnyLoadedResources(resources)) {
+  const scopedResources = scopeLoadedResourcesForApply(resources);
+
+  if (!hasAnyLoadedResources(scopedResources)) {
     return state;
   }
 
-  const targetedTypes = getTargetedResourceTypes(resources);
-  const missingCredentialNames = getMissingCredentialNames(resources, state);
+  const targetedTypes = getTargetedResourceTypes(scopedResources);
+  const missingCredentialNames = getMissingCredentialNames(
+    scopedResources,
+    state,
+  );
   const stateUninitialized =
     Object.keys(state.credentials).length === 0 ||
     targetedTypes.every((type) => Object.keys(state[type]).length === 0);
-  const invalidMappings = await getInvalidStateMappings(resources, state);
+  const invalidMappings = await getInvalidStateMappings(scopedResources, state);
 
   if (
     !stateUninitialized &&
@@ -437,6 +601,7 @@ export async function applyTool(
     resourceId,
     existingUuid,
     stateSection: state.tools,
+    fullState: state,
     updateEndpoint: `/tool/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "tools"),
     createEndpoint: "/tool",
@@ -487,6 +652,7 @@ export async function applyStructuredOutput(
     resourceId,
     existingUuid,
     stateSection: state.structuredOutputs,
+    fullState: state,
     updateEndpoint: `/structured-output/${existingUuid}?schemaOverride=true`,
     updatePayload: removeExcludedKeys(payload, "structuredOutputs"),
     createEndpoint: "/structured-output",
@@ -509,6 +675,7 @@ export async function applyAssistant(
     resourceId,
     existingUuid,
     stateSection: state.assistants,
+    fullState: state,
     updateEndpoint: `/assistant/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "assistants"),
     createEndpoint: "/assistant",
@@ -531,6 +698,7 @@ export async function applySquad(
     resourceId,
     existingUuid,
     stateSection: state.squads,
+    fullState: state,
     updateEndpoint: `/squad/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "squads"),
     createEndpoint: "/squad",
@@ -553,6 +721,7 @@ export async function applyPersonality(
     resourceId,
     existingUuid,
     stateSection: state.personalities,
+    fullState: state,
     updateEndpoint: `/eval/simulation/personality/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "personalities"),
     createEndpoint: "/eval/simulation/personality",
@@ -575,6 +744,7 @@ export async function applyScenario(
     resourceId,
     existingUuid,
     stateSection: state.scenarios,
+    fullState: state,
     updateEndpoint: `/eval/simulation/scenario/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "scenarios"),
     createEndpoint: "/eval/simulation/scenario",
@@ -597,6 +767,7 @@ export async function applySimulation(
     resourceId,
     existingUuid,
     stateSection: state.simulations,
+    fullState: state,
     updateEndpoint: `/eval/simulation/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "simulations"),
     createEndpoint: "/eval/simulation",
@@ -619,6 +790,7 @@ export async function applySimulationSuite(
     resourceId,
     existingUuid,
     stateSection: state.simulationSuites,
+    fullState: state,
     updateEndpoint: `/eval/simulation/suite/${existingUuid}`,
     updatePayload: removeExcludedKeys(payload, "simulationSuites"),
     createEndpoint: "/eval/simulation/suite",
@@ -638,11 +810,13 @@ export async function applyEval(
   if (existingUuid) {
     const updatePayload = removeExcludedKeys(payload, "evals");
     console.log(`  🔄 Updating eval: ${resourceId} (${existingUuid})`);
-    await vapiRequest("PATCH", `/eval/${existingUuid}`, updatePayload);
+    const result = await vapiRequest("PATCH", `/eval/${existingUuid}`, updatePayload);
+    await writeBaselineFromResponse(existingUuid, result, state);
     return existingUuid;
   } else {
     console.log(`  ✨ Creating eval: ${resourceId}`);
     const result = await vapiRequest("POST", "/eval", payload);
+    await writeBaselineFromResponse(result.id, result, state);
     return result.id;
   }
 }
@@ -677,9 +851,13 @@ export async function updateToolAssistantRefs(
     const resolved = resolveReferences(rawData, state);
 
     console.log(`  🔗 Linking tool ${resourceId} to assistant destinations`);
-    await vapiRequest("PATCH", `/tool/${uuid}`, {
+    const result = await vapiRequest("PATCH", `/tool/${uuid}`, {
       destinations: resolved.destinations,
     });
+    // This PATCH mutates the platform AFTER the main upsert wrote its
+    // baseline — refresh it from the linking response, or the next push would
+    // see drift we caused ourselves.
+    await writeBaselineFromResponse(uuid, result, state);
   }
 }
 
@@ -714,9 +892,12 @@ export async function updateStructuredOutputAssistantRefs(
 
     if (assistantIds.length > 0) {
       console.log(`  🔗 Linking structured output ${resourceId} to assistants`);
-      await vapiRequest("PATCH", `/structured-output/${uuid}`, {
+      const result = await vapiRequest("PATCH", `/structured-output/${uuid}`, {
         assistantIds,
       });
+      // Same post-upsert mutation as the tool-linking PATCH above — refresh
+      // the baseline from the response to avoid self-inflicted drift.
+      await writeBaselineFromResponse(uuid, result, state);
     }
   }
 }
@@ -728,27 +909,6 @@ export async function updateStructuredOutputAssistantRefs(
 function isPartialApply(): boolean {
   return !!(
     APPLY_FILTER.resourceTypes?.length || APPLY_FILTER.filePaths?.length
-  );
-}
-
-// Match a CLI-supplied path against a folder name. Common shapes the user
-// can pass:
-//   - `resources/<org>/assistants/foo.yml`
-//   - `./resources/<org>/assistants/foo.yml`
-//   - `assistants/foo.yml`            ← short form
-//   - `assistants/support/intake.yml` ← short form with subdir
-//   - absolute path
-// The previous version only matched `/<folder>/` (with a leading slash),
-// so the short form silently no-op'd: the type was never loaded into the
-// apply pipeline and the more permissive `filterResourcesByPaths` was
-// never even consulted.
-export function pathMatchesFolder(filePath: string, folder: string): boolean {
-  return (
-    filePath === folder ||
-    filePath.startsWith(`${folder}/`) ||
-    filePath.startsWith(`${folder}\\`) ||
-    filePath.includes(`/${folder}/`) ||
-    filePath.includes(`\\${folder}\\`)
   );
 }
 
@@ -791,6 +951,45 @@ function filterResourcesByPaths<T>(
   }
 
   return resources.filter((r) => matchingIds.has(r.resourceId));
+}
+
+function scopeLoadedResourcesForApply(
+  resources: LoadedResources,
+): LoadedResources {
+  if (!isPartialApply()) return resources;
+
+  return {
+    tools: shouldApplyResourceType("tools")
+      ? filterResourcesByPaths(resources.tools, "tools")
+      : [],
+    structuredOutputs: shouldApplyResourceType("structuredOutputs")
+      ? filterResourcesByPaths(resources.structuredOutputs, "structuredOutputs")
+      : [],
+    assistants: shouldApplyResourceType("assistants")
+      ? filterResourcesByPaths(resources.assistants, "assistants")
+      : [],
+    squads: shouldApplyResourceType("squads")
+      ? filterResourcesByPaths(resources.squads, "squads")
+      : [],
+    personalities: shouldApplyResourceType("personalities")
+      ? filterResourcesByPaths(resources.personalities, "personalities")
+      : [],
+    scenarios: shouldApplyResourceType("scenarios")
+      ? filterResourcesByPaths(resources.scenarios, "scenarios")
+      : [],
+    simulations: shouldApplyResourceType("simulations")
+      ? filterResourcesByPaths(resources.simulations, "simulations")
+      : [],
+    simulationSuites: shouldApplyResourceType("simulationSuites")
+      ? filterResourcesByPaths(
+          resources.simulationSuites,
+          "simulationSuites",
+        )
+      : [],
+    evals: shouldApplyResourceType("evals")
+      ? filterResourcesByPaths(resources.evals, "evals")
+      : [],
+  };
 }
 
 // Track which resourceIds were actually written during this apply. On
@@ -1098,7 +1297,6 @@ async function ensureAssistantExists(
       if (!uuid) return;
       upsertState(ctx.state.assistants, assistant.resourceId, {
         uuid,
-        lastPushedHash: hashPayload(assistant.data),
       });
       ctx.applied.assistants++;
       ctx.touched.assistants.add(assistant.resourceId);
@@ -1118,7 +1316,6 @@ async function ensureAssistantExists(
     }
     upsertState(ctx.state.assistants, assistant.resourceId, {
       uuid,
-      lastPushedHash: hashPayload(assistant.data),
     });
     ctx.applied.assistants++;
     ctx.autoApplied.add(`assistants:${assistantId}`);
@@ -1134,6 +1331,10 @@ async function ensureAssistantExists(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // Guard here (not only in runPush): apply spawns `tsx src/push.ts` directly,
+  // which enters via the isMainModule block below and never calls runPush.
+  assertStateMigrated(STATE_FILE_PATH);
+
   const partial = isPartialApply();
 
   console.log(
@@ -1142,7 +1343,7 @@ async function main(): Promise<void> {
   console.log(`🚀 Vapi GitOps Apply - Environment: ${VAPI_ENV}`);
   console.log(`   API: ${VAPI_BASE_URL}`);
   console.log(
-    `   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (dry-run)"}`,
+    `   Deletions: ${FORCE_DELETE ? "⚠️  ENABLED (--force)" : "🔒 Disabled (pass --force to enable)"}`,
   );
   if (DRY_RUN) {
     console.log("   Mode: 🧪 DRY-RUN (no API mutations, no state file write)");
@@ -1190,9 +1391,18 @@ async function main(): Promise<void> {
     // a `--force` push can't silently delete a dashboard resource the repo
     // has explicitly opted out of managing. Bootstrap-pull paths read their
     // own patterns directly and are unaffected by this constant.
-    console.log("\n📂 Loading resources...\n");
+    if (partial) {
+      console.log(
+        "\n📂 Loading resources (scoped run — full set loaded quietly for reference resolution; only the selection below is applied)...\n",
+      );
+    } else {
+      console.log("\n📂 Loading resources...\n");
+    }
     const ignorePatterns = FORCE_DELETE ? [] : loadIgnorePatterns();
-    const loadOpts = { ignorePatterns };
+    // In a scoped run, suppress the per-file "Loaded" chatter — printing every
+    // local resource makes the blast radius look larger than it is. The scoped
+    // selection is printed explicitly after filtering instead.
+    const loadOpts = { ignorePatterns, quiet: partial };
     const allToolsRaw = await loadResources<Record<string, unknown>>(
       "tools",
       loadOpts,
@@ -1420,6 +1630,31 @@ async function main(): Promise<void> {
       ? filterResourcesByPaths(allEvals, "evals")
       : [];
 
+    // Scoped run: print exactly what's in scope (the load above was quiet).
+    if (partial) {
+      const scoped: Array<[string, ResourceFile<Record<string, unknown>>[]]> = [
+        ["tools", tools],
+        ["structuredOutputs", structuredOutputs],
+        ["assistants", assistants],
+        ["squads", squads],
+        ["personalities", personalities],
+        ["scenarios", scenarios],
+        ["simulations", simulations],
+        ["simulationSuites", simulationSuites],
+        ["evals", evals],
+      ];
+      let any = false;
+      for (const [label, list] of scoped) {
+        for (const r of list) {
+          console.log(`  📦 In scope: ${label}/${r.resourceId}`);
+          any = true;
+        }
+      }
+      if (!any) {
+        console.log("  ⚠️  Nothing matched the requested scope.");
+      }
+    }
+
     // Auto-dependency resolution context
     const autoApplied = new Set<string>();
     const autoAppliedTools: ResourceFile<Record<string, unknown>>[] = [];
@@ -1499,7 +1734,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.tools, tool.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(tool.data),
           });
           touched.tools.add(tool.resourceId);
           applied.tools++;
@@ -1518,7 +1752,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.structuredOutputs, output.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(output.data),
           });
           touched.structuredOutputs.add(output.resourceId);
           applied.structuredOutputs++;
@@ -1550,7 +1783,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.assistants, assistant.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(assistant.data),
           });
           touched.assistants.add(assistant.resourceId);
           applied.assistants++;
@@ -1578,7 +1810,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.squads, squad.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(squad.data),
           });
           touched.squads.add(squad.resourceId);
           applied.squads++;
@@ -1597,7 +1828,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.personalities, personality.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(personality.data),
           });
           touched.personalities.add(personality.resourceId);
           applied.personalities++;
@@ -1616,7 +1846,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.scenarios, scenario.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(scenario.data),
           });
           touched.scenarios.add(scenario.resourceId);
           applied.scenarios++;
@@ -1635,7 +1864,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.simulations, simulation.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(simulation.data),
           });
           touched.simulations.add(simulation.resourceId);
           applied.simulations++;
@@ -1654,7 +1882,6 @@ async function main(): Promise<void> {
           if (!uuid) continue;
           upsertState(state.simulationSuites, suite.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(suite.data),
           });
           touched.simulationSuites.add(suite.resourceId);
           applied.simulationSuites++;
@@ -1672,7 +1899,6 @@ async function main(): Promise<void> {
           const uuid = await applyEval(evalResource, state);
           upsertState(state.evals, evalResource.resourceId, {
             uuid,
-            lastPushedHash: hashPayload(evalResource.data),
           });
           touched.evals.add(evalResource.resourceId);
           applied.evals++;
@@ -1755,6 +1981,25 @@ async function main(): Promise<void> {
         `   Simulation Suites: ${Object.keys(state.simulationSuites).length}`,
       );
       console.log(`   Evals: ${Object.keys(state.evals).length}`);
+    }
+
+    const totalCandidates =
+      tools.length +
+      structuredOutputs.length +
+      assistants.length +
+      squads.length +
+      personalities.length +
+      scenarios.length +
+      simulations.length +
+      simulationSuites.length +
+      evals.length;
+
+    if (partial && !DRY_RUN && totalCandidates > 0 && totalApplied === 0) {
+      console.error(
+        "\n❌ Push finished but applied 0 resource(s). Likely drift-blocked — " +
+          "run with --overwrite or resolve pull conflicts first.",
+      );
+      process.exit(1);
     }
   } finally {
     // Always flush state, even on partial failure — resources that already

@@ -73,6 +73,10 @@ you which stack PR closes the row.**
 | 19  | No `maxTokens` floor warning for tool-using assistants   | `maxTokens: 1` bricks the assistant silently       | None       | RESOLVED 2026-04-30 (Stack D)     |
 | 20  | Prompt vocabulary leaks into TTS                         | `Reason.` becomes verbal contaminant               | None       | Partial — Stack D heuristic       |
 | 21  | `.vapi-ignore` was pull-only (push could silently delete) | `--force` push DELETEd dashboard-only opt-outs    | None       | RESOLVED 2026-05-11 (#TBD)        |
+| 22  | Dashboard rename recreated the local file (duplicate per UUID) | Duplicate files after dashboard renames       | None       | RESOLVED (see entry)              |
+| 23  | Phantom `both-diverged` (canonicalization + agree-gate)  | Untouched resources blocked on first push          | None       | RESOLVED 2026-06-03 (#TBD)        |
+| 24  | Bare `push` is too easy to use as the deploy path        | Raw push skips apply's validate+pull safety        | None       | Open — mitigated by per-resource drift gate |
+| 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
 
 ---
 
@@ -1027,6 +1031,198 @@ in-process unit tests for each helper).
 ### Status
 
 RESOLVED 2026-05-11 (#TBD — PR number updates when opened).
+
+---
+
+## 22. Dashboard rename of a tracked resource recreated the local file (duplicate per UUID)
+
+**[RESOLVED 2026-06-03] (#TBD)**
+
+**Discovered:** during a `vitali-org` pull after renaming an assistant in the
+dashboard ("call-transfer-test" → "call-transfer-test-1"). Pull created a
+second file `call-transfer-test-1-c95f4c6b.md` next to the existing
+`call-transfer-test-c95f4c6b.md` — two files for one UUID.
+
+### Problem
+
+The engine treated the local filename slug as if it had to track the
+dashboard `name`. Renaming a resource on the dashboard caused pull to mint a
+new name-derived slug and write a duplicate file, orphaning the original.
+
+### Current behavior (was)
+
+`pullResourceType` (`src/pull.ts`) looked up the tracked resourceId by UUID,
+then discarded it via `resourceIdMatchesName` whenever the dashboard `name`
+no longer matched the slug — falling through to `generateResourceId` and
+producing a `<name>-<uuid8>` duplicate. The push side mirrored the same
+assumption: `getInvalidStateMappings` (`src/push.ts`) flagged the rename as
+`name_mismatch` and forced a bootstrap that re-keyed state to the
+name-derived slug, so the next push created a duplicate on the dashboard too.
+
+### Risk
+
+Silent duplication: two local files per UUID on pull, and (via apply) a
+duplicate dashboard resource on the subsequent push. Confusing state, lost
+edits, orphan cleanup required.
+
+### Resolution
+
+The filename slug is now a stable local handle, fully decoupled from the
+dashboard `name`. On pull, an already-tracked UUID keeps its existing
+resourceId verbatim — a rename only updates file content, never the filename
+(holds under `--force` too). On push, `name_mismatch` was removed from
+`getInvalidStateMappings`; only `missing_remote` (genuinely stale state) now
+triggers a bootstrap. New slugs are still minted only when the UUID is
+unknown to state (genuinely new resource or cross-env adoption — the
+same-name-twin adoption guard in `findExistingResourceId` is unchanged).
+Regression coverage: `tests/pull-rename-preserves-filename.test.ts`.
+
+### Status
+
+RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
+
+---
+
+## 23. Phantom `both-diverged`: canonicalization trapped in pull.ts + a gate that blocked when local and dashboard already agreed
+
+**[RESOLVED 2026-06-03] (#TBD)**
+
+**Discovered:** a scoped `npm run push` of an unedited assistant blocked with
+`❌ drift detected ... [both-diverged]` and "Applied 0 resource(s)", even
+though the local file matched the dashboard. A first fix looked like it
+worked — but it was only ever verified with `--dry-run`, which **skips the
+drift check entirely**, so the real push path was never exercised. The block
+came back on the first real push.
+
+### Problem (two layers)
+
+**Layer 1 — canonicalization was trapped in `pull.ts` (architectural smell).**
+`canonicalizeForHash` (the single basis pull writes `lastPulledHash` in:
+resourceId refs, credential names, prompt-in-body, `_platformDefault` marker)
+lived in `pull.ts`. Because `pull.ts` imports `drift.ts`, `drift.ts` could not
+import it back (cycle) — so it grew a **divergent duplicate**
+(`stripServerFields` / `SERVER_FIELDS`, byte-identical to pull's
+`cleanResource` / `EXCLUDED_FIELDS`) plus a dead `hashPlatformResource`. The
+first fix bridged the gap with an injected `hashPlatformPayload` callback +
+manual hash plumbing at the push call site — a patch around the module
+placement, not the root cause.
+
+**Layer 2 — the real phantom (the bug the patch never reached).** Even with
+matching bases, an untouched resource blocked because the **gate** treated a
+stale baseline as a conflict. A diagnostic on the live resource:
+
+```
+hashLocalResource (local file)      : 54734d2b…
+platformHash (canonicalized remote) : 54734d2b…   ← byte-identical
+state lastPulledHash                : 3a83baba…   ← stale (older basis)
+```
+
+Local and dashboard **agreed perfectly** — nothing to reconcile. But
+`classifyDrift` returns `both-diverged` whenever both live sides differ from
+the baseline (a deliberate, test-pinned *descriptive* contract), and
+`checkDriftForUpdate` only short-circuited on `platformHash === lastPulledHash`.
+So a stale baseline (every resource in a freshly-upgraded customer repo, whose
+`lastPulledHash` was written in an older hash basis) manufactured a conflict
+where none existed.
+
+### Risk
+
+Push/apply unusable for normal resources without `--overwrite` — the exact
+escape hatch that silently clobbers concurrent dashboard edits. The phantom
+drift trained operators to reach for the dangerous flag on every push.
+
+### Resolution
+
+1. **Extracted `src/canonical.ts`** (dependency-light: credentials + types).
+   It holds `VapiResource`, `EXCLUDED_FIELDS`, `cleanResource`,
+   `buildReverseMap`, `resolveReferencesToResourceIds`, and
+   `canonicalizeForHash`. `pull.ts`, `push.ts`, `audit.ts`, AND `drift.ts` now
+   import the ONE definition. Deleted drift's duplicate field-strip and the
+   dead `hashPlatformResource`. `checkDriftForUpdate` computes platform + local
+   hashes itself (no injected callback, no hash plumbing at the call site).
+2. **Fixed the gate, not the classifier.** `checkDriftForUpdate` now returns
+   `match` (no-op, never blocks) when `localHash === platformHash`, regardless
+   of the baseline. `classifyDrift` keeps its descriptive `both-diverged`
+   contract (it still signals the stale pointer) — policy lives in the gate.
+
+Regression coverage: `tests/push-stale-baseline-noop.test.ts` (e2e — stale
+baseline + local==dashboard → push applies, no block) and `tests/drift.test.ts`
+(canonicalization resolves tool UUID→slug so a clean resource matches baseline).
+
+### Lesson
+
+`--dry-run` is NOT a verification of the drift path — it skips it. Verify
+push-gate changes with a real (idempotent) push or the e2e harness.
+
+### Status
+
+RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
+
+---
+
+## 24. Bare `push` is too easy to use as the deploy path
+
+**Problem.** PR #41 review (dhruva-reddy): operators shouldn't have to memorize
+"`validate` && `apply` && avoid `push`". Raw `push` skips apply's
+validate-then-pull safety yet reads like the natural deploy verb, so it keeps
+getting used as one.
+
+**Current behavior.** `npm run push -- <org>` (`src/push.ts`) runs the raw
+push directly. Apply now embeds validation (`src/apply.ts` runs
+`validate-cmd` before its pull stage) and defaults conflict handling to the
+per-resource prompt, but bare push remains a single flag-less command.
+
+**Risk.** Lower than when the review was written — push now has the
+per-resource drift gate (`src/push.ts`, `checkDriftForUpdate` +
+`promptDriftResolution`), so out-of-band dashboard edits prompt or block
+instead of being clobbered. Remaining gap: push skips schema validation and
+the pull/merge pass, so it can still 400 mid-run or PATCH from a stale local
+view (one-sided, detectable, but avoidable).
+
+**Current mitigation.** Docs hierarchy (`AGENTS.md` "Choosing a sync
+command"), the orphan-YAML gate, and the drift gate/prompt.
+
+**Possible fix.** Reviewer's suggested shape: make raw local→dashboard push
+explicit/advanced via `npm run push -- <org> --direct`; bare `push` either
+delegates to safe apply or prints guidance telling the operator to use
+`apply` unless `--direct` is intended. Backwards-incompatible for automation
+that calls bare `push` — needs a deprecation window.
+
+**Status.** Open (mitigated 2026-06-04 by the per-resource drift gate and
+apply's built-in validate).
+
+---
+
+## 25. Interactive flows lack automated coverage
+
+**Problem.** PR #41 review (dhruva-reddy): the interactive picker
+(`src/interactive.ts` — Back/Cancel/empty-selection states) and the
+local-wins-apply-stays-clean invariant have no automated tests, and these are
+exactly the paths that regress while unit tests for path parsing still pass.
+
+**Current behavior.** No tests cover: (a) the picker's step machine
+(org → scope → pick → confirm → execute, including Back/Cancel/empty), (b)
+the push conflict prompt's three choices, (c) the regression "apply the same
+resource twice → second run is clean, not `both-diverged`" (root cause fixed
+by response-hash baselines in `src/push.ts` `writeBaselineFromResponse` and
+the `classifyDrift` live-agreement invariant in `src/drift.ts`, but
+unguarded by tests).
+
+**Risk.** Silent regressions in the most operator-visible surfaces; the
+existing suite also predates the hash-store refactor and will fail until
+reconciled.
+
+**Current mitigation.** Manual run-throughs per stage (see
+`docs/superpowers/specs/2026-06-03-state-hash-store-design.md`).
+
+**Possible fix.** The planned test-update iteration for the hash-store
+refactor must include, by name: picker smoke test (Back/Cancel/empty),
+conflict-prompt choice handling (mock TTY + select), and the
+double-apply-stays-clean regression (`localHash=B, platformHash=B,
+baseline=A → clean` plus baseline refresh after push).
+
+**Status.** Open — scheduled as part of the test-update iteration that
+reconciles the suite with the slim-state/hash-store engine.
 
 ---
 
