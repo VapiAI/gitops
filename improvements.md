@@ -77,6 +77,9 @@ you which stack PR closes the row.**
 | 23  | Phantom `both-diverged` (canonicalization + agree-gate)  | Untouched resources blocked on first push          | None       | RESOLVED 2026-06-03 (#TBD)        |
 | 24  | Bare `push` is too easy to use as the deploy path        | Raw push skips apply's validate+pull safety        | None       | Open — mitigated by per-resource drift gate |
 | 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
+| 26  | Rollback is snapshot replay, not transaction rollback     | Creates/deletes/state drift are not fully undone   | #3         | Open — document/plan transactional rollback     |
+
+**Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, and `#24–#26`. Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
 ---
 
@@ -1223,6 +1226,75 @@ baseline=A → clean` plus baseline refresh after push).
 
 **Status.** Open — scheduled as part of the test-update iteration that
 reconciles the suite with the slim-state/hash-store engine.
+
+---
+
+## 26. Rollback is snapshot replay, not one-click transactional rollback
+
+**Discovered:** source review of `src/snapshot.ts` and `src/rollback-cmd.ts`,
+2026-06-02; re-verified during the 2026-06-15 conflict cleanup.
+
+### Problem
+
+`npm run rollback -- <org> --to <timestamp>` restores the platform payloads
+captured before PATCH updates. That is useful, but it is not a full
+transactional undo for everything a push/apply might have changed.
+
+### Current behavior (Verified)
+
+- `src/snapshot.ts` writes `.vapi-state.<org>.snapshots/<timestamp>/...`
+  entries with the outgoing local payload and the current platform payload.
+- `src/push.ts` writes those snapshots before PATCHing existing resources and
+  reuses the drift-detection GET when available.
+- `src/rollback-cmd.ts` loads a timestamp and PATCHes each saved `platform`
+  payload back to the current UUID from `.vapi-state.<org>.json`.
+- Creates have no prior platform payload to replay. Deletes/orphan cleanup are
+  not recreated. Rollback also depends on the current state file still mapping
+  the same resource id to the same UUID.
+
+### Risk
+
+An operator can reasonably read "rollback" as "undo this whole deploy." Today
+it means "restore pre-push bodies for resources that were updated by PATCH and
+still have compatible state mappings." New resources may remain live, deleted
+resources may stay deleted, and renamed/re-keyed state can make snapshot entries
+skip.
+
+### Current mitigation
+
+Use rollback as a PATCH-update safety net, then audit and re-sync:
+
+```bash
+npm run audit -- <org>
+npm run pull -- <org> --bootstrap
+```
+
+For deploys that create/delete resources, pair rollback with manual cleanup or a
+follow-up `apply` from a known-good git revision.
+
+### Possible fix
+
+Add a per-run rollback manifest that records every mutation, not just PATCH
+payloads:
+
+- PATCH: current behavior, replay prior platform payload.
+- POST: record created UUID and optionally DELETE it during rollback.
+- DELETE: snapshot full pre-delete payload and optionally recreate it when the
+  API supports recreating that resource type.
+- State: snapshot relevant `.vapi-state.<org>.json` entries so rollback can
+  restore state mappings after platform replay.
+
+Expose an explicit dry-run / confirm flow, for example:
+
+```bash
+npm run rollback -- <org> --to <timestamp> --plan
+npm run rollback -- <org> --to <timestamp> --confirm <org>
+```
+
+### Status
+
+**Open.** Current rollback is valuable snapshot replay; it should not be treated
+as a transactional deploy rollback until create/delete/state coverage exists.
 
 ---
 
