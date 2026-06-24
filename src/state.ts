@@ -4,10 +4,12 @@ import { STATE_FILE_PATH, VAPI_ENV } from "./config.ts";
 import {
   asResourceState,
   hashPayload,
+  serializeState,
   sortedKeysReplacer,
   upsertState,
 } from "./state-serialize.ts";
 import type { ResourceState, StateFile } from "./types.ts";
+import { normalizeVariables } from "./variables.ts";
 
 // Re-export pure helpers so callers can import them from the same file as
 // loadState / saveState (less import churn) but the helpers themselves stay
@@ -60,6 +62,7 @@ function createEmptyState(): StateFile {
     simulations: {},
     simulationSuites: {},
     evals: {},
+    variables: {},
   };
 }
 
@@ -112,6 +115,10 @@ export function loadState(): StateFile {
       merged.simulationSuites as Record<string, unknown>,
     ),
     evals: migrateSection(merged.evals as Record<string, unknown>),
+    // Variables are NOT uuid-shaped — load them verbatim (validated/coerced),
+    // never through migrateSection. push/pull leave this section untouched, so
+    // hand-edited values round-trip through every save.
+    variables: normalizeVariables(merged.variables),
   };
 }
 
@@ -121,7 +128,7 @@ export async function saveState(state: StateFile): Promise<void> {
   // truncating it. A truncated state file would silently wipe all UUID
   // mappings on the next load.
   const tmpPath = `${STATE_FILE_PATH}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(state, sortedKeysReplacer, 2) + "\n");
+  await writeFile(tmpPath, serializeState(state) + "\n");
   await rename(tmpPath, STATE_FILE_PATH);
   console.log(`💾 Saved state file: ${STATE_FILE_PATH}`);
 }

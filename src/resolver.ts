@@ -1,4 +1,5 @@
-import type { ResourceState, StateFile } from "./types.ts";
+import type { ResourceState, StateFile, Variables } from "./types.ts";
+import { resolveVariables } from "./variables.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ID Resolution - Convert resource IDs to Vapi UUIDs
@@ -179,7 +180,14 @@ export function resolveReferences(
   data: Record<string, unknown>,
   state: StateFile,
 ): Record<string, unknown> {
-  const resolved = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+  // Substitute managed variables FIRST, then resolve resource references. A
+  // variable whose value is itself a resourceId (e.g. `toolIds: ["{{t}}"]`
+  // where `t` = "my-tool") therefore composes: the placeholder becomes the
+  // resourceId, which the reference resolution below maps to a UUID.
+  const resolved = resolveVariables(
+    JSON.parse(JSON.stringify(data)),
+    state.variables,
+  ) as Record<string, unknown>;
 
   // Resolve toolIds at root level
   if (Array.isArray(resolved.toolIds)) {
@@ -350,7 +358,17 @@ export interface ExtractedReferences {
 
 export function extractReferencedIds(
   data: Record<string, unknown>,
+  variables: Variables = {},
 ): ExtractedReferences {
+  // Resolve managed variables FIRST so a reference expressed via a placeholder
+  // (e.g. `toolIds: ["{{tool_ref}}"]`, `tool_ref: "my-tool"`) is seen as the
+  // real resourceId by every reference-aware consumer: dependency
+  // auto-creation (push), orphan/delete protection (delete.ts), and
+  // ignored-reference validation. Without this the extractor returns the
+  // literal "{{tool_ref}}", so the dependency is never created and a
+  // still-referenced resource looks unreferenced. Mirrors `resolveReferences`,
+  // which renders variables before the same id→UUID resolution.
+  data = resolveVariables(data, variables) as Record<string, unknown>;
   const tools: string[] = [];
   const structuredOutputs: string[] = [];
   const assistants: string[] = [];

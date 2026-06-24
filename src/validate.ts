@@ -17,7 +17,13 @@
 import { matchesIgnore } from "./config.ts";
 import { extractReferencedIds } from "./resolver.ts";
 import { FOLDER_MAP } from "./resources.ts";
-import type { LoadedResources, ResourceFile, ResourceType } from "./types.ts";
+import type {
+  LoadedResources,
+  ResourceFile,
+  ResourceType,
+  Variables,
+} from "./types.ts";
+import { extractPlaceholders } from "./variables.ts";
 
 export type ValidationSeverity = "warn" | "error";
 
@@ -457,9 +463,13 @@ function checkResourceRefs(
   resource: ResourceFile,
   type: ResourceType,
   ignorePatterns: string[],
+  variables: Variables = {},
 ): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
-  const refs = extractReferencedIds(resource.data as Record<string, unknown>);
+  const refs = extractReferencedIds(
+    resource.data as Record<string, unknown>,
+    variables,
+  );
 
   for (const { refKey, refType } of REF_TYPE_KEYS) {
     const folder = FOLDER_MAP[refType];
@@ -485,13 +495,16 @@ function checkResourceRefs(
 export function validateNoIgnoredReferences(
   loaded: LoadedResources,
   ignorePatterns: string[],
+  variables: Variables = {},
 ): ValidationFinding[] {
   if (ignorePatterns.length === 0) return [];
 
   const findings: ValidationFinding[] = [];
   for (const type of RESOURCE_TYPES_WITH_REFS) {
     for (const resource of loaded[type]) {
-      findings.push(...checkResourceRefs(resource, type, ignorePatterns));
+      findings.push(
+        ...checkResourceRefs(resource, type, ignorePatterns, variables),
+      );
     }
   }
   return findings;
@@ -500,6 +513,55 @@ export function validateNoIgnoredReferences(
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry: run all checks
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Check 7: Undefined variable references
+//
+// A resource may reference a managed variable with a whole-value `{{name}}`
+// placeholder. At push the placeholder is replaced from `state.variables`; a
+// name with no matching variable would be sent to the API verbatim as the
+// literal string "{{name}}". Promote it to a blocking finding so the typo is
+// caught before it ships a broken callback URL / model name / prompt fragment.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ALL_RESOURCE_TYPES: ResourceType[] = [
+  "tools",
+  "structuredOutputs",
+  "assistants",
+  "squads",
+  "personalities",
+  "scenarios",
+  "simulations",
+  "simulationSuites",
+  "evals",
+];
+
+export function validateVariableReferences(
+  loaded: LoadedResources,
+  variables: Variables,
+): ValidationFinding[] {
+  const findings: ValidationFinding[] = [];
+  const defined = new Set(Object.keys(variables));
+
+  for (const type of ALL_RESOURCE_TYPES) {
+    for (const resource of loaded[type]) {
+      for (const name of extractPlaceholders(resource.data)) {
+        if (defined.has(name)) continue;
+        findings.push({
+          severity: "error",
+          type,
+          resourceId: resource.resourceId,
+          rule: "undefined-variable",
+          message:
+            `references variable {{${name}}}, which is not defined in the ` +
+            `\`variables\` section of the state file`,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
 
 export function validateResources(
   resources: LoadedResources,

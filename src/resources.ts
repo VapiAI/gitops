@@ -6,7 +6,13 @@ import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import { isBackupCopyFile } from "./slug-utils.ts";
 import { stateUuid } from "./state.ts";
 import { hashPayload } from "./state-serialize.ts";
-import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
+import type {
+  ResourceFile,
+  ResourceType,
+  StateFile,
+  Variables,
+} from "./types.ts";
+import { resolveVariables } from "./variables.ts";
 
 // Options bag for the load functions. `ignorePatterns` is the symmetric
 // counterpart to pull's filter: when present, ids matching any pattern are
@@ -143,13 +149,39 @@ function findLocalResourceFile(
 export function hashLocalResource(
   type: ResourceType,
   resourceId: string,
+  variables: Variables = {},
 ): string | null {
   const filePath = findLocalResourceFile(type, resourceId);
   if (!filePath) return null;
   try {
-    return hashPayload(parseResourceDataFromFile(filePath));
+    // Render managed variables before hashing. The platform side is already
+    // rendered (it never saw the `{{name}}` placeholders), so rendering here
+    // keeps both sides in ONE basis — a variable-using file never shows
+    // phantom drift. No-op when `variables` is empty.
+    return hashPayload(
+      resolveVariables(parseResourceDataFromFile(filePath), variables),
+    );
   } catch {
     return null;
+  }
+}
+
+/**
+ * Parse the on-disk form of a local resource (if any), for pull's guided
+ * placeholder restoration. Returns the same shape `hashLocalResource` hashes
+ * (`.md` body merged into `model.messages`), or undefined when no file exists
+ * or it fails to parse.
+ */
+export function readLocalResourceData(
+  type: ResourceType,
+  resourceId: string,
+): Record<string, unknown> | undefined {
+  const filePath = findLocalResourceFile(type, resourceId);
+  if (!filePath) return undefined;
+  try {
+    return parseResourceDataFromFile(filePath);
+  } catch {
+    return undefined;
   }
 }
 

@@ -4,6 +4,7 @@
 // parser in `config.ts` (which `process.exit(1)`s when no env is supplied).
 
 import { createHash } from "crypto";
+import type { StateFile } from "./types.ts";
 import type { ResourceState } from "./types.ts";
 
 // JSON.stringify replacer that emits object keys in alphabetical order at
@@ -24,6 +25,44 @@ export function sortedKeysReplacer(_key: string, value: unknown): unknown {
     sorted[k] = (value as Record<string, unknown>)[k];
   }
   return sorted;
+}
+
+// Recursively sort object keys (arrays kept in order, primitives untouched).
+// The non-replacer equivalent of applying `sortedKeysReplacer` at every level —
+// used by `serializeState` to pre-sort everything outside the variables subtree.
+function deepSortKeys(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(deepSortKeys);
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    out[key] = deepSortKeys((value as Record<string, unknown>)[key]);
+  }
+  return out;
+}
+
+// Serialize a StateFile for on-disk write. Byte-identical to
+// `JSON.stringify(state, sortedKeysReplacer, 2)` for every uuid-section, with
+// ONE deliberate exception: the `variables` subtree. Variable NAMES are sorted
+// (same anti-churn rule as every other key), but each variable VALUE's internal
+// object-key order is preserved verbatim — `sortedKeysReplacer` would
+// alphabetize the keys of a hand-authored object value on every save, rewriting
+// the operator's chosen order for no semantic gain (hashing is key-order
+// insensitive). Keeping values byte-stable avoids that churn.
+export function serializeState(state: StateFile): string {
+  const top: Record<string, unknown> = {};
+  for (const key of Object.keys(state).sort()) {
+    if (key === "variables") {
+      const vars = state.variables;
+      const sortedNames: Record<string, unknown> = {};
+      for (const name of Object.keys(vars).sort()) sortedNames[name] = vars[name];
+      top[key] = sortedNames;
+    } else {
+      top[key] = deepSortKeys(
+        (state as unknown as Record<string, unknown>)[key],
+      );
+    }
+  }
+  return JSON.stringify(top, null, 2);
 }
 
 // Canonicalize a value: sort object keys at every level, drop null/undefined

@@ -37,11 +37,13 @@ import {
 import {
   FOLDER_MAP,
   hashLocalResource,
+  readLocalResourceData,
   resolvePullScopeFromFilePaths,
 } from "./resources.ts";
 import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
+import { restoreVariablePlaceholders } from "./variables.ts";
 
 // Map resource types to their API endpoints
 const ENDPOINT_MAP: Record<ResourceType, string> = {
@@ -652,7 +654,11 @@ export async function pullResourceType(
       const localFile = findLocalResourcePath(folderPath, resourceId);
 
       if (localFile && baseline) {
-        const localHash = hashLocalResource(resourceType, resourceId);
+        const localHash = hashLocalResource(
+          resourceType,
+          resourceId,
+          state.variables,
+        );
         if (localHash) {
           // Use canonicalizeForHash so platform-default mutation (_platformDefault)
           // and the 3-step pipeline are applied identically across pull-write,
@@ -820,6 +826,18 @@ export async function pullResourceType(
     // replace credential UUIDs) plus the _platformDefault marker.
     const withCredNames = canonicalizeForHash(resource, state, credReverse);
 
+    // Guided variable restoration: re-insert `{{name}}` placeholders ONLY where
+    // the existing local file already had them and the platform value still
+    // matches the managed value. Hashing is unaffected — hashLocalResource
+    // renders these back to values — so this is purely about keeping the
+    // author's templates intact instead of clobbering them with literals.
+    // No-op when there are no variables or no local file.
+    const toWrite = restoreVariablePlaceholders(
+      withCredNames,
+      readLocalResourceData(resourceType, resourceId),
+      state.variables,
+    ) as Record<string, unknown>;
+
     if (bootstrap) {
       const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
       console.log(
@@ -830,7 +848,7 @@ export async function pullResourceType(
       const filePath = await writeResourceFile(
         resourceType,
         resourceId,
-        withCredNames,
+        toWrite,
       );
       const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
       const relPath = relative(BASE_DIR, filePath);
@@ -861,7 +879,7 @@ export async function pullResourceType(
     // next operator to find.
     const diskHash = bootstrap
       ? null
-      : hashLocalResource(resourceType, resourceId);
+      : hashLocalResource(resourceType, resourceId, state.variables);
     if (!bootstrap && diskHash === null) {
       console.warn(
         `   ⚠️  ${resourceType}/${resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
@@ -960,16 +978,28 @@ async function resolveBothDivergedResources(options: {
 
     const withCredNames = canonicalizeForHash(entry.resource, state, credReverse);
 
+    // Guided variable restoration — preserve the author's `{{name}}` templates
+    // for unchanged fields (mirrors the normal pull-write path).
+    const toWrite = restoreVariablePlaceholders(
+      withCredNames,
+      readLocalResourceData(entry.resourceType, entry.resourceId),
+      state.variables,
+    ) as Record<string, unknown>;
+
     await writeResourceFile(
       entry.resourceType,
       entry.resourceId,
-      withCredNames,
+      toWrite,
     );
     console.log(
       `   ⬇️  ${entry.resourceId} (both diverged — resolving with --resolve=theirs, overwriting local with platform) ${formatDriftLabel("both-diverged")}`,
     );
     // Hash the post-write disk form (same invariant as the normal pull-write path).
-    const diskHash = hashLocalResource(entry.resourceType, entry.resourceId);
+    const diskHash = hashLocalResource(
+      entry.resourceType,
+      entry.resourceId,
+      state.variables,
+    );
     if (diskHash === null) {
       console.warn(
         `   ⚠️  ${entry.resourceType}/${entry.resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,

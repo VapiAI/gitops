@@ -9,8 +9,13 @@ import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { VAPI_BASE_URL, VAPI_ENV } from "./config.ts";
 import { loadResources } from "./resources.ts";
+import { loadState } from "./state.ts";
 import type { LoadedResources } from "./types.ts";
-import { summarizeFindings, validateResources } from "./validate.ts";
+import {
+  summarizeFindings,
+  validateResources,
+  validateVariableReferences,
+} from "./validate.ts";
 
 async function main(): Promise<void> {
   console.log(
@@ -35,7 +40,11 @@ async function main(): Promise<void> {
     evals: await loadResources("evals"),
   };
 
-  const findings = validateResources(resources);
+  const { variables } = loadState();
+  const findings = [
+    ...validateResources(resources),
+    ...validateVariableReferences(resources, variables),
+  ];
   console.log(`\n${summarizeFindings(findings)}\n`);
 
   const errorCount = findings.filter((f) => f.severity === "error").length;

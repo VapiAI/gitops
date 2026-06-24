@@ -1298,6 +1298,53 @@ as a transactional deploy rollback until create/delete/state coverage exists.
 
 ---
 
+## 27. Migration seam assumes every top-level state key is a `{ uuid }` section
+
+### Problem
+
+`assertStateMigrated` and `migrateOne` (`src/migrate-hash-store.ts`) treat
+**every** top-level object in the state file as a `name → { uuid }` section.
+Any section that legitimately holds non-uuid values trips this.
+
+### Current behavior
+
+The managed-variables feature added a `variables` section holding raw values.
+Without special-casing, `assertStateMigrated` reads each variable value, finds
+it isn't exactly `{ uuid }`, and throws "legacy format" — blocking every
+push/pull. Worse, `migrateOne` would call `uuidOf()` on each value, find none,
+and **drop the entire section** on the next `npm run migrate`. Both were fixed
+by exempting the `variables` key by name (`src/migrate-hash-store.ts:99`,
+`src/migrate-hash-store.ts:177`), and `loadState` loads it via
+`normalizeVariables` instead of `migrateSection` (`src/state.ts`).
+
+### Risk
+
+The exemption is **by literal key name**. The next contributor who adds another
+non-uuid top-level section (e.g. a future `settings` or `defaults` block) will
+hit the exact same silent-drop / false-legacy trap unless they remember to add
+another `=== "section-name"` guard. The failure mode for the drop is silent.
+
+### Current mitigation
+
+`variables` is exempted and covered by `tests/state-variables.test.ts` (guard
+does not trip; `migrateAll` preserves the section). `docs/learnings/variables.md`
+documents the constraint.
+
+### Possible fix
+
+Replace the by-name guards with a structural rule: a top-level value is a
+"uuid-section" only if every entry is string-or-`{ uuid }`-shaped; otherwise
+treat it as opaque and preserve verbatim. Or maintain an explicit
+`NON_UUID_SECTIONS` allow-list in one place that both the guard and the
+migration consult.
+
+### Status
+
+**Partially mitigated** (`variables` handled, 2026-06-24). The general
+brittleness — by-name exemptions in two functions — remains open.
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally
