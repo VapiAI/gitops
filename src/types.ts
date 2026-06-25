@@ -22,6 +22,22 @@ export interface ResourceState {
   uuid: string;
 }
 
+// A managed variable value. Variables are authored by hand in the `variables`
+// section of the state file and referenced from resource files via whole-value
+// liquid placeholders (`{{name}}`). The value can be any JSON type — at push
+// the placeholder is replaced by this value with its native type preserved
+// (a number stays a number, an object stays an object). See `variables.ts`.
+export type VariableValue =
+  | string
+  | number
+  | boolean
+  | null
+  | VariableValue[]
+  | { [key: string]: VariableValue };
+
+// `name → value` map. Names are identifier-ish (`[A-Za-z0-9_.-]+`, no spaces).
+export type Variables = Record<string, VariableValue>;
+
 // `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. Each section
 // carries `Record<string, ResourceState>` instead of bare strings.
 // `loadState()` migrates legacy data automatically.
@@ -36,6 +52,11 @@ export interface StateFile {
   simulations: Record<string, ResourceState>;
   simulationSuites: Record<string, ResourceState>;
   evals: Record<string, ResourceState>;
+  // Hand-authored centralized values, referenced from resource files via
+  // `{{name}}` placeholders. Unlike the other sections this is NOT a
+  // `name → { uuid }` map — it carries raw values. push/pull never mutate it;
+  // it round-trips verbatim. See `variables.ts` and `docs/learnings/variables.md`.
+  variables: Variables;
 }
 
 export interface ResourceFile<T = Record<string, unknown>> {

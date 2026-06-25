@@ -38,6 +38,7 @@ import {
   summarizeFindings,
   validateNoIgnoredReferences,
   validateResources,
+  validateVariableReferences,
 } from "./validate.ts";
 
 // Map a resource label to its state-file key. Used for snapshotting —
@@ -1203,7 +1204,10 @@ async function ensureAssistantDepsExist(
   const assistant = ctx.allAssistants.find((a) => a.resourceId === assistantId);
   if (!assistant) return false;
 
-  const refs = extractReferencedIds(assistant.data as Record<string, unknown>);
+  const refs = extractReferencedIds(
+    assistant.data as Record<string, unknown>,
+    ctx.state.variables,
+  );
   let depsCreated = false;
 
   for (const toolId of refs.tools) {
@@ -1524,7 +1528,13 @@ async function main(): Promise<void> {
       // the FORCE_DELETE-shadowed `ignorePatterns`) — even under `--force`,
       // a config that references an ignored resource is a contradiction the
       // operator should see.
-      ...validateNoIgnoredReferences(loadedResources, loadIgnorePatterns()),
+      ...validateNoIgnoredReferences(
+        loadedResources,
+        loadIgnorePatterns(),
+        state.variables,
+      ),
+      // Every `{{name}}` placeholder must resolve against state.variables.
+      ...validateVariableReferences(loadedResources, state.variables),
     ];
     if (findings.length > 0) {
       console.log(summarizeFindings(findings));
@@ -1768,6 +1778,7 @@ async function main(): Promise<void> {
       for (const assistant of assistants) {
         const refs = extractReferencedIds(
           assistant.data as Record<string, unknown>,
+          state.variables,
         );
         for (const toolId of refs.tools) {
           await ensureToolExists(toolId, depCtx);
@@ -1799,6 +1810,7 @@ async function main(): Promise<void> {
       for (const squad of squads) {
         const refs = extractReferencedIds(
           squad.data as Record<string, unknown>,
+          state.variables,
         );
         for (const assistantId of refs.assistants) {
           await ensureAssistantExists(assistantId, depCtx);

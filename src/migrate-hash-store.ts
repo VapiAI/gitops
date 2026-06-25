@@ -96,6 +96,13 @@ async function migrateOne(
   const slim: Record<string, Record<string, { uuid: string }>> = {};
 
   for (const [sectionKey, section] of Object.entries(raw)) {
+    // `variables` is a hand-authored name→value map, NOT a uuid-section.
+    // Preserve it verbatim — treating it as a section would try to read a
+    // `.uuid` off every value, find none, and DROP the whole section.
+    if (sectionKey === "variables") {
+      (slim as Record<string, unknown>)[sectionKey] = section;
+      continue;
+    }
     if (!isSection(section)) {
       // Preserve any non-section top-level value verbatim (none expected,
       // but don't silently drop unknown shapes).
@@ -172,7 +179,10 @@ export function assertStateMigrated(stateFilePath: string): void {
     return;
   }
 
-  for (const section of Object.values(raw)) {
+  for (const [sectionKey, section] of Object.entries(raw)) {
+    // `variables` holds raw values (not `{ uuid }`); its entries would all
+    // read as "legacy" and falsely trip the guard. It is never legacy.
+    if (sectionKey === "variables") continue;
     if (!isSection(section)) continue;
     for (const value of Object.values(section)) {
       if (isLegacyEntry(value)) {

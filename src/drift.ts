@@ -154,7 +154,7 @@ export async function checkDriftForUpdate(options: {
   // (rare on an update path), fall back to the baseline so the direction is
   // dashboard-ahead rather than a phantom both-diverged.
   const localHash =
-    hashLocalResource(resourceType, resourceId) ?? baseline;
+    hashLocalResource(resourceType, resourceId, state.variables) ?? baseline;
 
   // Local and platform are byte-identical → there is nothing to reconcile and
   // the PATCH is a no-op. NEVER block here, even if the baseline disagrees

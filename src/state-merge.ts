@@ -33,7 +33,12 @@ export interface TouchedSets {
   credentials: Set<string>;
 }
 
-const SECTIONS: Array<keyof StateFile> = [
+// The uuid-mapped sections this merge walks. `variables` is excluded — it is
+// a hand-authored value map, not a `name → { uuid }` section, and is carried
+// through verbatim below (push never mutates it).
+type UuidSectionKey = Exclude<keyof StateFile, "variables">;
+
+const SECTIONS: Array<UuidSectionKey> = [
   "tools",
   "structuredOutputs",
   "assistants",
@@ -61,6 +66,8 @@ export function mergeScoped(
     simulations: {},
     simulationSuites: {},
     evals: {},
+    // Carried through verbatim — a scoped push never touches variables.
+    variables: { ...inMemory.variables },
   };
 
   for (const section of SECTIONS) {

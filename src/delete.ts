@@ -10,6 +10,7 @@ import type {
   ResourceState,
   ResourceType,
   StateFile,
+  Variables,
 } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,11 +80,18 @@ export function findReferencingResources(
   targetId: string,
   targetType: ReferenceableType,
   allResources: LoadedResources,
+  variables: Variables = {},
 ): ResourceReference[] {
   const referencingResources: ResourceReference[] = [];
 
   const checkResource = (resource: ResourceFile, resourceType: string) => {
-    const refs = extractReferencedIds(resource.data as Record<string, unknown>);
+    // Pass variables so a reference via `{{placeholder}}` is resolved to the
+    // real resourceId — otherwise a still-referenced resource looks
+    // unreferenced and becomes eligible for deletion.
+    const refs = extractReferencedIds(
+      resource.data as Record<string, unknown>,
+      variables,
+    );
 
     if (targetType === "tools" && refs.tools.includes(targetId)) {
       referencingResources.push({
@@ -375,6 +383,7 @@ export async function deleteOrphanedResources(
         orphan.resourceId,
         refType,
         loadedResources,
+        state.variables,
       );
       if (refs.length > 0) {
         blocked.push({ ...orphan, refs });

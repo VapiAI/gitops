@@ -28,6 +28,7 @@ Each file targets a specific topic so you can load only the context you need.
 | Enforcing call time limits / graceful call ending | [call-duration.md](call-duration.md) |
 | Voice provider field cheat-sheet (Cartesia vs 11labs vs others) | [voice-providers.md](voice-providers.md) |
 | YAML authoring conventions, .vapi-ignore lifecycle | [yaml-conventions.md](yaml-conventions.md) |
+| Centralizing repeated values with `{{variables}}` | [variables.md](variables.md) |
 | What will pull/push/apply do in situation X? | [sync-behavior.md](sync-behavior.md) |
 
 ---
@@ -80,3 +81,4 @@ How the gitops sync engine itself behaves:
 |------|----------------|
 | [sync-behavior.md](sync-behavior.md) | The full pull/push/apply scenario matrix: state file vs hash-store baseline vs dashboard, drift directions (clean / local-ahead / dashboard-ahead / both-diverged), per-resource conflict prompt, existence cases (local-only file, dashboard-only resource, deletions either side, fresh clone, renames, legacy-state migration), `.bkp` backup copies, flag cheat sheet |
 | [yaml-conventions.md](yaml-conventions.md) | YAML authoring conventions, `.vapi-ignore` lifecycle |
+| [variables.md](variables.md) | Managed `{{variables}}` in the state file: whole-value substitution at push, placeholder restoration at pull, type preservation, drift-stays-clean, validation of undefined names |

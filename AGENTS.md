@@ -34,6 +34,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 | Enforcing call time limits / graceful call ending | `docs/learnings/call-duration.md` |
 | Voice provider field cheat-sheet (Cartesia vs 11labs vs OpenAI etc.) | `docs/learnings/voice-providers.md` |
 | YAML authoring conventions, .vapi-ignore lifecycle | `docs/learnings/yaml-conventions.md` |
+| Centralizing repeated values with `{{variables}}` | `docs/learnings/variables.md` |
 | What pull/push/apply do in every drift & existence scenario | `docs/learnings/sync-behavior.md` |
 
 **Where new knowledge goes:**
@@ -202,7 +203,9 @@ docs/
     ├── voicemail-detection.md                 # Voicemail vs human classification
     ├── call-duration.md                       # Call time limits and graceful end-of-call
     ├── voice-providers.md                     # Per-provider voice block field cheat-sheet
-    └── yaml-conventions.md                    # YAML authoring conventions, .vapi-ignore lifecycle
+    ├── yaml-conventions.md                    # YAML authoring conventions, .vapi-ignore lifecycle
+    ├── variables.md                           # Managed {{variables}} in the state file
+    └── sync-behavior.md                       # pull/push/apply scenario matrix
 
 resources/
 ├── <org>/                   # Org-scoped resources (npm run push -- <org> reads here)

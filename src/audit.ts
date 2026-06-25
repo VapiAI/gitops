@@ -377,7 +377,7 @@ function checkContentDrift(
     const entry = state[type][resourceId];
     if (!entry) continue;
 
-    const localHash = hashLocalResource(type, resourceId);
+    const localHash = hashLocalResource(type, resourceId, state.variables);
     if (!localHash) continue;
 
     const remoteResource = remoteByUuid.get(entry.uuid);
