@@ -315,6 +315,11 @@ vapi-gitops/
 
 ### Promoting Resources Across Orgs
 
+For a safe, non-deployable dev → staging → production walkthrough, see the
+[dummy multi-org example](examples/cross-org-promotion/README.md). It includes
+fake API tokens, illustrative state mappings, and a tool → assistant dependency
+in each org. Nothing under `examples/` is loaded by the GitOps engine.
+
 ```bash
 # Copy a squad from dev to production
 cp resources/my-org/squads/voice-squad.yml resources/production/squads/
@@ -323,6 +328,22 @@ cp resources/my-org/assistants/intake-agent.md resources/production/assistants/
 # Push to production (missing dependencies auto-resolve)
 npm run push -- production
 ```
+
+#### Rolling Back a Promotion
+
+Treat a promotion rollback as a new, auditable Git change: revert the commit
+that changed the promoted resources, then apply the destination org again.
+
+```bash
+git revert <promotion-commit>
+npm run apply -- production
+```
+
+This is distinct from `npm run rollback`, which restores a single org from a
+local pre-deploy snapshot. Today, `apply` does not delete dashboard resources
+whose files were removed by the revert; use the explicitly gated cleanup flow
+for those deletions. A mirror-style promotion workflow must include deletions
+for `git revert` plus re-promotion to fully restore the prior desired state.
 
 ---
 
@@ -341,13 +362,13 @@ Use:
 
 ### Bootstrap State Sync
 
-Use bootstrap pull when you need the latest platform IDs and credential mappings without downloading all remote resources:
+Use bootstrap pull when you need the latest platform IDs and org-local bindings without downloading all remote resources:
 
 ```bash
 npm run pull -- my-org --bootstrap
 ```
 
-This refreshes `.vapi-state.<org>.json` and credential mappings while leaving `resources/<org>/` untouched. If you skip this step, `push` will automatically run it when it detects empty or stale state.
+This refreshes `.vapi-state.<org>.json`, credential mappings, and the generated credential/phone-number block in `.env.<org>` while leaving `resources/<org>/` untouched. Setup and ordinary pulls perform the same binding refresh. If you skip this step, `push` will automatically run it when it detects empty or stale state.
 
 ### Pulling a Single Resource By UUID
 
@@ -607,6 +628,20 @@ Credentials are managed automatically through the state file. No secrets in reso
 1. **Pull** fetches credentials from Vapi and stores `name → UUID` in the state file
 2. Resource files use human-readable credential names
 3. **Push** resolves names back to UUIDs before sending to the API
+
+Setup and pull also refresh a marked block in the gitignored `.env.<org>` file:
+
+```dotenv
+# BEGIN VAPI MANAGED BINDINGS
+VAPI_CREDENTIAL_MY_SERVER_CREDENTIAL=<org-specific-uuid>
+VAPI_PHONE_NUMBER_SUPPORT_LINE=<org-specific-uuid>
+# END VAPI MANAGED BINDINGS
+```
+
+Only IDs are exported. Credentials and phone numbers are never provisioned or
+copied between orgs. Phone numbers must have a dashboard name; unnamed or
+duplicate-name matches are omitted with a warning. Values maintained outside
+the marked block are preserved and take precedence.
 
 ```yaml
 # Resource file (environment-agnostic)

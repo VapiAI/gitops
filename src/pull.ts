@@ -6,6 +6,11 @@ import { fileURLToPath } from "url";
 import { stringify } from "yaml";
 import { vapiGet, VapiApiError } from "./api.ts";
 import {
+  fetchAllPhoneNumbers,
+  syncBindings,
+  type PhoneNumberBinding,
+} from "./bindings.ts";
+import {
   APPLY_FILTER,
   BASE_DIR,
   BOOTSTRAP_SYNC,
@@ -513,6 +518,8 @@ function findLocalResourcePath(
 export interface PullOptions {
   force?: boolean;
   bootstrap?: boolean;
+  bindingsOnly?: boolean;
+  skipBindings?: boolean;
   typeFilter?: ResourceType[];
   resourceIds?: string[];
   resolveMode?: DriftResolveMode;
@@ -1019,6 +1026,10 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   assertStateMigrated(STATE_FILE_PATH);
   const force = options.force ?? process.argv.includes("--force");
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
+  const bindingsOnly =
+    options.bindingsOnly ?? process.argv.includes("--bindings-only");
+  const skipBindings =
+    options.skipBindings ?? process.argv.includes("--skip-bindings");
   const filePathFilter = APPLY_FILTER.filePaths;
   let typeFilter = options.typeFilter ?? APPLY_FILTER.resourceTypes;
   let resourceIds = options.resourceIds ?? APPLY_FILTER.resourceIds;
@@ -1148,6 +1159,37 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     simulationSuites: { ...zero },
     evals: { ...zero },
   };
+
+  if (!skipBindings) {
+    console.log("\n🔗 Syncing org-local bindings...");
+    let phoneNumbers: PhoneNumberBinding[] | undefined;
+    try {
+      phoneNumbers = await fetchAllPhoneNumbers(vapiGet);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`   ⚠️  Binding discovery failed: ${message}`);
+      console.warn(
+        `   Existing .env.${VAPI_ENV} bindings were left unchanged; managed resources will continue syncing.`,
+      );
+    }
+    if (phoneNumbers) {
+      const result = await syncBindings(
+        join(BASE_DIR, `.env.${VAPI_ENV}`),
+        state.credentials,
+        phoneNumbers,
+      );
+      console.log(
+        `   Wrote ${result.count} credential/phone-number binding(s) to .env.${VAPI_ENV}`,
+      );
+      for (const warning of result.warnings) console.warn(`   ⚠️  ${warning}`);
+    }
+  }
+
+  if (bindingsOnly) {
+    await saveState(state);
+    console.log("\n✅ Binding sync complete!\n");
+    return { state, stats, force, bootstrap };
+  }
 
   // Pull in reverse-resolution order: pull resources that are referenced by others first,
   // so their state is populated when resolving references (UUID → resourceId) in dependent types.
