@@ -176,6 +176,28 @@ orphan gate, audit, interactive picker, explicit CLI paths (refused with 🚫),
 and gitignored (`*.bkp.*`). They can be diffed and merged from — never pulled,
 pushed, or counted.
 
+## Cross-org promotion deletions
+
+Promotion mirrors the committed source resource tree into downstream orgs; it
+does not deploy the source org itself. A safe deletion therefore has two
+separate lifecycles:
+
+1. Delete the source resource file in a reviewed Git change, but retain its
+   `.vapi-state.<source>.json` entry. The entry is the deletion tombstone.
+2. Review `npm run promote` and merge or apply it. Only matching destination
+   paths are removed, in reverse dependency order.
+3. An automatic `--all --apply` run carries that authorization through every
+   adjacent org even after the intermediate org removes its own state entry.
+4. Verify the destination APIs return 404 and the bot commit removed the
+   destination files and UUID mappings.
+5. Reconcile the source org separately with a scoped
+   `npm run apply -- <source> --force <deleted-file-path...>`, then commit the
+   cleaned source state.
+
+Do not delete the source state mapping or refresh it away before step 2. With
+no source files and no tombstone, promotion refuses the empty-source mirror
+instead of guessing that a full destination wipe was intended.
+
 ---
 
 ## Flag cheat sheet

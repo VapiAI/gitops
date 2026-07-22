@@ -322,6 +322,24 @@ patterns it owns. Those patterns are a safety boundary: matching destination
 files are mirrored, including deletions, while unrelated destination files are
 left alone.
 
+#### One-time promotion setup
+
+1. Configure every org with `npm run setup`, using one stable slug per org
+   (for example `acme-dev`, `acme-staging`, and `acme-prod`).
+2. Run `npm run pull -- <org> --bootstrap` for every org. Commit each
+   `.vapi-state.<org>.json`; never commit `.env.<org>` or
+   `.vapi-state-hash/`.
+3. Copy `promotion.example.yml` to `promotion.yml`. List orgs in forward-only
+   release order and set the correct `baseUrl` for each region.
+4. Give each pipeline the narrowest resource globs it owns. A pattern is both
+   the copy boundary and the deletion boundary; avoid `**/*` unless the whole
+   destination org is intentionally a mirror.
+5. Choose `bind` or `omit` for credentials and phone numbers in each target
+   org. Pull generates stable aliases in `.env.<org>` from resources that
+   already exist there; promotion never copies secrets or provisions numbers.
+6. Run the read-only plan for each transition before the first apply and
+   confirm every create, update, and delete is expected.
+
 ```bash
 # Read-only plan; no files or APIs change
 npm run promote -- --pipeline release --from dev --to staging
@@ -358,8 +376,16 @@ manual runs:
 3. Set the repository variable `VAPI_PROMOTION_ENABLED=true` to reconcile all
    adjacent transitions after changes land on `main`. This continuously
    converges the full pipeline in one run, including the final production org.
-4. For a controlled single transition, run the workflow manually and provide
+4. In **Settings → Actions → General → Workflow permissions**, allow GitHub
+   Actions to read and write repository contents. If branch protection blocks
+   bot pushes to `main`, explicitly allow this workflow or use an equivalent
+   reviewed state-commit path.
+5. For a controlled single transition, run the workflow manually and provide
    `pipeline`, `from`, and `to`.
+
+Automatic runs watch committed changes to `promotion.yml` and `resources/**`.
+A manual run with no inputs reconciles every adjacent transition; supplying
+inputs requires all three values and reconciles only that transition.
 
 After a successful apply, the workflow commits destination files and the
 updated, UUID-only state files back to `main` with `[skip promotion]`. This
@@ -370,6 +396,24 @@ baselines.
 For a complete fake dev → staging → production fixture, see the
 [dummy multi-org example](examples/cross-org-promotion/README.md). Nothing under
 `examples/` is loaded by the engine.
+
+#### Source-org and deletion boundary
+
+Promotion treats `resources/<source>/` in Git as the reviewed desired state for
+downstream orgs. It applies destination orgs only; deploy or pull the source org
+through its normal GitOps lifecycle separately.
+
+For a mirrored deletion, delete the managed source file in the PR but keep its
+committed source-state UUID mapping until the downstream workflow succeeds.
+That mapping is the tombstone proving the resource was previously managed, so
+an empty or misconfigured source cannot wipe a destination accidentally. The
+workflow carries an authorized deletion through every adjacent org in the same
+run, removes each destination mapping after its API deletion, and leaves files
+outside the pipeline patterns untouched. Reconcile the source org and commit
+its cleaned state after downstream deletion completes.
+
+See [sync behavior](docs/learnings/sync-behavior.md#cross-org-promotion-deletions)
+for the exact lifecycle.
 
 #### Rolling Back a Promotion
 
