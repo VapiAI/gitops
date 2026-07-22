@@ -1,8 +1,14 @@
 import { VapiApiError, vapiDelete } from "./api.ts";
-import { FORCE_DELETE, loadIgnorePatterns, matchesIgnore, VAPI_ENV } from "./config.ts";
+import {
+  FORCE_DELETE,
+  loadIgnorePatterns,
+  matchesIgnore,
+  VAPI_ENV,
+} from "./config.ts";
 import { deleteBaseline } from "./hash-store.ts";
 import { extractReferencedIds } from "./resolver.ts";
 import { FOLDER_MAP } from "./resources.ts";
+import type { TouchedSets } from "./state-merge.ts";
 import type {
   LoadedResources,
   OrphanedResource,
@@ -20,10 +26,12 @@ export function findOrphanedResources(
   loadedResourceIds: string[],
   stateResourceIds: Record<string, ResourceState>,
   ignoredIds?: Set<string>,
+  scopedIds?: Set<string>,
 ): OrphanedResource[] {
   const orphaned: OrphanedResource[] = [];
 
   for (const [resourceId, entry] of Object.entries(stateResourceIds)) {
+    if (scopedIds && !scopedIds.has(resourceId)) continue;
     if (loadedResourceIds.includes(resourceId)) continue;
     // Data-safety: an id absent from local files BUT listed in .vapi-ignore
     // is an opt-out, not an orphan. Excluding here prevents `--force` push
@@ -183,6 +191,8 @@ export async function deleteOrphanedResources(
   loadedResources: LoadedResources,
   state: StateFile,
   typesToDelete?: ResourceType[],
+  scopedIds?: Map<ResourceType, Set<string>>,
+  touched?: TouchedSets,
 ): Promise<void> {
   const shouldCheck = (type: ResourceType) =>
     !typesToDelete || typesToDelete.includes(type);
@@ -240,6 +250,7 @@ export async function deleteOrphanedResources(
         loadedResources.tools.map((t) => t.resourceId),
         state.tools,
         ignoredByType.tools.ignored,
+        scopedIds?.get("tools"),
       )
     : [];
   const orphanedOutputs = shouldCheck("structuredOutputs")
@@ -247,6 +258,7 @@ export async function deleteOrphanedResources(
         loadedResources.structuredOutputs.map((o) => o.resourceId),
         state.structuredOutputs,
         ignoredByType.structuredOutputs.ignored,
+        scopedIds?.get("structuredOutputs"),
       )
     : [];
   const orphanedAssistants = shouldCheck("assistants")
@@ -254,6 +266,7 @@ export async function deleteOrphanedResources(
         loadedResources.assistants.map((a) => a.resourceId),
         state.assistants,
         ignoredByType.assistants.ignored,
+        scopedIds?.get("assistants"),
       )
     : [];
   const orphanedSquads = shouldCheck("squads")
@@ -261,6 +274,7 @@ export async function deleteOrphanedResources(
         loadedResources.squads.map((s) => s.resourceId),
         state.squads,
         ignoredByType.squads.ignored,
+        scopedIds?.get("squads"),
       )
     : [];
   const orphanedPersonalities = shouldCheck("personalities")
@@ -268,6 +282,7 @@ export async function deleteOrphanedResources(
         loadedResources.personalities.map((p) => p.resourceId),
         state.personalities,
         ignoredByType.personalities.ignored,
+        scopedIds?.get("personalities"),
       )
     : [];
   const orphanedScenarios = shouldCheck("scenarios")
@@ -275,6 +290,7 @@ export async function deleteOrphanedResources(
         loadedResources.scenarios.map((s) => s.resourceId),
         state.scenarios,
         ignoredByType.scenarios.ignored,
+        scopedIds?.get("scenarios"),
       )
     : [];
   const orphanedSimulations = shouldCheck("simulations")
@@ -282,6 +298,7 @@ export async function deleteOrphanedResources(
         loadedResources.simulations.map((s) => s.resourceId),
         state.simulations,
         ignoredByType.simulations.ignored,
+        scopedIds?.get("simulations"),
       )
     : [];
   const orphanedSimulationSuites = shouldCheck("simulationSuites")
@@ -289,6 +306,7 @@ export async function deleteOrphanedResources(
         loadedResources.simulationSuites.map((s) => s.resourceId),
         state.simulationSuites,
         ignoredByType.simulationSuites.ignored,
+        scopedIds?.get("simulationSuites"),
       )
     : [];
   const orphanedEvals = shouldCheck("evals")
@@ -296,6 +314,7 @@ export async function deleteOrphanedResources(
         loadedResources.evals.map((e) => e.resourceId),
         state.evals,
         ignoredByType.evals.ignored,
+        scopedIds?.get("evals"),
       )
     : [];
 
@@ -436,6 +455,7 @@ export async function deleteOrphanedResources(
       console.log(`  🗑️  Deleting ${type}: ${resourceId} (${uuid})`);
       await vapiDelete(`${DELETE_ENDPOINT_MAP[stateKey]}/${uuid}`);
       delete state[stateKey][resourceId];
+      touched?.[stateKey].add(resourceId);
       await deleteBaseline(VAPI_ENV, uuid);
       deleted++;
     } catch (error) {

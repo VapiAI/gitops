@@ -625,6 +625,20 @@ test("findOrphanedResources: ignored ids do not affect non-ignored orphans", () 
   ]);
 });
 
+test("findOrphanedResources: an explicit file scope cannot delete sibling orphans", () => {
+  const stateMap = {
+    selected: { uuid: DUMMY_UUID_1 },
+    sibling: { uuid: DUMMY_UUID_2 },
+  };
+  const orphans = deleteModule.findOrphanedResources(
+    [],
+    stateMap,
+    undefined,
+    new Set(["selected"]),
+  );
+  assert.deepEqual(orphans, [{ resourceId: "selected", uuid: DUMMY_UUID_1 }]);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // validateNoIgnoredReferences: new validator. Returns error-severity finding
 // for any squad/assistant that references an ignored assistant id.

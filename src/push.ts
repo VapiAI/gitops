@@ -1,6 +1,8 @@
+import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
   ALLOW_NEW_FILES,
   APPLY_FILTER,
@@ -21,8 +23,6 @@ import {
   findExistingResourceByName,
   type RemoteResource,
 } from "./dep-dedup.ts";
-import { select } from "@inquirer/prompts";
-import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
 import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
@@ -74,6 +74,7 @@ import {
   FOLDER_MAP,
   loadResources,
   loadSingleResource,
+  parseResourceFilePath,
   pathMatchesFolder,
 } from "./resources.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
@@ -810,7 +811,11 @@ export async function applyEval(
   if (existingUuid) {
     const updatePayload = removeExcludedKeys(payload, "evals");
     console.log(`  🔄 Updating eval: ${resourceId} (${existingUuid})`);
-    const result = await vapiRequest("PATCH", `/eval/${existingUuid}`, updatePayload);
+    const result = await vapiRequest(
+      "PATCH",
+      `/eval/${existingUuid}`,
+      updatePayload,
+    );
     await writeBaselineFromResponse(existingUuid, result, state);
     return existingUuid;
   } else {
@@ -981,10 +986,7 @@ function scopeLoadedResourcesForApply(
       ? filterResourcesByPaths(resources.simulations, "simulations")
       : [],
     simulationSuites: shouldApplyResourceType("simulationSuites")
-      ? filterResourcesByPaths(
-          resources.simulationSuites,
-          "simulationSuites",
-        )
+      ? filterResourcesByPaths(resources.simulationSuites, "simulationSuites")
       : [],
     evals: shouldApplyResourceType("evals")
       ? filterResourcesByPaths(resources.evals, "evals")
@@ -1676,21 +1678,21 @@ async function main(): Promise<void> {
     // Determine which types to check for orphaned deletions
     // Full apply: check all types. Partial apply: only check the filtered type(s).
     let typesToDelete: ResourceType[] | undefined;
+    let scopedDeleteIds: Map<ResourceType, Set<string>> | undefined;
     if (partial) {
       typesToDelete = [];
       if (APPLY_FILTER.resourceTypes?.length) {
         typesToDelete.push(...APPLY_FILTER.resourceTypes);
       } else if (APPLY_FILTER.filePaths?.length) {
-        if (tools.length > 0) typesToDelete.push("tools");
-        if (structuredOutputs.length > 0)
-          typesToDelete.push("structuredOutputs");
-        if (assistants.length > 0) typesToDelete.push("assistants");
-        if (squads.length > 0) typesToDelete.push("squads");
-        if (personalities.length > 0) typesToDelete.push("personalities");
-        if (scenarios.length > 0) typesToDelete.push("scenarios");
-        if (simulations.length > 0) typesToDelete.push("simulations");
-        if (simulationSuites.length > 0) typesToDelete.push("simulationSuites");
-        if (evals.length > 0) typesToDelete.push("evals");
+        scopedDeleteIds = new Map();
+        for (const filePath of APPLY_FILTER.filePaths) {
+          const parsed = parseResourceFilePath(filePath);
+          if (!parsed) continue;
+          const ids = scopedDeleteIds.get(parsed.type) ?? new Set<string>();
+          ids.add(parsed.resourceId);
+          scopedDeleteIds.set(parsed.type, ids);
+        }
+        typesToDelete.push(...scopedDeleteIds.keys());
       }
     }
 
@@ -1715,6 +1717,8 @@ async function main(): Promise<void> {
       },
       state,
       typesToDelete,
+      scopedDeleteIds,
+      touched,
     );
 
     // Apply in dependency order:

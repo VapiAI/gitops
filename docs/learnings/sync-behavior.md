@@ -126,11 +126,13 @@ stale pointer. Never blocks, never prompts.
 | Command | Behavior |
 |---|---|
 | `pull` | 🗑️ deletion intent honored — file is NOT re-materialized; state entry kept |
-| `push` | resource not loaded → state-without-file = orphan candidate. Plain push **leaves the dashboard untouched**. Actual deletion is the double-gated cleanup verb: `npm run cleanup -- <org> --force --confirm <org>` |
+| `push` / `apply` | resource not loaded → state-without-file = orphan candidate. Without `--force`, the dashboard is left untouched and the pending deletion is printed. With `--force`, reference-safe state-tracked orphans are deleted in reverse dependency order. `promotion.yml` uses this path only after its scoped mirror has removed the matching destination file. |
 | to stop tracking entirely | add it to `.vapi-ignore` (it will never re-appear on pull) |
 
-A first-class "delete locally → apply deletes on platform" flow is **not yet
-supported** — deletion stays an explicit, double-gated operation.
+`cleanup --force --confirm <org>` remains the explicit whole-org cleanup verb.
+For ordinary GitOps deletion, `apply --force` is the deliberate deletion gate;
+for cross-org promotion, the reviewed promotion resource patterns are the
+additional ownership boundary.
 
 ### D. Tracked locally, deleted on the dashboard (L + S + B, no D)
 
