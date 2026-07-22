@@ -198,7 +198,8 @@ async function transitionRun(
   transition: PromotionTransition,
   apply: boolean,
   tokens: Map<string, string>,
-): Promise<void> {
+  allowEmptySourceDeletion: boolean,
+): Promise<boolean> {
   if (apply) {
     childRun(
       "src/pull.ts",
@@ -221,6 +222,7 @@ async function transitionRun(
     sourceState: stateLoad(transition.source),
     targetState: stateLoad(transition.target),
     bindings: config.orgs[transition.target]!.bindings,
+    allowEmptySourceDeletion,
   });
   console.log(
     `\n${transition.pipeline}: ${transition.source} → ${transition.target}`,
@@ -228,7 +230,7 @@ async function transitionRun(
   for (const change of plan.changes)
     console.log(`  ${change.kind.padEnd(6)} ${change.path}`);
   if (plan.changes.length === 0) console.log("  no changes");
-  if (!apply || plan.changes.length === 0) return;
+  if (!apply || plan.changes.length === 0) return false;
   await promotionPlanApply(plan);
   const changedPaths = plan.changes.map(
     (change) => `resources/${transition.target}/${change.path}`,
@@ -239,6 +241,7 @@ async function transitionRun(
     connectionLoad(config, transition.target, tokens),
     ["--force", "--allow-new-files", "--resolve=ours", ...changedPaths],
   );
+  return plan.changes.some((change) => change.kind === "delete");
 }
 
 export async function promotionCommandRun(
@@ -251,8 +254,23 @@ export async function promotionCommandRun(
   const config = promotionConfigParse(readFileSync(configPath, "utf8"));
   const tokens = parsed.apply ? tokensParse() : new Map<string, string>();
   delete process.env.VAPI_PROMOTION_TOKENS;
-  for (const transition of transitionsBuild(config, parsed))
-    await transitionRun(config, transition, parsed.apply, tokens);
+  // Applying a deletion removes the intermediate org's state entry. Carry the
+  // reviewed authorization forward so the same deletion can reach later orgs.
+  const deletionAuthorizedSources = new Set<string>();
+  for (const transition of transitionsBuild(config, parsed)) {
+    const sourceKey = `${transition.pipeline}:${transition.source}`;
+    const deleted = await transitionRun(
+      config,
+      transition,
+      parsed.apply,
+      tokens,
+      deletionAuthorizedSources.has(sourceKey),
+    );
+    if (deleted)
+      deletionAuthorizedSources.add(
+        `${transition.pipeline}:${transition.target}`,
+      );
+  }
 }
 
 const isMainModule =

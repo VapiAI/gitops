@@ -334,6 +334,37 @@ test("promotion refuses an untracked empty-source wipe", async () => {
   }
 });
 
+test("promotion carries a reviewed empty-source deletion to the next org", async () => {
+  const fx = await fixture();
+  try {
+    await put(
+      fx.root,
+      "resources/target/assistants/agent.md",
+      "---\nname: Agent\n---\nprompt\n",
+    );
+    const plan = await promotionPlanBuild({
+      rootDir: fx.root,
+      source: "source",
+      target: "target",
+      patterns: ["assistants/**"],
+      sourceState: state(),
+      targetState: state({
+        assistants: {
+          agent: { uuid: "aaaaaaaa-1111-1111-1111-111111111111" },
+        },
+      }),
+      allowEmptySourceDeletion: true,
+    });
+
+    assert.deepEqual(
+      plan.changes.map((change) => [change.kind, change.path]),
+      [["delete", "assistants/agent.md"]],
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("promotion replaces a destination UUID-suffixed file without duplicating it", async () => {
   const fx = await fixture();
   try {

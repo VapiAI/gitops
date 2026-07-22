@@ -61,6 +61,7 @@ export interface PromotionPlanOptions {
   sourceState: StateFile;
   targetState: StateFile;
   bindings?: PromotionBindings;
+  allowEmptySourceDeletion?: boolean;
 }
 
 interface PromotionResource {
@@ -549,7 +550,8 @@ export async function promotionPlanBuild(
   if (
     selectedSource.length === 0 &&
     selectedTarget.length > 0 &&
-    !stateConfirmsDeletion
+    !stateConfirmsDeletion &&
+    !options.allowEmptySourceDeletion
   )
     throw new Error(
       "Refusing an empty-source mirror deletion without matching source state",
