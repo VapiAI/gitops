@@ -1,9 +1,10 @@
 import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync } from "fs";
-import { mkdir, rm, writeFile } from "fs/promises";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { updateEnvConnection } from "./bindings.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import { slugify } from "./slug-utils.ts";
 
@@ -259,10 +260,12 @@ async function writeEnvFile(
   baseUrl: string,
 ): Promise<void> {
   const envPath = join(BASE_DIR, `.env.${slug}`);
-  let content = `VAPI_TOKEN=${token}\n`;
-  if (baseUrl !== VAPI_REGIONS.us) {
-    content += `VAPI_BASE_URL=${baseUrl}\n`;
-  }
+  const existing = existsSync(envPath) ? await readFile(envPath, "utf-8") : "";
+  const content = updateEnvConnection(
+    existing,
+    token,
+    baseUrl === VAPI_REGIONS.us ? undefined : baseUrl,
+  );
   await writeFile(envPath, content);
 }
 
@@ -300,6 +303,12 @@ function invokePull(slug: string, selectedIds: Set<string>): void {
     PATH: `${binDir}${pathSep}${process.env.PATH ?? ""}`,
   };
 
+  execSync(`tsx src/pull.ts ${slug} --bootstrap --bindings-only`, {
+    cwd: BASE_DIR,
+    stdio: "inherit",
+    env,
+  });
+
   for (const [typeKey, uuids] of byType) {
     const idArgs = uuids.flatMap((id) => ["--id", id]);
     const cmd = [
@@ -307,6 +316,7 @@ function invokePull(slug: string, selectedIds: Set<string>): void {
       "src/pull.ts",
       slug,
       "--force",
+      "--skip-bindings",
       "--type",
       typeKey,
       ...idArgs,
@@ -480,6 +490,7 @@ async function main(): Promise<void> {
     console.log("  Writing environment file only.\n");
     await writeEnvFile(slug, trimmedKey, vapiBaseUrl);
     await mkdir(resourceDir, { recursive: true });
+    invokePull(slug, new Set());
     printSummary(slug);
     return;
   }

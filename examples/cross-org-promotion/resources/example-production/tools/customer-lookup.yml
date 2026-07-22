@@ -1,0 +1,28 @@
+# EXAMPLE ONLY. This tool uses a reserved .invalid endpoint and cannot work.
+type: function
+async: false
+function:
+  name: lookup_example_customer
+  description: >-
+    Use this demonstration tool only when a caller asks for an account lookup.
+    Collect the caller's email address first. Do not use it for billing changes,
+    authentication, or any action that modifies customer data.
+  parameters:
+    type: object
+    properties:
+      customerEmail:
+        type: string
+        description: The email address the caller provided for the lookup.
+    required:
+      - customerEmail
+server:
+  url: https://api.example.invalid/v1/customers/lookup
+  timeoutSeconds: 20
+  credentialId: crm-api
+messages:
+  - type: request-start
+    blocking: false
+    content: Let me look up that example account.
+  - type: request-response-delayed
+    timingMilliseconds: 4000
+    content: The example lookup is still running.

@@ -1,0 +1,18 @@
+{
+  "credentials": {
+    "crm-api": { "uuid": "00000000-0000-4000-8000-000000000201" }
+  },
+  "assistants": {
+    "support-assistant": { "uuid": "00000000-0000-4000-8000-000000000221" }
+  },
+  "structuredOutputs": {},
+  "tools": {
+    "customer-lookup": { "uuid": "00000000-0000-4000-8000-000000000211" }
+  },
+  "squads": {},
+  "personalities": {},
+  "scenarios": {},
+  "simulations": {},
+  "simulationSuites": {},
+  "evals": {}
+}
