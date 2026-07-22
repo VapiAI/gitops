@@ -17,6 +17,7 @@
     "audit": "tsx src/audit-cmd.ts",
     "sim": "tsx src/sim-cmd.ts",
     "rollback": "tsx src/rollback-cmd.ts",
+    "promote": "tsx src/promote-cmd.ts",
     "build": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },

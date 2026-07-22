@@ -1,0 +1,120 @@
+name: Promote Vapi resources
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - promotion.yml
+      - resources/**
+  workflow_dispatch:
+    inputs:
+      pipeline:
+        description: Pipeline name from promotion.yml
+        required: false
+        type: string
+      from:
+        description: Source org (requires a destination org)
+        required: false
+        type: string
+      to:
+        description: Destination org (requires a source org)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vapi-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (vars.VAPI_PROMOTION_ENABLED == 'true' &&
+      !contains(github.event.head_commit.message, '[skip promotion]'))
+    runs-on: ubuntu-latest
+    env:
+      VAPI_PROMOTION_TOKENS: ${{ secrets.VAPI_PROMOTION_TOKENS }}
+      PIPELINE: ${{ inputs.pipeline }}
+      SOURCE_ORG: ${{ inputs.from }}
+      TARGET_ORG: ${{ inputs.to }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Reconcile configured promotions
+        id: promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f promotion.yml || {
+            echo "promotion.yml is required; copy promotion.example.yml and customize it."
+            exit 1
+          }
+          test -n "$VAPI_PROMOTION_TOKENS" || {
+            echo "The VAPI_PROMOTION_TOKENS repository secret is required."
+            exit 1
+          }
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            supplied=0
+            [[ -n "$PIPELINE" ]] && ((supplied += 1))
+            [[ -n "$SOURCE_ORG" ]] && ((supplied += 1))
+            [[ -n "$TARGET_ORG" ]] && ((supplied += 1))
+            [[ "$supplied" == 0 || "$supplied" == 3 ]] || {
+              echo "Provide pipeline, from, and to together, or leave all three blank."
+              exit 1
+            }
+            args=(--apply)
+            if [[ "$supplied" == 3 ]]; then
+              args+=(--pipeline "$PIPELINE")
+              args+=(--from "$SOURCE_ORG" --to "$TARGET_ORG")
+            else
+              args+=(--all)
+            fi
+            npm run promote -- "${args[@]}"
+          else
+            npm run promote -- --all --apply
+          fi
+
+      - name: Commit reconciled files and UUID state
+        if: always()
+        shell: bash
+        env:
+          PROMOTION_OUTCOME: ${{ steps.promotion.outcome }}
+        run: |
+          set -euo pipefail
+          paths=(':(glob).vapi-state.*.json')
+          if [[ "$PROMOTION_OUTCOME" == "success" ]]; then
+            paths+=(resources)
+          fi
+
+          if [[ -z "$(git status --porcelain -- "${paths[@]}")" ]]; then
+            echo "Promotion produced no Git changes."
+            exit 0
+          fi
+
+          git config user.name "vapi-gitops[bot]"
+          git config user.email "vapi-gitops[bot]@users.noreply.github.com"
+          git add -A -- "${paths[@]}"
+          git commit -m "chore: record promoted Vapi state [skip promotion]"
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push; then
+              exit 0
+            fi
+            echo "main advanced during promotion; retrying ($attempt/3)."
+          done
+          exit 1

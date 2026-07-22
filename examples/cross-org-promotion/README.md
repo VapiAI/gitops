@@ -15,15 +15,13 @@ The example state files intentionally assign different UUIDs to the same
 logical resources in each org. They are reference material only. Never copy
 them into the repository root or use them with a real Vapi organization.
 
-## What works today
+## What the promotion engine does
 
-The current engine manages each org independently. It resolves tool and
-credential aliases through that org's `.vapi-state.<org>.json`, so resource
-YAML never needs to contain another org's UUID.
-
-Cross-org promotion is manual today: copy the desired files between org
-directories, validate the destination, and apply it. There is not yet a
-`promotion.yml` reconciler or a `promote` command.
+The engine resolves tools, structured outputs, assistants, and credentials
+through each org's own `.vapi-state.<org>.json`. `npm run promote` mirrors only
+the resource patterns reviewed in `promotion.yml`, includes referenced managed
+dependencies, and lets the destination push mint or reuse that org's UUIDs.
+Source-org managed UUIDs are never copied as destination references.
 
 ## Try it with disposable Vapi orgs
 
@@ -64,18 +62,23 @@ Use real disposable orgs, not the fake IDs in this directory.
    npm run validate -- example-production
    ```
 
-5. Dry-run the first creation. Review the two intentionally new files before
-   passing the new-file override:
+5. Copy `promotion.example.yml` to `promotion.yml`, keep the three example orgs,
+   and set the resource patterns to `assistants/support-*` and
+   `tools/customer-*`.
+
+6. Review the promotion plan. It does not write files or call Vapi:
 
    ```bash
-   npm run push -- example-dev --dry-run --allow-new-files
-   npm run push -- example-staging --dry-run --allow-new-files
-   npm run push -- example-production --dry-run --allow-new-files
+   npm run promote -- --pipeline release --from example-dev --to example-staging
    ```
 
-6. After human review, run the corresponding `apply` commands with
-   `--allow-new-files`. Future updates can use plain `apply` because the real
-   state files will contain the newly created IDs.
+7. After reviewing the plan, apply it. The command refreshes bindings, mirrors
+   the selected files, and uses the existing guarded apply path for creation,
+   modification, and deletion:
+
+   ```bash
+   npm run promote -- --pipeline release --from example-dev --to example-staging --apply
+   ```
 
 ## Verify the mapping behavior
 
@@ -88,15 +91,17 @@ node -e 'for (const org of ["example-dev", "example-staging", "example-productio
 The aliases should be identical while every org's physical IDs are different.
 No UUID should appear in the resource YAML or Markdown.
 
-## Promote and roll back manually
+## Promote and roll back through Git
 
-To test an update, change the dev assistant, apply `example-dev`, copy the file
-to staging, and apply `example-staging`. Repeat for production after review.
+To test an update, change and apply the dev assistant, commit the change, then
+run the same promotion command. The destination keeps its existing UUID while
+the changed content is patched.
 
 Rollback is a forward Git operation: revert the configuration commit and apply
-the affected destination org again. The current engine does not automatically
-delete dashboard resources whose files were removed by a revert; use the
-explicitly gated cleanup flow for those deletions.
+the same promotion again. If the revert removes a newly created source file,
+the promotion's scoped mirror removes the matching destination file and the
+existing `apply --force` path deletes only that state-tracked destination
+resource.
 
 ## Credentials and phone numbers
 

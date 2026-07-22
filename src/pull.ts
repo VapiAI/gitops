@@ -1,15 +1,20 @@
 import { execSync } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
-import { dirname, join, relative, resolve } from "path";
+import { dirname, extname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { stringify } from "yaml";
-import { vapiGet, VapiApiError } from "./api.ts";
+import { VapiApiError, vapiGet } from "./api.ts";
 import {
   fetchAllPhoneNumbers,
-  syncBindings,
   type PhoneNumberBinding,
+  syncBindings,
 } from "./bindings.ts";
+import {
+  buildReverseMap,
+  canonicalizeForHash,
+  type VapiResource,
+} from "./canonical.ts";
 import {
   APPLY_FILTER,
   BASE_DIR,
@@ -22,16 +27,11 @@ import {
   VAPI_ENV,
   VAPI_TOKEN,
 } from "./config.ts";
-import {
-  buildReverseMap,
-  canonicalizeForHash,
-  type VapiResource,
-} from "./canonical.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import {
   classifyDrift,
-  formatDriftLabel,
   type DriftDirection,
+  formatDriftLabel,
 } from "./drift.ts";
 import { readBaseline, writeBaseline } from "./hash-store.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
@@ -42,6 +42,7 @@ import {
 import {
   FOLDER_MAP,
   hashLocalResource,
+  parseResourceFilePath,
   resolvePullScopeFromFilePaths,
 } from "./resources.ts";
 import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
@@ -125,6 +126,27 @@ function getLocallyChangedFiles(): Set<string> {
     }
   }
   return files;
+}
+
+export function preserveExplicitOursPaths(
+  changedFiles: Set<string> | undefined,
+  filePaths: string[],
+  env: string,
+): Set<string> {
+  const preserved = new Set(changedFiles);
+  for (const filePath of filePaths) {
+    const parsed = parseResourceFilePath(filePath);
+    if (!parsed) continue;
+    preserved.add(
+      join(
+        "resources",
+        env,
+        FOLDER_MAP[parsed.type],
+        `${parsed.resourceId}${extname(filePath)}`,
+      ),
+    );
+  }
+  return preserved;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -437,7 +459,11 @@ export async function writeDashboardBackup(
   state: StateFile,
 ): Promise<string> {
   const credReverse = credentialReverseMap(state);
-  const withCredNames = canonicalizeForHash(platformPayload, state, credReverse);
+  const withCredNames = canonicalizeForHash(
+    platformPayload,
+    state,
+    credReverse,
+  );
   // Filesystem-safe ISO timestamp: 2026-06-04T19-22-33 (no colons, no ms).
   const timestamp = new Date()
     .toISOString()
@@ -487,12 +513,19 @@ function emptyDriftCounts(): DriftDirectionCounts {
   };
 }
 
-function parseResolveMode(explicit?: DriftResolveMode): DriftResolveMode | undefined {
+function parseResolveMode(
+  explicit?: DriftResolveMode,
+): DriftResolveMode | undefined {
   if (explicit) return explicit;
   const arg = process.argv.find((a) => a.startsWith("--resolve="));
   if (!arg) return undefined;
   const mode = arg.slice("--resolve=".length);
-  if (mode === "ours" || mode === "theirs" || mode === "fail" || mode === "defer")
+  if (
+    mode === "ours" ||
+    mode === "theirs" ||
+    mode === "fail" ||
+    mode === "defer"
+  )
     return mode;
   throw new Error(
     `Invalid --resolve value: ${mode}. Use --resolve=ours|theirs|fail|defer`,
@@ -928,9 +961,7 @@ async function resolveBothDivergedResources(options: {
     console.error(
       `\n❌ ${bothDiverged.length} resource(s) have 3-way drift (both local and dashboard changed since last pull).`,
     );
-    console.error(
-      "   Pass --resolve=ours|theirs|fail to proceed:",
-    );
+    console.error("   Pass --resolve=ours|theirs|fail to proceed:");
     for (const entry of bothDiverged) {
       console.error(
         `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}\n` +
@@ -965,7 +996,11 @@ async function resolveBothDivergedResources(options: {
       continue;
     }
 
-    const withCredNames = canonicalizeForHash(entry.resource, state, credReverse);
+    const withCredNames = canonicalizeForHash(
+      entry.resource,
+      state,
+      credReverse,
+    );
 
     await writeResourceFile(
       entry.resourceType,
@@ -1093,14 +1128,31 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     for (const f of changedFiles) {
       if (!f.startsWith(`resources/${VAPI_ENV}/`)) changedFiles.delete(f);
     }
-    if (changedFiles.size > 0) {
-      console.log(
-        `\n📦 ${changedFiles.size} locally modified file(s) will be preserved`,
-      );
-      console.log(
-        "   Use --force to overwrite all local files with platform state",
-      );
-    }
+  }
+
+  if (
+    !force &&
+    !bootstrap &&
+    resolveMode === "ours" &&
+    filePathFilter?.length
+  ) {
+    // Explicit `ours` is the authority even when git's stat cache misses a
+    // file that was rewritten immediately before this pull (promotion does
+    // exactly that). Otherwise pull can restore only part of a promotion.
+    changedFiles = preserveExplicitOursPaths(
+      changedFiles,
+      filePathFilter,
+      VAPI_ENV,
+    );
+  }
+
+  if (gitEnabled && changedFiles && changedFiles.size > 0) {
+    console.log(
+      `\n📦 ${changedFiles.size} locally modified file(s) will be preserved`,
+    );
+    console.log(
+      "   Use --force to overwrite all local files with platform state",
+    );
   }
 
   const ignorePatterns = !bootstrap && !force ? loadIgnorePatterns() : [];
@@ -1225,7 +1277,11 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
       pullOptsFor("structuredOutputs"),
     );
   if (shouldPull("squads"))
-    stats.squads = await pullResourceType("squads", state, pullOptsFor("squads"));
+    stats.squads = await pullResourceType(
+      "squads",
+      state,
+      pullOptsFor("squads"),
+    );
   if (shouldPull("personalities"))
     stats.personalities = await pullResourceType(
       "personalities",
@@ -1308,7 +1364,9 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     console.log("       🚫 = matched .vapi-ignore (not tracked)");
     console.log("       ✏️  = locally modified (preserved)");
     console.log("       ⬆️  = local ahead of dashboard (preserved)");
-    console.log("       ⬇️  = both diverged, --resolve=theirs (overwrote local)");
+    console.log(
+      "       ⬇️  = both diverged, --resolve=theirs (overwrote local)",
+    );
     console.log("       📝 = engine wrote/updated file on disk");
     console.log("       🗑️  = locally deleted (intent in state)");
     console.log(
@@ -1326,7 +1384,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
         "\n💡 Tip: run plain pull first (this) to see what changed before resorting to --force.",
       );
       console.log(
-        "   --force is for \"I know exactly what I want from the dashboard and I'm overwriting locals\" — rare.",
+        '   --force is for "I know exactly what I want from the dashboard and I\'m overwriting locals" — rare.',
       );
     }
   }

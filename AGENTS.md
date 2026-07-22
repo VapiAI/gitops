@@ -60,7 +60,7 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 | Create a multi-agent squad          | Create `resources/<org>/squads/<name>.yml`                                        |
 | Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
 | Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
-| Promote resources across orgs       | Copy files between `resources/<org-a>/` and `resources/<org-b>/`                  |
+| Promote resources across orgs       | `npm run promote -- --pipeline <name> --from <org-a> --to <org-b> --apply`        |
 | Deploy local changes (default)      | `npm run apply -- <org>` — pull → merge → push, safe against dashboard drift       |
 | Pre-flight schema check (no network) | `npm run validate -- <org>` — run before every `apply`                            |
 | Audit state/dashboard drift (read-only) | `npm run audit -- <org>` — orphans, ghosts, content-identical clusters, inline-tools. Exit 1 on findings. |
@@ -877,6 +877,8 @@ npm run push -- <org> --strict                     # Abort push if any validator
 npm run push -- <org> --allow-new-files            # Bypass orphan-YAML gate (use only after confirming each orphan is intentionally new — see "Orphan-YAML gate" section above)
 npm run apply -- <org>                             # Pull then push (full sync)
 npm run apply -- <org> --allow-new-files           # Same, propagating the bypass through to the push stage
+npm run promote -- --pipeline <name> --from <source> --to <target>        # Read-only promotion plan
+npm run promote -- --pipeline <name> --from <source> --to <target> --apply # Forward-only scoped mirror + deploy
 npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
 npm run audit -- <org>                             # Read-only drift detector: orphan YAML, state ghosts, content-identical clusters, sibling base-slugs, dashboard orphans, inline model.tools. Exit 1 on findings.
 npm run audit -- <org> --type assistants           # Scope audit to a single resource type
@@ -1008,4 +1010,3 @@ When transferring to human:
 3. Create simulations (pair personality + scenario)
 4. Create suites (batch simulations together)
 5. Run via Vapi dashboard or API
-

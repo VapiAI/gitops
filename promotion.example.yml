@@ -1,0 +1,41 @@
+version: 1
+
+# Define as many orgs as your release model needs. Credentials and phone
+# numbers are org-local bindings: promotion may bind an existing target-org
+# resource or omit the reference, but it never provisions or copies one.
+orgs:
+  example-dev:
+    baseUrl: https://api.vapi.ai
+  example-staging:
+    baseUrl: https://api.vapi.ai
+    bindings:
+      credentials:
+        default: bind
+        analytics-api: omit
+      phoneNumbers:
+        default: omit
+        support-line: bind
+  example-production:
+    baseUrl: https://api.vapi.ai
+    bindings:
+      credentials:
+        default: bind
+      phoneNumbers:
+        default: omit
+
+pipelines:
+  release:
+    # Transitions may only move forward through this ordered list.
+    orgs:
+      - example-dev
+      - example-staging
+      - example-production
+
+    # These glob patterns (*, **, and ?) are the promotion ownership boundary.
+    # Target files inside the boundary are mirrored, including deletions;
+    # unrelated target files are left alone. Use **/* only when the entire
+    # destination org is intentionally a mirror of the source org.
+    resources:
+      - assistants/support-*
+      - tools/customer-*
+      - structuredOutputs/support-*

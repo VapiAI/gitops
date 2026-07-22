@@ -126,11 +126,13 @@ stale pointer. Never blocks, never prompts.
 | Command | Behavior |
 |---|---|
 | `pull` | 🗑️ deletion intent honored — file is NOT re-materialized; state entry kept |
-| `push` | resource not loaded → state-without-file = orphan candidate. Plain push **leaves the dashboard untouched**. Actual deletion is the double-gated cleanup verb: `npm run cleanup -- <org> --force --confirm <org>` |
+| `push` / `apply` | resource not loaded → state-without-file = orphan candidate. Without `--force`, the dashboard is left untouched and the pending deletion is printed. With `--force`, reference-safe state-tracked orphans are deleted in reverse dependency order. `promotion.yml` uses this path only after its scoped mirror has removed the matching destination file. |
 | to stop tracking entirely | add it to `.vapi-ignore` (it will never re-appear on pull) |
 
-A first-class "delete locally → apply deletes on platform" flow is **not yet
-supported** — deletion stays an explicit, double-gated operation.
+`cleanup --force --confirm <org>` remains the explicit whole-org cleanup verb.
+For ordinary GitOps deletion, `apply --force` is the deliberate deletion gate;
+for cross-org promotion, the reviewed promotion resource patterns are the
+additional ownership boundary.
 
 ### D. Tracked locally, deleted on the dashboard (L + S + B, no D)
 
@@ -173,6 +175,28 @@ Written by push prompt option ③. Invisible **everywhere**: resource loader,
 orphan gate, audit, interactive picker, explicit CLI paths (refused with 🚫),
 and gitignored (`*.bkp.*`). They can be diffed and merged from — never pulled,
 pushed, or counted.
+
+## Cross-org promotion deletions
+
+Promotion mirrors the committed source resource tree into downstream orgs; it
+does not deploy the source org itself. A safe deletion therefore has two
+separate lifecycles:
+
+1. Delete the source resource file in a reviewed Git change, but retain its
+   `.vapi-state.<source>.json` entry. The entry is the deletion tombstone.
+2. Review `npm run promote` and merge or apply it. Only matching destination
+   paths are removed, in reverse dependency order.
+3. An automatic `--all --apply` run carries that authorization through every
+   adjacent org even after the intermediate org removes its own state entry.
+4. Verify the destination APIs return 404 and the bot commit removed the
+   destination files and UUID mappings.
+5. Reconcile the source org separately with a scoped
+   `npm run apply -- <source> --force <deleted-file-path...>`, then commit the
+   cleaned source state.
+
+Do not delete the source state mapping or refresh it away before step 2. With
+no source files and no tombstone, promotion refuses the empty-source mirror
+instead of guessing that a full destination wipe was intended.
 
 ---
 

@@ -4,10 +4,10 @@ import test from "node:test";
 process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
-const {
-  parseResourceFilePath,
-  resolvePullScopeFromFilePaths,
-} = await import("../src/resources.ts");
+const { parseResourceFilePath, resolvePullScopeFromFilePaths } = await import(
+  "../src/resources.ts"
+);
+const { preserveExplicitOursPaths } = await import("../src/pull.ts");
 
 test("parseResourceFilePath: long-form assistant path", () => {
   const parsed = parseResourceFilePath(
@@ -20,7 +20,9 @@ test("parseResourceFilePath: long-form assistant path", () => {
 });
 
 test("parseResourceFilePath: short-form assistant path", () => {
-  const parsed = parseResourceFilePath("assistants/call-transfer-test-c95f4c6b.md");
+  const parsed = parseResourceFilePath(
+    "assistants/call-transfer-test-c95f4c6b.md",
+  );
   assert.deepEqual(parsed, {
     type: "assistants",
     resourceId: "call-transfer-test-c95f4c6b",
@@ -33,7 +35,9 @@ test("resolvePullScopeFromFilePaths: maps file paths to dashboard UUIDs by state
     {
       credentials: {},
       assistants: {
-        "call-transfer-test-c95f4c6b": { uuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+        "call-transfer-test-c95f4c6b": {
+          uuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        },
       },
       structuredOutputs: {},
       tools: {},
@@ -75,4 +79,20 @@ test("resolvePullScopeFromFilePaths: new resources without state skip pull", () 
   assert.equal(scope.idsByType.size, 0);
   assert.equal(scope.skippedWithoutState.length, 1);
   assert.equal(scope.skippedWithoutState[0]?.resourceId, "new-agent");
+});
+
+test("resolve ours preserves every scoped file when git misses a fresh rewrite", () => {
+  const assistant =
+    "resources/test-fixture-org/assistants/promotion-smoke-assistant.md";
+  const tool = "resources/test-fixture-org/tools/promotion-smoke-lookup.yml";
+  const output =
+    "resources/test-fixture-org/structuredOutputs/promotion-smoke-result.yml";
+
+  const preserved = preserveExplicitOursPaths(
+    new Set([tool, output]),
+    [assistant, tool, output],
+    "test-fixture-org",
+  );
+
+  assert.deepEqual([...preserved].sort(), [assistant, output, tool].sort());
 });
