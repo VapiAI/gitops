@@ -7,6 +7,7 @@ import {
   _resetRunSnapshotDir,
   listSnapshotTimestamps,
   loadSnapshot,
+  prepareRollbackPayload,
   snapshotsRoot,
   writeSnapshot,
 } from "../src/snapshot.ts";
@@ -139,4 +140,32 @@ test("loadSnapshot throws when timestamp directory is missing", async () => {
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test("prepareRollbackPayload strips API-managed fields and preserves config", () => {
+  assert.deepEqual(
+    prepareRollbackPayload({
+      id: "assistant-uuid",
+      orgId: "org-uuid",
+      createdAt: "2026-07-23T00:00:00Z",
+      updatedAt: "2026-07-23T01:00:00Z",
+      isServerUrlSecretSet: false,
+      name: "Agent A",
+      model: {
+        provider: "openai",
+        model: "gpt-4.1",
+        messages: [{ role: "system", content: "Keep this prompt." }],
+      },
+      voicemailDetection: null,
+    }),
+    {
+      name: "Agent A",
+      model: {
+        provider: "openai",
+        model: "gpt-4.1",
+        messages: [{ role: "system", content: "Keep this prompt." }],
+      },
+      voicemailDetection: null,
+    },
+  );
 });

@@ -7,7 +7,9 @@ process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 const { parseResourceFilePath, resolvePullScopeFromFilePaths } = await import(
   "../src/resources.ts"
 );
-const { preserveExplicitOursPaths } = await import("../src/pull.ts");
+const { mapWithConcurrency, preserveExplicitOursPaths } = await import(
+  "../src/pull.ts"
+);
 
 test("parseResourceFilePath: long-form assistant path", () => {
   const parsed = parseResourceFilePath(
@@ -95,4 +97,23 @@ test("resolve ours preserves every scoped file when git misses a fresh rewrite",
   );
 
   assert.deepEqual([...preserved].sort(), [assistant, output, tool].sort());
+});
+
+test("targeted fetch work is bounded by the requested concurrency", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const values = await mapWithConcurrency(
+    Array.from({ length: 12 }, (_, index) => index),
+    3,
+    async (value) => {
+      active++;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return value * 2;
+    },
+  );
+
+  assert.equal(maximumActive, 3);
+  assert.deepEqual(values, Array.from({ length: 12 }, (_, index) => index * 2));
 });

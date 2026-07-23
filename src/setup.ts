@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { updateEnvConnection } from "./bindings.ts";
+import { visitAssistantIdReferences } from "./assistant-references.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import { slugify } from "./slug-utils.ts";
 
@@ -192,25 +193,9 @@ function detectMissingDependencies(
           addRef("structuredOutputs", sid);
       }
 
-      if (Array.isArray(r.members)) {
-        for (const m of r.members as Record<string, unknown>[]) {
-          addRef("assistants", m.assistantId);
-          if (Array.isArray(m.assistantDestinations)) {
-            for (const d of m.assistantDestinations as Record<
-              string,
-              unknown
-            >[]) {
-              addRef("assistants", d.assistantId);
-            }
-          }
-        }
-      }
-
-      if (Array.isArray(r.destinations)) {
-        for (const d of r.destinations as Record<string, unknown>[]) {
-          addRef("assistants", d.assistantId);
-        }
-      }
+      visitAssistantIdReferences(r, (_owner, assistantId) => {
+        addRef("assistants", assistantId);
+      });
 
       if (Array.isArray(r.assistantIds)) {
         for (const aid of r.assistantIds) addRef("assistants", aid);

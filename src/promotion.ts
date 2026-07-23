@@ -477,6 +477,40 @@ function renderContent(data: unknown, path: string, body?: string): string {
   return extname(path) === ".md" ? `---\n${yaml}---\n${body ?? ""}` : yaml;
 }
 
+function normalizeMarkdownBody(body: string | undefined): string {
+  return (body ?? "").replace(/\r\n/g, "\n").replace(/\n+$/g, "");
+}
+
+async function promotionContentMatches(
+  existing: PromotionResource,
+  desiredData: unknown,
+  desiredBody: string | undefined,
+  options: PromotionPlanOptions,
+): Promise<boolean> {
+  if (extname(existing.path) === ".ts") return false;
+
+  const current = await resourceData(
+    existing,
+    options.rootDir,
+    options.target,
+  );
+  const desiredComparable = referencesCanonicalize(
+    desiredData,
+    options.targetState,
+  );
+  const currentComparable = referencesCanonicalize(
+    current.data,
+    options.targetState,
+  );
+  if (!isDeepStrictEqual(desiredComparable, currentComparable)) return false;
+
+  return (
+    extname(existing.path) !== ".md" ||
+    normalizeMarkdownBody(desiredBody) ===
+      normalizeMarkdownBody(current.body)
+  );
+}
+
 function dependenciesFind(
   value: unknown,
   sourceState: StateFile,
@@ -613,7 +647,17 @@ export async function promotionPlanBuild(
         ? file.content
         : renderContent(transformed, file.path, parsed.body);
     const existing = targetByPath.get(file.path);
-    if (!existing || existing.content !== content)
+    const contentMatches = existing
+      ? extname(file.path) === ".ts"
+        ? existing.content === content
+        : await promotionContentMatches(
+            existing,
+            transformed,
+            parsed.body,
+            options,
+          )
+      : false;
+    if (!existing || !contentMatches)
       changes.push({
         kind: existing ? "update" : "create",
         path: file.path,

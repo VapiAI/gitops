@@ -1,4 +1,5 @@
 import type { ResourceState, StateFile } from "./types.ts";
+import { visitAssistantIdReferences } from "./assistant-references.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ID Resolution - Convert resource IDs to Vapi UUIDs
@@ -179,7 +180,7 @@ export function resolveReferences(
   data: Record<string, unknown>,
   state: StateFile,
 ): Record<string, unknown> {
-  const resolved = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+  const resolved: Record<string, unknown> = structuredClone(data);
 
   // Resolve toolIds at root level
   if (Array.isArray(resolved.toolIds)) {
@@ -240,46 +241,10 @@ export function resolveReferences(
     }
   }
 
-  // Resolve assistantId in destinations[] (for handoff tools)
-  if (Array.isArray(resolved.destinations)) {
-    for (const destination of resolved.destinations as Record<
-      string,
-      unknown
-    >[]) {
-      if (typeof destination.assistantId === "string") {
-        const resolvedId = resolveAssistantId(destination.assistantId, state);
-        if (resolvedId) {
-          destination.assistantId = resolvedId;
-        }
-      }
-    }
-  }
-
-  // Resolve members[].assistantId in squads
-  if (Array.isArray(resolved.members)) {
-    for (const member of resolved.members as Record<string, unknown>[]) {
-      if (typeof member.assistantId === "string") {
-        const resolvedId = resolveAssistantId(member.assistantId, state);
-        if (resolvedId) {
-          member.assistantId = resolvedId;
-        }
-      }
-      // Resolve assistantDestinations[].assistantId
-      if (Array.isArray(member.assistantDestinations)) {
-        for (const dest of member.assistantDestinations as Record<
-          string,
-          unknown
-        >[]) {
-          if (typeof dest.assistantId === "string") {
-            const resolvedId = resolveAssistantId(dest.assistantId, state);
-            if (resolvedId) {
-              dest.assistantId = resolvedId;
-            }
-          }
-        }
-      }
-    }
-  }
+  visitAssistantIdReferences(resolved, (owner, assistantId) => {
+    const resolvedId = resolveAssistantId(assistantId, state);
+    if (resolvedId) owner.assistantId = resolvedId;
+  });
 
   // Resolve personalityId in simulations
   if (typeof resolved.personalityId === "string") {
@@ -402,34 +367,9 @@ export function extractReferencedIds(
     }
   }
 
-  // Check destinations[].assistantId (for handoff tools)
-  if (Array.isArray(data.destinations)) {
-    for (const destination of data.destinations as Record<string, unknown>[]) {
-      if (typeof destination.assistantId === "string") {
-        assistants.push(cleanId(destination.assistantId));
-      }
-    }
-  }
-
-  // Check members[].assistantId in squads
-  if (Array.isArray(data.members)) {
-    for (const member of data.members as Record<string, unknown>[]) {
-      if (typeof member.assistantId === "string") {
-        assistants.push(cleanId(member.assistantId));
-      }
-      // Check assistantDestinations[].assistantId
-      if (Array.isArray(member.assistantDestinations)) {
-        for (const dest of member.assistantDestinations as Record<
-          string,
-          unknown
-        >[]) {
-          if (typeof dest.assistantId === "string") {
-            assistants.push(cleanId(dest.assistantId));
-          }
-        }
-      }
-    }
-  }
+  visitAssistantIdReferences(data, (_owner, assistantId) => {
+    assistants.push(cleanId(assistantId));
+  });
 
   // Check personalityId in simulations
   if (typeof data.personalityId === "string") {

@@ -10,6 +10,7 @@ import {
   promotionPlanBuild,
   promotionTransitionValidate,
 } from "../src/promotion.ts";
+import { promotionApplyArguments } from "../src/promote-cmd.ts";
 import type { StateFile } from "../src/types.ts";
 
 function state(entries: Partial<StateFile> = {}): StateFile {
@@ -287,6 +288,86 @@ test("promotion canonicalizes source UUIDs and applies credential and phone poli
   } finally {
     await fx.cleanup();
   }
+});
+
+test("promotion comparison canonicalizes both orgs and ignores terminal Markdown newlines", async () => {
+  const fx = await fixture();
+  try {
+    const sourceAssistant = "11111111-1111-4111-8111-111111111111";
+    const targetAssistant = "22222222-2222-4222-8222-222222222222";
+    await put(
+      fx.root,
+      "resources/source/squads/relay.yml",
+      `members:\n  - assistantId: ${sourceAssistant}\n`,
+    );
+    await put(
+      fx.root,
+      "resources/target/squads/relay.yml",
+      `members:\n  - assistantId: ${targetAssistant}\n`,
+    );
+    await put(
+      fx.root,
+      "resources/source/assistants/agent.md",
+      "---\nname: Agent\n---\n# Prompt\n",
+    );
+    await put(
+      fx.root,
+      "resources/target/assistants/agent.md",
+      "---\nname: Agent\n---\n# Prompt\n\n",
+    );
+
+    const plan = await promotionPlanBuild({
+      rootDir: fx.root,
+      source: "source",
+      target: "target",
+      patterns: ["assistants/**", "squads/**"],
+      sourceState: state({
+        assistants: { agent: { uuid: sourceAssistant } },
+      }),
+      targetState: state({
+        assistants: { agent: { uuid: targetAssistant } },
+      }),
+    });
+
+    assert.deepEqual(plan.changes, []);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("promotion apply arguments reflect only reviewed plan actions", () => {
+  assert.deepEqual(
+    promotionApplyArguments(
+      {
+        rootDir: "/tmp",
+        target: "target",
+        changes: [
+          { kind: "update", path: "assistants/existing.md", content: "x" },
+        ],
+      },
+    ),
+    ["--resolve=ours", "resources/target/assistants/existing.md"],
+  );
+
+  const createArgs = promotionApplyArguments(
+    {
+      rootDir: "/tmp",
+      target: "target",
+      changes: [{ kind: "create", path: "tools/new.yml", content: "x" }],
+    },
+  );
+  assert.ok(createArgs.includes("--allow-new-files"));
+  assert.ok(!createArgs.includes("--force"));
+
+  const deleteArgs = promotionApplyArguments(
+    {
+      rootDir: "/tmp",
+      target: "target",
+      changes: [{ kind: "delete", path: "tools/old.yml" }],
+    },
+  );
+  assert.ok(deleteArgs.includes("--force"));
+  assert.ok(!deleteArgs.includes("--allow-new-files"));
 });
 
 test("promotion plan is dry until explicitly applied", async () => {

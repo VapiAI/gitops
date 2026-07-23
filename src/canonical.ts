@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { replaceCredentialRefs } from "./credentials.ts";
+import { visitAssistantIdReferences } from "./assistant-references.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 
 export interface VapiResource {
@@ -82,7 +83,7 @@ export function resolveReferencesToResourceIds(
   const scenariosMap = buildReverseMap(state, "scenarios");
   const simulationsMap = buildReverseMap(state, "simulations");
 
-  const resolved = { ...resource };
+  const resolved: Record<string, unknown> = structuredClone(resource);
 
   // Resolve toolIds in model
   if (resolved.model && typeof resolved.model === "object") {
@@ -116,49 +117,9 @@ export function resolveReferencesToResourceIds(
     delete resolved.assistantIds;
   }
 
-  // Resolve assistantId in tool destinations (handoff tools)
-  if (Array.isArray(resolved.destinations)) {
-    resolved.destinations = (
-      resolved.destinations as Record<string, unknown>[]
-    ).map((dest) => {
-      if (typeof dest.assistantId === "string") {
-        return {
-          ...dest,
-          assistantId: assistantsMap.get(dest.assistantId) ?? dest.assistantId,
-        };
-      }
-      return dest;
-    });
-  }
-
-  // Resolve members[].assistantId in squads
-  if (Array.isArray(resolved.members)) {
-    resolved.members = (resolved.members as Record<string, unknown>[]).map(
-      (member) => {
-        const resolvedMember = { ...member };
-        if (typeof member.assistantId === "string") {
-          resolvedMember.assistantId =
-            assistantsMap.get(member.assistantId) ?? member.assistantId;
-        }
-        // Resolve assistantDestinations[].assistantId
-        if (Array.isArray(member.assistantDestinations)) {
-          resolvedMember.assistantDestinations = (
-            member.assistantDestinations as Record<string, unknown>[]
-          ).map((dest) => {
-            if (typeof dest.assistantId === "string") {
-              return {
-                ...dest,
-                assistantId:
-                  assistantsMap.get(dest.assistantId) ?? dest.assistantId,
-              };
-            }
-            return dest;
-          });
-        }
-        return resolvedMember;
-      },
-    );
-  }
+  visitAssistantIdReferences(resolved, (owner, assistantId) => {
+    owner.assistantId = assistantsMap.get(assistantId) ?? assistantId;
+  });
 
   // Resolve personalityId in simulations
   if (typeof resolved.personalityId === "string") {

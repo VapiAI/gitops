@@ -18,6 +18,7 @@
 import { existsSync } from "fs";
 import { mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
+import { cleanResource, type VapiResource } from "./canonical.ts";
 import { sortedKeysReplacer } from "./state-serialize.ts";
 
 export function snapshotsRoot(baseDir: string, env: string): string {
@@ -92,6 +93,14 @@ export interface SnapshotEntry {
   resourceType: string;
   resourceId: string;
   payload: SnapshotPayload;
+}
+
+export function prepareRollbackPayload(
+  platform: unknown,
+): Record<string, unknown> {
+  if (!platform || typeof platform !== "object" || Array.isArray(platform))
+    throw new Error("Snapshot platform payload must be a resource object");
+  return cleanResource(platform as VapiResource);
 }
 
 export async function loadSnapshot(
