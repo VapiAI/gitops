@@ -11,7 +11,11 @@
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
+import {
+  listSnapshotTimestamps,
+  loadSnapshot,
+  prepareRollbackPayload,
+} from "./snapshot.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -188,7 +192,7 @@ async function main(): Promise<void> {
         Authorization: `Bearer ${cfg.token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(entry.payload.platform),
+      body: JSON.stringify(prepareRollbackPayload(entry.payload.platform)),
     });
     if (!response.ok) {
       const text = await response.text();

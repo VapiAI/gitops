@@ -67,6 +67,7 @@ function parseApiMessage(body: string): string {
 const MAX_RETRIES = 5;
 const INITIAL_DELAY_MS = 2000;
 const REQUEST_DELAY_MS = 700; // Delay between requests to avoid rate limits
+const MAX_RETRY_JITTER_MS = 1000;
 
 let lastRequestTime = 0;
 
@@ -88,6 +89,14 @@ async function throttle(): Promise<void> {
 // a 502 as a hard failure forces the operator to re-run the entire push.
 function shouldRetry(status: number): boolean {
   return status === 429 || (status >= 500 && status < 600);
+}
+
+function retryDelayMs(attempt: number): number {
+  const base = INITIAL_DELAY_MS * Math.pow(2, attempt);
+  const jitter = Math.floor(
+    Math.random() * Math.min(base * 0.25, MAX_RETRY_JITTER_MS),
+  );
+  return base + jitter;
 }
 
 export async function vapiRequest<T = VapiResponse>(
@@ -127,7 +136,7 @@ export async function vapiRequest<T = VapiResponse>(
     }
 
     if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
-      const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
+      const delay = retryDelayMs(attempt);
       const reason =
         response.status === 429
           ? "Rate limited"
@@ -169,7 +178,7 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
     }
 
     if (shouldRetry(response.status) && attempt < MAX_RETRIES) {
-      const delay = INITIAL_DELAY_MS * Math.pow(2, attempt);
+      const delay = retryDelayMs(attempt);
       const reason =
         response.status === 429
           ? "Rate limited"

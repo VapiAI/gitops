@@ -153,10 +153,47 @@ export function preserveExplicitOursPaths(
 // API Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+const TARGETED_PULL_CONCURRENCY = 5;
+
+function isVapiResource(value: unknown): value is VapiResource {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof value.id === "string"
+  );
+}
+
+export async function mapWithConcurrency<Input, Output>(
+  values: readonly Input[],
+  concurrency: number,
+  mapper: (value: Input, index: number) => Promise<Output>,
+): Promise<Output[]> {
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error("Concurrency must be a positive integer");
+  }
+
+  const results = new Array<Output>(values.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    while (nextIndex < values.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(values[index]!, index);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, values.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 export async function fetchAllResources(
   resourceType: ResourceType,
 ): Promise<VapiResource[]> {
-  const endpoint = ENDPOINT_MAP[resourceType];
+  const endpoint =
+    resourceType === "assistants"
+      ? `${ENDPOINT_MAP[resourceType]}?limit=1000`
+      : ENDPOINT_MAP[resourceType];
   const data = await vapiGet<unknown>(endpoint);
 
   // Handle paginated response format (e.g., structured-output returns { results: [], metadata: {} })
@@ -164,12 +201,12 @@ export async function fetchAllResources(
     data &&
     typeof data === "object" &&
     "results" in data &&
-    Array.isArray((data as Record<string, unknown>).results)
+    Array.isArray(data.results)
   ) {
-    return (data as { results: VapiResource[] }).results;
+    return data.results.filter(isVapiResource);
   }
 
-  return data as VapiResource[];
+  return Array.isArray(data) ? data.filter(isVapiResource) : [];
 }
 
 export async function fetchResourceById(
@@ -587,18 +624,15 @@ export async function pullResourceType(
   } = options;
   console.log(`\n📥 Pulling ${resourceType}...`);
 
-  const allResources = (await fetchAllResources(resourceType)) ?? [];
-
-  if (!Array.isArray(allResources)) {
-    console.log(`   ⚠️  No ${resourceType} found (API returned non-array)`);
-    return { created: 0, updated: 0, skipped: 0 };
-  }
-
-  let resources = allResources;
+  let resources: VapiResource[];
   if (resourceIds?.length) {
-    const requestedIds = new Set(resourceIds);
-    resources = allResources.filter((resource) =>
-      requestedIds.has(resource.id),
+    const requestedResources = await mapWithConcurrency(
+      resourceIds,
+      TARGETED_PULL_CONCURRENCY,
+      (id) => fetchResourceById(resourceType, id),
+    );
+    resources = requestedResources.filter(
+      (resource): resource is VapiResource => resource !== null,
     );
     const foundIds = new Set(resources.map((resource) => resource.id));
     const missingIds = resourceIds.filter((id) => !foundIds.has(id));
@@ -612,6 +646,7 @@ export async function pullResourceType(
       );
     }
   } else {
+    resources = await fetchAllResources(resourceType);
     console.log(`   Found ${resources.length} ${resourceType} in Vapi`);
   }
 
@@ -671,7 +706,7 @@ export async function pullResourceType(
     // These are explicit opt-outs — the resource exists on the dashboard but
     // this repo does not manage it. Do NOT track in state (so a future
     // un-ignore pulls cleanly and so state doesn't accumulate stale entries).
-    if (!bootstrap && !force) {
+    if (!force) {
       const matched = matchesIgnore(folderPath, resourceId);
       if (matched) {
         console.log(`   🚫 ${resourceId} (matched .vapi-ignore: ${matched})`);
@@ -1155,7 +1190,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     );
   }
 
-  const ignorePatterns = !bootstrap && !force ? loadIgnorePatterns() : [];
+  const ignorePatterns = !force ? loadIgnorePatterns() : [];
   if (ignorePatterns.length > 0) {
     console.log(
       `\n🚫 ${ignorePatterns.length} pattern(s) loaded from .vapi-ignore — matching resources will be skipped`,

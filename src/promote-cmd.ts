@@ -2,7 +2,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
+import type {
+  PromotionConfig,
+  PromotionPipeline,
+  PromotionPlan,
+} from "./promotion.ts";
 import {
   promotionConfigParse,
   promotionPlanApply,
@@ -193,6 +197,22 @@ function stateLoad(org: string) {
   return promotionStateParse(readFileSync(path, "utf8"));
 }
 
+export function promotionApplyArguments(plan: PromotionPlan): string[] {
+  const args = ["--resolve=ours"];
+  if (plan.changes.some((change) => change.kind === "delete")) {
+    args.push("--force");
+  }
+  if (plan.changes.some((change) => change.kind === "create")) {
+    args.push("--allow-new-files");
+  }
+  args.push(
+    ...plan.changes.map(
+      (change) => `resources/${plan.target}/${change.path}`,
+    ),
+  );
+  return args;
+}
+
 async function transitionRun(
   config: PromotionConfig,
   transition: PromotionTransition,
@@ -232,14 +252,11 @@ async function transitionRun(
   if (plan.changes.length === 0) console.log("  no changes");
   if (!apply || plan.changes.length === 0) return false;
   await promotionPlanApply(plan);
-  const changedPaths = plan.changes.map(
-    (change) => `resources/${transition.target}/${change.path}`,
-  );
   childRun(
     "src/apply.ts",
     transition.target,
     connectionLoad(config, transition.target, tokens),
-    ["--force", "--allow-new-files", "--resolve=ours", ...changedPaths],
+    promotionApplyArguments(plan),
   );
   return plan.changes.some((change) => change.kind === "delete");
 }
