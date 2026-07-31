@@ -139,7 +139,12 @@ additional ownership boundary.
 | Command | Behavior |
 |---|---|
 | `push` | drift GET hits 404 → stale state mapping dropped, baseline deleted, resource **skipped this run** with a warning. The file is now case A — the next push hits the orphan gate, and `--allow-new-files` recreates it (deliberately requires re-confirmation). |
-| `pull` | resource absent from the dashboard list → its state entry drops out of the rewritten state file; the local file remains and becomes case A |
+| `pull` (plain) | ⚠️ local file, state mapping, and baseline are retained. The listing absence is reported, but plain pull never deletes and preserves the state claim so a later forced pull can confirm the deletion. |
+| `pull --force` | The listing absence makes the state-tracked file a candidate, then a direct GET must return 404 before the file, state mapping, and baseline are removed. A live response, API error, ambiguous extension twins, or `.vapi-ignore` match retains the file; managed retentions also keep their state mapping for a later retry. Files without a pre-pull state mapping are never deletion candidates. ID-scoped pulls never prune; a full `--type` pull may prune only that type. Force materialization can still overwrite a same-slug file when the dashboard resource is live. |
+
+`apply --force` intentionally strips `--force` from its pull subprocess and
+passes it only to push. It enables dashboard-orphan deletion; it does not run
+this local stale-file prune. Invoke direct `pull --force` for that operation.
 
 ### E. Fresh clone / new developer (L + S committed, but B is per-dev and missing)
 
@@ -165,9 +170,11 @@ deliberately.
 
 ### H. `.vapi-ignore` match
 
-Skipped in **both** directions: never written by pull, never sent by push,
-orphan-protected against `--force` deletion. A resource referencing an ignored
-resource is a validation error.
+Plain pull, push, and apply skip matched resources. Explicit `--force` pull or
+push bypasses the write/load filter, but ignore protection still applies to
+deletion: force pull reconciliation does not remove a matched local file, and
+force push orphan cleanup does not delete a matched dashboard resource. A
+resource referencing an ignored resource is a validation error.
 
 ### I. Backup copies (`<name>.<TIMESTAMP>.bkp.md|yml`, legacy `<name>.dashboard.*`)
 
@@ -209,8 +216,9 @@ instead of guessing that a full destination wipe was intended.
 | `--resolve=theirs` | pull, apply | overwrite local fleet-wide with dashboard |
 | `--resolve=fail` | pull, apply | exit 1 on any conflict (CI) |
 | `--overwrite` | push | skip the drift gate/prompt, push local unconditionally |
-| `--force` | pull | nuke-and-rematerialize local from dashboard (bypasses ALL preservation) |
-| `--force` | push/apply/cleanup | enable deletions of dashboard orphans |
+| `--force` | pull | re-materialize live dashboard resources and remove stale state-tracked files only after a direct 404; deletion excludes no-state, ignored, ambiguous, and unconfirmed candidates |
+| `--force` | push/cleanup | enable deletions of dashboard orphans |
+| `--force` | apply | keep the pull stage non-force; enable dashboard-orphan deletion in the push stage |
 | `--allow-new-files` | push/apply | bypass the orphan-YAML gate (confirm each orphan is genuinely new first) |
 | `--bootstrap` | pull | refresh state + baselines without writing resource files |
 | `--dry-run` | push | print would-be calls; no API calls, no baseline writes, no prompts |

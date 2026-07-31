@@ -10,7 +10,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **Template-safe first run:** In a fresh clone, prefer `npm run pull -- <org> --bootstrap` to refresh `.vapi-state.<org>.json` and credential mappings without materializing the target org's resources into `resources/<org>/`. `npm run push -- <org>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
 
-**Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being touched in either direction (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<org>/.vapi-ignore` with gitignore-style patterns. See `resources/.vapi-ignore.example` for syntax and examples. The list is **bidirectional**: matched ids are skipped on pull (never written), on push and `apply` (never sent), and orphan-protected (a `--force` push will not DELETE a dashboard resource whose id matches the ignore). `--force` on push bypasses the load-filter so a deliberate override can flow through, but orphan-protect still applies. A resource that references an ignored resource (e.g. a squad pointing at `assistants/foo` while `assistants/foo` is ignored) is a validation ERROR — `--strict` push aborts before any API call.
+**Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being touched in either direction (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<org>/.vapi-ignore` with gitignore-style patterns. See `resources/.vapi-ignore.example` for syntax and examples. Plain pull, push, and apply skip matched ids. Explicit `--force` pull/push bypasses the write/load filter so a deliberate override can flow through, but ignore protection still applies to deletion: neither force pull reconciliation nor force push orphan cleanup deletes a matched resource. A resource that references an ignored resource (e.g. a squad pointing at `assistants/foo` while `assistants/foo` is ignored) is a validation ERROR — `--strict` push aborts before any API call.
 
 **Learnings & recipes:** Before configuring resources or debugging issues, read the relevant file in **`docs/learnings/`**. Load only what you need:
 
@@ -105,7 +105,9 @@ Runs the engine's local validators against every YAML/MD file in the org without
 
 Drift direction is computed against the per-developer baseline store `.vapi-state-hash/<org>/<uuid>` (gitignored) — the hash of the last platform content *you* pulled or pushed. The committed state file holds only `name → uuid`. See `docs/learnings/sync-behavior.md` for every scenario.
 
-`--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
+`--force` skips all of this and re-materializes local from dashboard. It also removes a stale state-tracked file only when the resource is absent from the unscoped type listing **and** a direct UUID GET returns 404. The delete pass never removes files without a pre-pull state mapping, `.vapi-ignore` matches, ambiguous extension twins, or candidates whose GET fails or still returns a resource. Force materialization may still overwrite a live same-slug file, including an ignored one. ID-scoped pulls never prune. Use `--force` ONLY when you literally need dashboard inventory to replace local truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
+
+`apply --force` intentionally keeps its pull stage non-force and passes `--force` only to push for dashboard-orphan deletion. Run direct `pull --force` when you explicitly want this local stale-file reconciliation.
 
 **Pull-output icon legend.** Distinct semantics in a single pulled-resource line:
 
@@ -119,7 +121,7 @@ Drift direction is computed against the per-developer baseline store `.vapi-stat
 | `⏳` | `--resolve=defer` — 3-way conflict left intact for push's per-resource prompt |
 | `🔒` | Platform-default resource (read-only, immutable) |
 | `🚫` | Matched `.vapi-ignore` (not tracked locally), or a `.bkp` backup copy refused as a resource |
-| `🗑️`  | Locally deleted (deletion intent recorded in state) |
+| `🗑️`  | Local deletion intent recorded in state, or `--force` removed a tracked file after confirming the dashboard resource returns 404 |
 
 Push adds two more: `⏭️` (conflict prompt → kept dashboard, push skipped) and `📄` (conflict prompt → dashboard copy saved as `<name>.<TIMESTAMP>.bkp.<ext>` for manual merge).
 
