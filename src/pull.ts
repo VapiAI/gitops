@@ -36,6 +36,11 @@ import {
 import { readBaseline, writeBaseline } from "./hash-store.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
+  classifyStaleTrackedResources,
+  pruneStaleTrackedResources,
+  warnStaleTrackedResources,
+} from "./prune.ts";
+import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
 } from "./recanonicalize.ts";
@@ -484,6 +489,14 @@ export interface PullStats {
   created: number;
   updated: number;
   skipped: number;
+  /** Local files removed because the dashboard resource is gone (`--force`). */
+  deleted: number;
+  /**
+   * Stale tracked files left on disk. On a plain pull that is every stale
+   * candidate (deletion needs `--force`); on a forced pull it is the ones
+   * protected by `.vapi-ignore`, ambiguous on disk, or unconfirmable.
+   */
+  staleRetained: number;
 }
 
 // `defer` preserves the local file AND the drift baseline (no rewrite, no
@@ -591,7 +604,13 @@ export async function pullResourceType(
 
   if (!Array.isArray(allResources)) {
     console.log(`   ⚠️  No ${resourceType} found (API returned non-array)`);
-    return { created: 0, updated: 0, skipped: 0 };
+    return {
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      deleted: 0,
+      staleRetained: 0,
+    };
   }
 
   let resources = allResources;
@@ -617,6 +636,13 @@ export async function pullResourceType(
 
   const reverseMap = buildReverseMap(state, resourceType);
   const credReverse = credentialReverseMap(state);
+  // Snapshot the pre-pull mappings before the loop rewrites the section. The
+  // diff between this and `newStateSection` is what identifies resources the
+  // dashboard no longer has (see src/prune.ts for the full safety model).
+  const previousStateSection: Record<string, ResourceState> = {
+    ...state[resourceType],
+  };
+  const liveUuids = new Set(allResources.map((resource) => resource.id));
   const newStateSection: Record<string, ResourceState> = resourceIds?.length
     ? { ...state[resourceType] }
     : {};
@@ -627,6 +653,8 @@ export async function pullResourceType(
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let deleted = 0;
+  let staleRetained = 0;
 
   for (const resource of resources) {
     // Check if we already have this resource in state (by UUID).
@@ -915,10 +943,76 @@ export async function pullResourceType(
     );
   }
 
+  // ── Stale-tracked reconciliation ──────────────────────────────────────────
+  //
+  // Runs only after the whole type has been processed, so a mid-loop throw
+  // (API error, write failure) exits before anything is deleted. Skipped for
+  // bootstrap (writes no files, so it has no local inventory to reconcile) and
+  // for ID-scoped pulls, where the response deliberately excludes everything
+  // the operator did not ask for — `newStateSection` starts as a full copy of
+  // prior state there, so nothing looks stale anyway, but the guard states the
+  // intent rather than relying on that.
+  //
+  // A `--type`-scoped pull DOES prune, and correctly so: pruning is per-type
+  // by construction, and a full-type listing is exactly the evidence needed
+  // for that type.
+  if (!bootstrap && !resourceIds?.length) {
+    const stale = classifyStaleTrackedResources({
+      resourceType,
+      previousSection: previousStateSection,
+      newSection: newStateSection,
+      liveUuids,
+    });
+
+    if (stale.length > 0) {
+      if (force) {
+        const pruned = await pruneStaleTrackedResources({
+          stale,
+          fetchById: fetchResourceById,
+        });
+        // A retained managed file must keep its state claim. Otherwise a
+        // transient GET failure or incomplete listing turns it into an
+        // untracked orphan and the next force pull can no longer retry the
+        // reconciliation. Ignored resources are intentionally not managed.
+        for (const { resource, reason } of pruned.retained) {
+          if (reason === "ignored") continue;
+          upsertState(newStateSection, resource.resourceId, {
+            uuid: resource.uuid,
+          });
+        }
+        deleted = pruned.deleted.length;
+        // Only count retentions that actually left a file behind, so the
+        // summary line stays literally true.
+        staleRetained = pruned.retained.reduce(
+          (sum, entry) => sum + entry.resource.filePaths.length,
+          0,
+        );
+      } else {
+        // Plain pull is the preview step for this destructive action. Keep
+        // the mapping and baseline so the recommended follow-up force pull
+        // can still prove the 404 and remove the file. Ignore matches stay
+        // outside managed state by contract; no-file ghosts keep their
+        // historical plain-pull cleanup behavior because there is no local
+        // content to protect or retry.
+        for (const candidate of stale) {
+          if (
+            candidate.disposition === "ignored" ||
+            candidate.disposition === "no-file"
+          )
+            continue;
+          upsertState(newStateSection, candidate.resourceId, {
+            uuid: candidate.uuid,
+          });
+        }
+        staleRetained = warnStaleTrackedResources({ stale });
+      }
+    }
+  }
+
   // Update state with new mappings
   state[resourceType] = newStateSection;
 
-  return { created, updated, skipped };
+  return { created, updated, skipped, deleted, staleRetained };
 }
 
 async function resolveBothDivergedResources(options: {
@@ -1078,6 +1172,12 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
       "\n⚠️  --force will overwrite local files without showing you direction labels or surfacing 3-way conflicts.",
     );
     console.warn(
+      "   It also DELETES tracked local files whose dashboard resource is gone (each confirmed by a 404 GET first).",
+    );
+    console.warn(
+      "   Files without a state mapping and .vapi-ignore matches are never deleted by reconciliation.",
+    );
+    console.warn(
       "   Run `npm run pull -- <org>` (no flag) first to see the drift report.",
     );
     console.warn("   Continuing in 2s — Ctrl+C to abort.");
@@ -1166,6 +1266,9 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     console.log(
       "\n⚡ Force mode: overwriting all local files with platform state",
     );
+    console.log(
+      "   Stale-file reconciliation removes state-tracked files only after a direct 404; no-state and ignored files are not deleted",
+    );
   } else if (bootstrap) {
     console.log(
       "\n🧭 Bootstrap mode: refreshing state and credentials without materializing remote resources",
@@ -1199,7 +1302,13 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   // Credentials are always pulled first — they're needed to reverse-resolve UUIDs in resource files
   await pullCredentials(state);
 
-  const zero: PullStats = { created: 0, updated: 0, skipped: 0 };
+  const zero: PullStats = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    deleted: 0,
+    staleRetained: 0,
+  };
   const stats: Record<ResourceType, PullStats> = {
     tools: { ...zero },
     structuredOutputs: { ...zero },
@@ -1342,6 +1451,14 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     (sum, s) => sum + s.skipped,
     0,
   );
+  const totalDeleted = Object.values(stats).reduce(
+    (sum, s) => sum + s.deleted,
+    0,
+  );
+  const totalStaleRetained = Object.values(stats).reduce(
+    (sum, s) => sum + s.staleRetained,
+    0,
+  );
   console.log(
     "\n═══════════════════════════════════════════════════════════════",
   );
@@ -1351,8 +1468,11 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   );
 
   console.log("📋 Summary:");
-  for (const [type, { created, updated, skipped }] of Object.entries(stats)) {
+  for (const [type, { created, updated, skipped, deleted }] of Object.entries(
+    stats,
+  )) {
     const parts = [`${created} new`, `${updated} updated`];
+    if (deleted > 0) parts.push(`${deleted} deleted`);
     if (skipped > 0) parts.push(`${skipped} skipped`);
     console.log(`   ${type}: ${parts.join(", ")}`);
   }
@@ -1368,9 +1488,34 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
       "       ⬇️  = both diverged, --resolve=theirs (overwrote local)",
     );
     console.log("       📝 = engine wrote/updated file on disk");
-    console.log("       🗑️  = locally deleted (intent in state)");
+    console.log(
+      "       🗑️  = local file already absent (deletion intent kept in state)",
+    );
     console.log(
       `   Run with --force to overwrite: npm run pull -- ${VAPI_ENV} --force`,
+    );
+  }
+
+  if (force && !bootstrap) {
+    console.log(
+      `\n🔒 Force reconciliation complete${totalDeleted > 0 ? `: ${totalDeleted} platform-confirmed stale file(s) removed` : ""}.`,
+    );
+    console.log(
+      "   A tracked file is removed only after its dashboard UUID returns 404; the delete pass preserved no-state and ignored files.",
+    );
+    if (totalStaleRetained > 0) {
+      console.log(
+        `   ⚠️  ${totalStaleRetained} stale tracked file(s) were NOT removed — see the reasons above.`,
+      );
+    }
+  } else if (!bootstrap && totalStaleRetained > 0) {
+    // The Riley case: a resource deleted on the dashboard whose local file
+    // survived every pull without a word of output. Plain pull now says so.
+    console.log(
+      `\n   ⚠️  ${totalStaleRetained} tracked local file(s) are no longer in the dashboard listing (retained — plain pull never deletes).`,
+    );
+    console.log(
+      `   Confirm with \`npm run audit -- ${VAPI_ENV}\`, then \`npm run pull -- ${VAPI_ENV} --force\` to remove them.`,
     );
   }
 

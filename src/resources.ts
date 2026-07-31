@@ -1,6 +1,15 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
-import { basename, dirname, extname, join, relative, resolve } from "path";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "path";
 import { parse as parseYaml } from "yaml";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import { isBackupCopyFile } from "./slug-utils.ts";
@@ -126,17 +135,52 @@ function parseResourceDataFromFile(filePath: string): Record<string, unknown> {
   return data;
 }
 
+// Every on-disk file that could back `<type>/<resourceId>`. Normally 0 or 1
+// entries. More than one means the repo carries duplicate-extension twins
+// (`foo.yml` + `foo.yaml`) — the loader already refuses that pair, and prune
+// refuses to delete it rather than guess which one is authoritative.
+//
+export function listLocalResourceFiles(
+  type: ResourceType,
+  resourceId: string,
+): string[] {
+  const dir = resolve(RESOURCES_DIR, FOLDER_MAP[type]);
+  if (!existsSync(dir)) return [];
+
+  const realDir = realpathSync(dir);
+  const staysWithin = (root: string, candidate: string): boolean => {
+    const rel = relative(root, candidate);
+    return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+  };
+
+  const files: string[] = [];
+  for (const ext of VALID_EXTENSIONS) {
+    const filePath = resolve(dir, `${resourceId}${ext}`);
+    if (!staysWithin(dir, filePath) || !existsSync(filePath)) continue;
+
+    // A nested directory may itself be a symlink. Resolve the parent before
+    // returning a path to destructive callers so an in-tree-looking state key
+    // cannot unlink a file outside this resource type's real directory.
+    try {
+      if (!staysWithin(realDir, realpathSync(dirname(filePath)))) continue;
+    } catch {
+      continue;
+    }
+    files.push(filePath);
+  }
+  return files;
+}
+
 function findLocalResourceFile(
   type: ResourceType,
   resourceId: string,
 ): string | undefined {
-  const dir = join(RESOURCES_DIR, FOLDER_MAP[type]);
-  for (const ext of VALID_EXTENSIONS) {
-    if (ext === ".ts") continue;
-    const filePath = join(dir, `${resourceId}${ext}`);
-    if (existsSync(filePath)) return filePath;
-  }
-  return undefined;
+  // TypeScript resources are loaded by executing the module and cannot be
+  // content-hashed as YAML. They still belong in the complete local inventory
+  // above so destructive reconciliation cannot strand a tracked `.ts` file.
+  return listLocalResourceFiles(type, resourceId).find(
+    (filePath) => extname(filePath) !== ".ts",
+  );
 }
 
 /** Stable content hash of a local resource file (same basis as lastPulledHash). */

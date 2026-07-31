@@ -127,7 +127,7 @@ Pass an org slug as the first argument to skip interactive prompts:
 # Pull everything for an org
 npm run pull -- my-org
 
-# Force pull (overwrite local changes)
+# Force pull (replace local inventory with confirmed dashboard truth)
 npm run pull -- my-org --force
 
 # Push only assistants
@@ -676,11 +676,14 @@ pull (default)     pull --force        push
 ─────────────      ─────────────       ─────────────
 Download from      Download from       Upload local
 platform, skip     platform, overwrite files to
-locally changed    everything          platform
-files
+locally changed    files, and remove   platform
+files              confirmed-gone
+                   tracked files
 ```
 
-**`pull`** — downloads platform state. Detects locally modified files and skips them (your work is preserved). Use `--force` to overwrite everything.
+**`pull`** — downloads platform state. Detects locally modified files and skips them (your work is preserved). Use `--force` to overwrite files from live dashboard resources and remove stale state-tracked files only after a direct UUID GET confirms the dashboard resource is gone. The delete pass never removes files without a pre-pull state mapping or `.vapi-ignore` matches; force materialization can still overwrite a live same-slug file.
+
+**`apply --force`** keeps the pull stage non-force and enables dashboard-orphan deletion in the push stage. Run direct `pull --force` when you want local stale-file reconciliation.
 
 **`push`** — reads local files and syncs them to the platform. Handles creates, updates, and deletions.
 

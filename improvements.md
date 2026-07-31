@@ -78,6 +78,7 @@ you which stack PR closes the row.**
 | 24  | Bare `push` is too easy to use as the deploy path        | Raw push skips apply's validate+pull safety        | None       | Open — mitigated by per-resource drift gate |
 | 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
 | 26  | Rollback is snapshot replay, not transaction rollback     | Creates/deletes/state drift are not fully undone   | #3         | Open — document/plan transactional rollback     |
+| 27  | Force pull stranded dashboard-deleted tracked files       | Stale files became orphan creates after sync       | None       | RESOLVED 2026-07-31 (#49)                       |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, and `#24–#26`. Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1295,6 +1296,54 @@ npm run rollback -- <org> --to <timestamp> --confirm <org>
 
 **Open.** Current rollback is valuable snapshot replay; it should not be treated
 as a transactional deploy rollback until create/delete/state coverage exists.
+
+---
+
+## 27. Force pull stranded dashboard-deleted tracked files
+
+**[RESOLVED 2026-07-31] (#49)**
+
+**Discovered:** a dashboard-deleted assistant file survived repeated
+`pull --force` runs and later surfaced as an orphan-YAML create candidate.
+
+### Problem
+
+`pull --force` overwrote resources returned by the dashboard but did not remove
+local files for state-tracked resources that the dashboard no longer returned.
+
+### Current behavior (Verified)
+
+Before this change, `pullResourceType` rebuilt each state section solely from
+the dashboard listing. A missing dashboard resource therefore lost its state
+mapping while its file and hash baseline remained. The file became untracked,
+so the orphan-YAML gate blocked the next push or `--allow-new-files` could
+recreate the resource.
+
+### Risk
+
+A forced pull claimed to re-materialize dashboard truth but left deleted
+resources active in the local declarative tree. Operators could accidentally
+recreate a deliberately deleted resource.
+
+### Current mitigation
+
+Before the fix, run `npm run audit -- <org>`, identify each local orphan, and
+delete the confirmed-stale file and mapping by hand before pushing.
+
+### Possible fix
+
+Implemented in `src/pull.ts:943-1006` and `src/prune.ts:1-237`: classify only
+pre-pull state mappings absent from the unscoped listing, protect untracked and
+ignored files, and require a direct UUID GET to return 404 before removing the
+file and baseline. Plain pulls and inconclusive force pulls retain managed state
+so a later force pull can retry. Regression coverage is in
+`tests/prune.test.ts` and `tests/pull-force-prune.test.ts`.
+
+### Status
+
+**RESOLVED 2026-07-31 (#49).** Forced pulls now prune only platform-confirmed
+stale tracked files; scoped pulls and unsafe or ambiguous candidates retain
+their files.
 
 ---
 
