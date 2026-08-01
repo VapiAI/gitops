@@ -79,6 +79,7 @@ you which stack PR closes the row.**
 | 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
 | 26  | Rollback is snapshot replay, not transaction rollback     | Creates/deletes/state drift are not fully undone   | #3         | Open — document/plan transactional rollback     |
 | 27  | List endpoints read one unpaginated page at a time        | >100-resource fleets got truncated orphan detection | None       | RESOLVED 2026-08-01 (consumers gap open)        |
+| 28  | Handoff tools 400 on first push into an empty org          | Push aborts before the assistant-linking pass runs  | None       | RESOLVED 2026-08-01                             |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1363,6 +1364,62 @@ Two details are load-bearing, both covered by `tests/list-pagination.test.ts`:
 so they still report confidently on a partial view. `cleanup.ts` has its own local
 `vapiGet` and stays unpaginated (`src/cleanup.ts:193`); it fails safe, since a
 truncated listing finds *fewer* dashboard orphans to delete.
+
+## 28. Handoff/transfer tools 400 on a first push into an empty org
+
+**[RESOLVED 2026-08-01]**
+
+**Discovered:** on a customer repo. `PATCH /tool/d787c351… → 400 Assistant with
+ID "clinical-stage-1-a4598432" not found`, aborting the whole push.
+
+### Problem
+
+Tools are applied before assistants, because assistants reference tools. A
+handoff/transfer tool references an *assistant*, which inverts the dependency for
+that subset — a genuine cycle. The update path sent the unresolved assistant slug
+to the API, which rejected it.
+
+### Current behavior (Verified)
+
+The engine already resolves the cycle in two passes. `applyTool`
+(`src/push.ts`) strips unresolved assistant destinations from the **create**
+payload, and `updateToolAssistantRefs` PATCHes the real destinations once every
+assistant exists. The **update** payload had no equivalent: it was
+`removeExcludedKeys(payload, "tools")` with the raw slug still in
+`destinations[].assistantId`. Any tool that already existed on the platform while
+its referenced assistant was not yet in state produced a 400, and because
+`applyTool` rethrows, the push aborted before the linking pass ran.
+
+Reproduces whenever a tool exists remotely and its assistant does not exist
+locally in state — a first push into an empty org, a re-pointed handoff, or a
+`--type tools` push.
+
+### Risk
+
+A first push into a fresh org fails partway with an error that names an assistant
+rather than the tool, so the cause reads as an assistant problem. Resources
+applied before the failing tool stay applied, so the org is left half-configured.
+
+### Current mitigation
+
+Push assistants first (`npm run push -- <org> --type assistants`), then push
+everything.
+
+### Possible fix
+
+Implemented: `omitUnresolvedDestinations` drops the whole `destinations` key from
+the update payload when any entry is unresolved, letting the existing linking pass
+set the real value.
+
+Omitting the key matters more than filtering the array. Vapi PATCH replaces the
+keys it receives, so sending a filtered array would wipe destinations that are
+live on the dashboard whenever the referenced assistant is merely untracked
+locally. An absent key is left alone. Covered by
+`tests/tool-assistant-cycle.test.ts`.
+
+### Status
+
+**RESOLVED 2026-08-01.**
 
 ---
 

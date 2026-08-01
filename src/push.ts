@@ -604,10 +604,28 @@ export async function applyTool(
     stateSection: state.tools,
     fullState: state,
     updateEndpoint: `/tool/${existingUuid}`,
-    updatePayload: removeExcludedKeys(payload, "tools"),
+    updatePayload: omitUnresolvedDestinations(
+      removeExcludedKeys(payload, "tools"),
+      data as Record<string, unknown>,
+    ),
     createEndpoint: "/tool",
     createPayload: payloadForCreate,
   });
+}
+
+// A destination is unresolved when reference resolution left the assistantId
+// exactly as the file wrote it — i.e. the slug is not in state yet, so no UUID
+// could be substituted.
+function isUnresolvedDestination(
+  resolvedDest: Record<string, unknown> | undefined,
+  originalDest: Record<string, unknown> | undefined,
+): boolean {
+  if (!resolvedDest || typeof resolvedDest.assistantId !== "string")
+    return false;
+  if (!originalDest || typeof originalDest.assistantId !== "string")
+    return false;
+  const originalId = (originalDest.assistantId as string).split("##")[0]?.trim();
+  return resolvedDest.assistantId === originalId;
 }
 
 // Strip destinations with unresolved assistantIds (where original equals resolved = not found in state)
@@ -622,17 +640,45 @@ function stripUnresolvedAssistantDestinations(
   const originalDests = original.destinations as Record<string, unknown>[];
   const resolvedDests = resolved.destinations as Record<string, unknown>[];
 
-  // Filter out destinations where assistantId wasn't resolved (still matches original)
-  const filteredDests = resolvedDests.filter((dest, idx) => {
-    if (typeof dest.assistantId !== "string") return true;
-    const origDest = originalDests[idx];
-    if (!origDest || typeof origDest.assistantId !== "string") return true;
-    // Keep if resolved (UUID format) or no original assistantId
-    const originalId = (origDest.assistantId as string).split("##")[0]?.trim();
-    return dest.assistantId !== originalId;
-  });
+  const filteredDests = resolvedDests.filter(
+    (dest, idx) => !isUnresolvedDestination(dest, originalDests[idx]),
+  );
 
   return { ...resolved, destinations: filteredDests };
+}
+
+// The update-path counterpart, and the reason a first push into an empty org
+// used to fail with `400 Assistant with ID "<slug>" not found`.
+//
+// Tools are applied before assistants (tools are a dependency of assistants),
+// but a handoff/transfer tool references an assistant — a genuine cycle. On a
+// CREATE the unresolved destinations are stripped and `updateToolAssistantRefs`
+// links them once every assistant exists. The UPDATE path had no equivalent, so
+// it sent the raw slug, the API rejected it, and the push aborted before the
+// linking pass could run.
+//
+// This omits the whole `destinations` key rather than sending a filtered array:
+// PATCH replaces the keys it receives, so a filtered array would wipe
+// destinations that are live on the dashboard whenever the local assistant is
+// merely untracked (a `--type tools` push, for instance). Omitting the key
+// leaves the platform value untouched, and the linking pass sets the real value.
+export function omitUnresolvedDestinations(
+  payload: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(payload.destinations)) return payload;
+
+  const originalDests = Array.isArray(original.destinations)
+    ? (original.destinations as Record<string, unknown>[])
+    : [];
+  const anyUnresolved = (
+    payload.destinations as Record<string, unknown>[]
+  ).some((dest, idx) => isUnresolvedDestination(dest, originalDests[idx]));
+
+  if (!anyUnresolved) return payload;
+
+  const { destinations: _omitted, ...rest } = payload;
+  return rest;
 }
 
 export async function applyStructuredOutput(

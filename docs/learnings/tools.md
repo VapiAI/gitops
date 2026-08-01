@@ -466,3 +466,18 @@ The LLM produces only `name` and `email` (what the caller spoke). The orchestrat
 For belt-and-braces, pair static parameters with HMAC body signing so the backend verifies sender + content, not just channel.
 
 For the trust-tier breakdown of which Liquid variables are safe to use here (`{{ customer.number }}`, `{{ call.id }}`, etc.) vs. which are LLM-derived and not, see [assistants.md → Liquid Variable Bag and Trust Tiers](assistants.md#liquid-variable-bag-and-trust-tiers).
+
+## Handoff/transfer tools reference assistants (dependency cycle)
+
+Tools are pushed before assistants, because assistants reference tools. A
+handoff or transfer tool references an assistant, which inverts that for the
+tool in question. The engine handles it in two passes: the tool is created (or
+updated) without its unresolved assistant destinations, then a linking pass
+PATCHes the real destinations once every assistant exists.
+
+Consequence worth knowing: on a push where the referenced assistant is not in
+state, the tool's `destinations` are deliberately **not** sent. They are set by
+the linking pass at the end of the same push. If you scope a push to
+`--type tools` while the assistant is untracked, the destinations on the
+dashboard are left as-is rather than cleared — the engine omits the key instead
+of sending a partial array, because PATCH replaces whatever it receives.
