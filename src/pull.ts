@@ -667,6 +667,93 @@ function findLocalResourcePath(
   ].find((p) => existsSync(p));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Conflict timing context
+//
+// A 3-way conflict report used to show three 8-character hash prefixes, which
+// tell a human nothing about which side to keep. Timestamps do — but only as a
+// hint, never as the decision:
+//
+//   - `updatedAt` is bumped by OUR OWN pushes, so a "newer" dashboard often just
+//     means you pushed a few minutes ago, not that a teammate changed anything.
+//   - the local mtime is reset by `git clone` and `git checkout`, so on a fresh
+//     checkout every file looks like it was edited seconds ago.
+//   - "later" does not mean "supersedes". Two edits to different fields both
+//     deserve to survive, and last-write-wins would silently discard one.
+//
+// So this is printed to help a human pick a `--resolve` mode. The engine still
+// refuses to choose. A previous schema stored `lastPulledAt` for this and it was
+// deliberately dropped in favour of content hashes; nothing here brings it back.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatAge(ms: number): string {
+  const mins = Math.round(ms / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function isoMinute(date: Date): string {
+  return `${date.toISOString().slice(0, 16).replace("T", " ")}Z`;
+}
+
+/**
+ * Human-readable timing for one conflicted resource, or `undefined` when
+ * neither side offers a usable timestamp. Exported for tests.
+ */
+export function conflictTimingHint(options: {
+  dashboardUpdatedAt?: unknown;
+  localModifiedMs?: number;
+}): string | undefined {
+  const remote =
+    typeof options.dashboardUpdatedAt === "string"
+      ? new Date(options.dashboardUpdatedAt)
+      : undefined;
+  const remoteOk = remote && !Number.isNaN(remote.getTime());
+  const local =
+    typeof options.localModifiedMs === "number" &&
+    Number.isFinite(options.localModifiedMs)
+      ? new Date(options.localModifiedMs)
+      : undefined;
+
+  if (!remoteOk && !local) return undefined;
+  if (remoteOk && !local) return `dashboard changed ${isoMinute(remote)}`;
+  if (!remoteOk && local) return `your file changed ${isoMinute(local)}`;
+
+  const delta = remote!.getTime() - local!.getTime();
+  const which =
+    Math.abs(delta) < 60_000
+      ? "within a minute of each other"
+      : delta > 0
+        ? `dashboard is ${formatAge(delta)} newer`
+        : `your file is ${formatAge(-delta)} newer`;
+  return `dashboard changed ${isoMinute(remote!)}, your file ${isoMinute(local!)} — ${which}`;
+}
+
+// Reads the local file's mtime for the timing hint. Returns undefined rather
+// than throwing: a missing file or an unreadable stat must never break the
+// conflict report.
+function localModifiedMs(
+  resourceType: ResourceType,
+  resourceId: string,
+): number | undefined {
+  try {
+    const path = findLocalResourcePath(FOLDER_MAP[resourceType], resourceId);
+    return path ? statSync(path).mtimeMs : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function timingLine(entry: BothDivergedResource): string {
+  const hint = conflictTimingHint({
+    dashboardUpdatedAt: entry.resource.updatedAt,
+    localModifiedMs: localModifiedMs(entry.resourceType, entry.resourceId),
+  });
+  return hint ? `\n       ${hint}` : "";
+}
+
 export interface PullOptions {
   force?: boolean;
   bootstrap?: boolean;
@@ -1057,7 +1144,8 @@ async function resolveBothDivergedResources(options: {
     );
     for (const entry of bothDiverged) {
       console.log(
-        `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}`,
+        `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}` +
+          timingLine(entry),
       );
     }
     return { exitCode: 0 };
@@ -1070,7 +1158,8 @@ async function resolveBothDivergedResources(options: {
     for (const entry of bothDiverged) {
       console.error(
         `     - ${entry.resourceType}/${entry.resourceId}\n` +
-          `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…`,
+          `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…` +
+          timingLine(entry),
       );
     }
     return { exitCode: 1 };
@@ -1084,7 +1173,8 @@ async function resolveBothDivergedResources(options: {
     for (const entry of bothDiverged) {
       console.error(
         `     - ${FOLDER_MAP[entry.resourceType]}/${entry.resourceId}\n` +
-          `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…`,
+          `       local-hash: ${entry.localHash.slice(0, 8)}…   platform-hash: ${entry.platformHash.slice(0, 8)}…   last-pulled: ${entry.lastPulledHash.slice(0, 8)}…` +
+          timingLine(entry),
       );
     }
     console.error(
@@ -1095,6 +1185,15 @@ async function resolveBothDivergedResources(options: {
     );
     console.error(
       "     --resolve=fail   exit non-zero without writing anything (CI mode — fail the build so a human investigates)",
+    );
+    console.error(
+      "\n     Timestamps above are a hint, not a verdict: your own pushes bump the dashboard's",
+    );
+    console.error(
+      "     updatedAt, and git clone/checkout resets local file times. Newer does not mean correct —",
+    );
+    console.error(
+      "     two edits to different fields both deserve to survive.",
     );
     return { exitCode: 1 };
   }

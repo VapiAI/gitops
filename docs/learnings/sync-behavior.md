@@ -99,6 +99,35 @@ UUIDs → names):
 | `apply` (default `--resolve=defer`) | pull defers → push prompts for **exactly the conflicted resources**; clean ones flow silently |
 | `apply --resolve=ours` | no questions: pull re-baselines, push runs with `--overwrite` (CI semantics; dashboard edits lose) |
 
+### Conflict timing context (advisory)
+
+When a 3-way conflict is reported, each entry carries a timing line beside the
+hashes:
+
+```
+     - assistants/intake
+       local-hash: 3f9a1c2b…   platform-hash: 8e01d4aa…   last-pulled: 3f9a1c2b…
+       dashboard changed 2026-08-01 15:00Z, your file 2026-08-01 12:00Z — dashboard is 3h newer
+```
+
+It is a hint, never a verdict, and the engine still refuses to choose. Three
+reasons it cannot be trusted as one:
+
+- `updatedAt` is bumped by **our own pushes**, so a "newer" dashboard often just
+  means you pushed a few minutes ago.
+- The local mtime is reset by `git clone` and `git checkout`, so on a fresh
+  checkout every file looks edited seconds ago.
+- **Later does not mean supersedes.** If you changed the prompt and a teammate
+  changed the voice, both edits deserve to survive; last-write-wins would discard
+  one silently.
+
+Sub-minute gaps are reported as "within a minute of each other" rather than
+picking a winner, because clock skew is the same order of magnitude as the gap.
+
+A previous state schema stored `lastPulledAt` for this purpose and it was
+deliberately removed in favour of content hashes. This line reads `updatedAt`
+from the live response and the file's mtime at report time; it persists nothing.
+
 ### 5. Both changed identically (L = D, stale baseline)
 
 Both `pull` and `push` treat this as clean (live sides agree — nothing to
