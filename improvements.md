@@ -78,8 +78,9 @@ you which stack PR closes the row.**
 | 24  | Bare `push` is too easy to use as the deploy path        | Raw push skips apply's validate+pull safety        | None       | Open — mitigated by per-resource drift gate |
 | 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
 | 26  | Rollback is snapshot replay, not transaction rollback     | Creates/deletes/state drift are not fully undone   | #3         | Open — document/plan transactional rollback     |
+| 27  | List endpoints read one unpaginated page at a time        | >100-resource fleets got truncated orphan detection | None       | RESOLVED 2026-08-01 (consumers gap open)        |
 
-**Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, and `#24–#26`. Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
+**Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
 ---
 
@@ -1295,6 +1296,73 @@ npm run rollback -- <org> --to <timestamp> --confirm <org>
 
 **Open.** Current rollback is valuable snapshot replay; it should not be treated
 as a transactional deploy rollback until create/delete/state coverage exists.
+
+---
+
+## 27. List endpoints were read one unpaginated page at a time
+
+**[RESOLVED 2026-08-01]**
+
+**Discovered:** while reviewing force-pull reconciliation. Any feature that reads
+"absent from the listing" as "deleted" would have been wrong for every resource
+past the first hundred.
+
+### Problem
+
+`fetchAllResources` issued exactly one GET per resource type with no `limit` and
+no cursor. Vapi list endpoints cap a response at 100 items, so for any org with
+more than 100 resources of a type the engine silently operated on a truncated
+inventory.
+
+### Current behavior (Verified)
+
+Every consumer that decides *what exists* from a listing was affected:
+`push.ts:452-506` flags a tracked resource absent from the listing as
+`missing_remote` and drops its state mapping, `delete.ts` treats listing absence
+as an orphan, `audit` reports on the same data, and `pullCredentials` builds the
+credential reverse-map from it — a truncated credential list leaves raw UUIDs in
+YAML the reverse-map was supposed to resolve.
+
+Confirmed against the live API (2026-08-01): all nine list endpoints accept
+`?limit=` and `?createdAtLe=`, and `createdAtLe` genuinely filters.
+
+### Risk
+
+Silent and size-dependent: correct for small orgs, wrong for large ones, with no
+output distinguishing the two.
+
+### Current mitigation
+
+None before the fix. Operators on large fleets had to know not to trust
+orphan-detection output.
+
+### Possible fix
+
+Implemented as `fetchPagedList` in `src/pull.ts`: page backwards through
+`createdAt` (the only cursor these endpoints offer) until a short page proves the
+end, dedupe by id, and return a `complete` verdict alongside the resources.
+`fetchAllResources` and `fetchCredentials` are wrappers, so pull, push, delete,
+and audit all get the completed pages.
+
+Two details are load-bearing, both covered by `tests/list-pagination.test.ts`:
+
+- The **first** request carries `?limit` too. Without it, completeness was decided
+  by comparing a response capped at the API's *default* page size against
+  `LIST_PAGE_SIZE` — correct only while those two numbers happen to be equal. Had
+  the API default ever dropped below `LIST_PAGE_SIZE`, a capped response would
+  have read as complete.
+- The cursor is `createdAtLe`, not `createdAtLt`. An exclusive cursor drops every
+  item sharing the boundary timestamp with the previous page's oldest, and
+  bulk-created fleets do collide; inclusive re-reads the boundary item, which the
+  id map dedupes.
+
+### Status
+
+**RESOLVED 2026-08-01** for the listings themselves. Open remainder: `push`,
+`delete`, and `audit` consume the paged resources but not the `complete` verdict,
+so they still report confidently on a partial view. `cleanup.ts` has its own local
+`vapiGet` and stays unpaginated (`src/cleanup.ts:193`); it fails safe, since a
+truncated listing finds *fewer* dashboard orphans to delete.
 
 ---
 

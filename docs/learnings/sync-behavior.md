@@ -141,6 +141,21 @@ additional ownership boundary.
 | `push` | drift GET hits 404 → stale state mapping dropped, baseline deleted, resource **skipped this run** with a warning. The file is now case A — the next push hits the orphan gate, and `--allow-new-files` recreates it (deliberately requires re-confirmation). |
 | `pull` | resource absent from the dashboard list → its state entry drops out of the rewritten state file; the local file remains and becomes case A |
 
+### Listing completeness
+
+Vapi list endpoints return at most 100 items per request and offer no page
+cursor, only `createdAt` comparison filters. `fetchAllResources` pages backwards
+through `createdAt` until a short page proves it reached the end, deduping by id
+(the cursor is inclusive, so an item sharing the boundary timestamp is re-read
+rather than skipped).
+
+If the walk cannot be completed — the endpoint ignores the cursor params, the
+payload carries no `createdAt`, or the page-count backstop trips — the engine
+warns and the listing must be treated as a partial view. Anything that reads
+"absent from the listing" as "deleted on the dashboard" is wrong on a partial
+view; that includes push's `missing_remote` detection and `delete`'s orphan
+sweep, which consume the resources today without consuming the verdict.
+
 ### E. Fresh clone / new developer (L + S committed, but B is per-dev and missing)
 
 | Command | Behavior |

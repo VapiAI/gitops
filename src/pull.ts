@@ -153,23 +153,138 @@ export function preserveExplicitOursPaths(
 // API Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function fetchAllResources(
-  resourceType: ResourceType,
-): Promise<VapiResource[]> {
-  const endpoint = ENDPOINT_MAP[resourceType];
-  const data = await vapiGet<unknown>(endpoint);
+// Vapi list endpoints cap a response at 100 items (`limit` defaults to 100) and
+// expose no page cursor — only `createdAt` comparison filters. One GET per type
+// therefore truncates any fleet bigger than a page, silently, and everything
+// that decides *what exists* from a listing inherits the truncation: pull's
+// materialization, push's invalid-mapping detection, `delete`'s orphan sweep,
+// and `audit`.
+const LIST_PAGE_SIZE = 100;
+// 50 pages = 5k resources of one type. A runaway-loop backstop, not a real cap.
+const LIST_MAX_PAGES = 50;
 
-  // Handle paginated response format (e.g., structured-output returns { results: [], metadata: {} })
+// Anything a list endpoint can return. Both `VapiResource` and `VapiCredential`
+// satisfy it, so the pager below serves resource types and credentials alike.
+type Listable = { id: string; createdAt?: unknown };
+
+function unwrapListResponse<T extends Listable>(data: unknown): T[] {
+  // Some endpoints wrap (e.g. structured-output returns { results, metadata }).
   if (
     data &&
     typeof data === "object" &&
     "results" in data &&
     Array.isArray((data as Record<string, unknown>).results)
   ) {
-    return (data as { results: VapiResource[] }).results;
+    return (data as { results: T[] }).results;
+  }
+  return data as T[];
+}
+
+// Compared as strings: Vapi emits `createdAt` as UTC ISO 8601 (`...Z`), which
+// sorts lexicographically. Anything that is not a string is skipped, and a page
+// with no usable timestamp stops paging rather than guessing a cursor.
+function oldestCreatedAt(resources: Listable[]): string | undefined {
+  let oldest: string | undefined;
+  for (const resource of resources) {
+    const createdAt = resource.createdAt;
+    if (typeof createdAt !== "string") continue;
+    if (!oldest || createdAt < oldest) oldest = createdAt;
+  }
+  return oldest;
+}
+
+interface PagedListing<T> {
+  resources: T[];
+  /** True only when the engine can prove it saw every item of this type. */
+  complete: boolean;
+}
+
+async function fetchPagedList<T extends Listable>(
+  endpoint: string,
+  label: string,
+): Promise<PagedListing<T>> {
+  // Send `limit` on the FIRST request too, so the page size is ours rather than
+  // whatever the endpoint defaults to. Without it, completeness is decided by
+  // comparing a response capped at the API's default against LIST_PAGE_SIZE —
+  // correct only while those two numbers happen to be equal.
+  let first: T[];
+  try {
+    first = unwrapListResponse<T>(
+      await vapiGet<unknown>(`${endpoint}?limit=${LIST_PAGE_SIZE}`),
+    );
+  } catch (error) {
+    // An endpoint that rejects `limit` still has to work. Fall back to the bare
+    // request, but do not claim completeness: without a known page size there is
+    // nothing to compare the length against.
+    console.warn(
+      `   ⚠️  ${label}: list endpoint rejected ?limit (${error instanceof Error ? error.message : String(error)}); listing cannot be proven complete`,
+    );
+    const bare = unwrapListResponse<T>(await vapiGet<unknown>(endpoint));
+    return { resources: bare, complete: false };
+  }
+  if (!Array.isArray(first)) return { resources: first, complete: false };
+
+  // A short first page proves we saw everything in one request — the common case
+  // pays nothing for paging.
+  if (first.length < LIST_PAGE_SIZE) return { resources: first, complete: true };
+
+  // A full page means the response was capped. Walk backwards through
+  // `createdAt`, the only cursor these endpoints offer.
+  const byId = new Map(first.map((resource) => [resource.id, resource]));
+  let cursor = oldestCreatedAt(first);
+  let complete = false;
+  let pages = 1;
+
+  for (; cursor && pages <= LIST_MAX_PAGES; pages++) {
+    let batch: T[];
+    try {
+      // `createdAtLe`, not `Lt`: an exclusive cursor silently drops every item
+      // sharing the boundary timestamp with the previous page's oldest (bulk
+      // created fleets do collide). Inclusive re-reads the boundary item, which
+      // the id map dedupes for free.
+      batch = unwrapListResponse<T>(
+        await vapiGet<unknown>(
+          `${endpoint}?limit=${LIST_PAGE_SIZE}&createdAtLe=${encodeURIComponent(cursor)}`,
+        ),
+      );
+    } catch (error) {
+      console.warn(
+        `   ⚠️  ${label}: could not page past ${byId.size} (${error instanceof Error ? error.message : String(error)})`,
+      );
+      break;
+    }
+    if (!Array.isArray(batch)) break;
+
+    const sizeBefore = byId.size;
+    for (const resource of batch) byId.set(resource.id, resource);
+    if (batch.length < LIST_PAGE_SIZE) {
+      complete = true;
+      break;
+    }
+    // No new ids, or a cursor that will not move: paging is not working on this
+    // endpoint (params ignored, or every item shares one timestamp).
+    const nextCursor = oldestCreatedAt(batch);
+    if (byId.size === sizeBefore || !nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
   }
 
-  return data as VapiResource[];
+  const resources = [...byId.values()];
+  if (!complete) {
+    console.warn(
+      `   ⚠️  ${label}: listing may be incomplete (${resources.length} fetched, ${pages} request(s)). Anything that infers "deleted" from absence should not trust it.`,
+    );
+  }
+  return { resources, complete };
+}
+
+export async function fetchAllResources(
+  resourceType: ResourceType,
+): Promise<VapiResource[]> {
+  const { resources } = await fetchPagedList<VapiResource>(
+    ENDPOINT_MAP[resourceType],
+    resourceType,
+  );
+  return resources;
 }
 
 export async function fetchResourceById(
@@ -197,7 +312,11 @@ interface VapiCredential {
 }
 
 async function fetchCredentials(): Promise<VapiCredential[]> {
-  return vapiGet<VapiCredential[]>("/credential");
+  // Paged for the same reason resource types are: a truncated credential list
+  // leaves raw UUIDs in the YAML that the credential reverse-map exists to
+  // resolve.
+  return (await fetchPagedList<VapiCredential>("/credential", "credentials"))
+    .resources;
 }
 
 function credentialSlug(cred: VapiCredential): string {
