@@ -476,8 +476,24 @@ updated) without its unresolved assistant destinations, then a linking pass
 PATCHes the real destinations once every assistant exists.
 
 Consequence worth knowing: on a push where the referenced assistant is not in
-state, the tool's `destinations` are deliberately **not** sent. They are set by
-the linking pass at the end of the same push. If you scope a push to
+state, the tool's `destinations` are deliberately **not** sent by the main
+create/update. They are set by the linking pass at the end of the same push,
+once every assistant in the push has been applied. If you scope a push to
 `--type tools` while the assistant is untracked, the destinations on the
 dashboard are left as-is rather than cleared — the engine omits the key instead
 of sending a partial array, because PATCH replaces whatever it receives.
+
+The linking pass itself can still find an unresolved destination — not
+"not yet applied this push" but genuinely absent from both state and the
+local repo. In that case it does **not** send the raw slug. It **skips that
+tool** and logs a warning naming the unresolved reference(s):
+
+```
+⚠️  Tool "<tool-id>" still references unresolved assistant destination(s): <slug>. Leaving this tool's destinations untouched on the platform — they will link on a future push once those assistants exist.
+```
+
+The rest of the push continues normally, and the destinations link
+automatically on a later push once the assistant exists. Previously the
+linking pass sent the raw slug straight through, and the API's `400
+Assistant not found` aborted the whole push at the very end — after every
+other resource had already applied.
