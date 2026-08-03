@@ -19,7 +19,13 @@ import test from "node:test";
 process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
-const { omitUnresolvedDestinations } = await import("../src/push.ts");
+const {
+  omitUnresolvedDestinations,
+  unresolvedDestinationSlugs,
+  updateToolAssistantRefs,
+} = await import("../src/push.ts");
+
+import type { ResourceFile, StateFile } from "../src/types.ts";
 
 const UUID = "8f14e45f-ceea-467a-9f1b-1a1b2c3d4e5f";
 
@@ -113,4 +119,127 @@ test("non-assistant destinations never block the update", async () => {
   };
   const result = omitUnresolvedDestinations(payload, payload);
   assert.ok("destinations" in result);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `updateToolAssistantRefs` runs AFTER every other resource has already
+// applied — it is the linking pass, not the initial create. Today it
+// unconditionally PATCHes `resolved.destinations`, so a destination whose
+// assistant is genuinely absent (not in state, not in the local repo) still
+// carries a raw slug and the API answers `400 Assistant with ID "<slug>" not
+// found`, aborting the whole push at the very end. `unresolvedDestinationSlugs`
+// is the guard: it reports which destinations still carry a slug post-
+// resolution so the linking pass can skip that tool and warn instead of
+// PATCHing garbage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("unresolvedDestinationSlugs: a slug entry is reported", () => {
+  const result = unresolvedDestinationSlugs([
+    { type: "assistant", assistantId: "clinical-stage-1" },
+  ]);
+  assert.deepEqual(result, ["clinical-stage-1"]);
+});
+
+test("unresolvedDestinationSlugs: a trailing YAML comment is stripped before reporting", () => {
+  const result = unresolvedDestinationSlugs([
+    { type: "assistant", assistantId: "clinical-stage-1 ## stage one" },
+  ]);
+  assert.deepEqual(result, ["clinical-stage-1"]);
+});
+
+test("unresolvedDestinationSlugs: an array of only UUID assistantIds reports nothing", () => {
+  // Raw UUIDs are never "unresolved" here — the CREATE path already strips
+  // any destination whose resolved value equals the original, so a UUID that
+  // reaches this helper is either a genuinely resolved reference or an
+  // untracked-but-valid raw UUID the author wrote directly. Either way it must
+  // flow to the PATCH, not get reported as unresolved.
+  const result = unresolvedDestinationSlugs([
+    { type: "assistant", assistantId: UUID },
+  ]);
+  assert.deepEqual(result, []);
+});
+
+test("unresolvedDestinationSlugs: non-assistant destinations are not reported", () => {
+  const result = unresolvedDestinationSlugs([
+    { type: "number", number: "+15550000000" },
+  ]);
+  assert.deepEqual(result, []);
+});
+
+test("unresolvedDestinationSlugs: non-array input returns an empty list", () => {
+  assert.deepEqual(unresolvedDestinationSlugs(undefined), []);
+  assert.deepEqual(unresolvedDestinationSlugs(null), []);
+  assert.deepEqual(unresolvedDestinationSlugs("not-an-array"), []);
+});
+
+function emptyState(): StateFile {
+  return {
+    credentials: {},
+    assistants: {},
+    structuredOutputs: {},
+    tools: {},
+    squads: {},
+    personalities: {},
+    scenarios: {},
+    simulations: {},
+    simulationSuites: {},
+    evals: {},
+  };
+}
+
+test("updateToolAssistantRefs: skips the PATCH and warns when the referenced assistant is genuinely absent", async () => {
+  const state = emptyState();
+  state.tools["router"] = { uuid: UUID };
+  // Deliberately no entry under state.assistants for "clinical-stage-1" — the
+  // assistant is genuinely absent, not merely not-yet-applied.
+
+  const tool: ResourceFile = {
+    resourceId: "router",
+    filePath: "/fake/tools/router.yml",
+    data: {
+      type: "transferCall",
+      destinations: [{ type: "assistant", assistantId: "clinical-stage-1" }],
+    },
+  };
+
+  const fetchCalls: unknown[] = [];
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  globalThis.fetch = (async (...args: unknown[]) => {
+    fetchCalls.push(args);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: UUID }),
+      text: async () => "{}",
+    } as unknown as Response;
+  }) as typeof globalThis.fetch;
+
+  try {
+    await updateToolAssistantRefs([tool], state);
+
+    assert.equal(
+      fetchCalls.length,
+      0,
+      "no PATCH should be sent when the assistant is genuinely absent",
+    );
+    assert.ok(
+      warnings.some((args) =>
+        args.some(
+          (arg) =>
+            typeof arg === "string" &&
+            arg.includes("router") &&
+            arg.includes("clinical-stage-1"),
+        ),
+      ),
+      "a warning naming the tool and the unresolved slug should be logged",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
+  }
 });

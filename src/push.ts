@@ -681,6 +681,30 @@ export function omitUnresolvedDestinations(
   return rest;
 }
 
+// Destinations that survived resolution still carrying a slug — the
+// referenced assistant is in neither state nor the local repo. Cleaned of
+// any trailing `## comment` the author left on the reference.
+export function unresolvedDestinationSlugs(destinations: unknown): string[] {
+  if (!Array.isArray(destinations)) return [];
+
+  const slugs: string[] = [];
+  for (const dest of destinations as unknown[]) {
+    if (
+      !dest ||
+      typeof dest !== "object" ||
+      typeof (dest as Record<string, unknown>).assistantId !== "string"
+    ) {
+      continue;
+    }
+    const cleaned = (dest as Record<string, unknown>).assistantId as string;
+    const slug = cleaned.split("##")[0]?.trim() ?? "";
+    if (!UUID_REGEX.test(slug)) {
+      slugs.push(slug);
+    }
+  }
+  return slugs;
+}
+
 export async function applyStructuredOutput(
   resource: ResourceFile,
   state: StateFile,
@@ -900,6 +924,20 @@ export async function updateToolAssistantRefs(
 
     // Resolve destinations now that all assistants exist
     const resolved = resolveReferences(rawData, state);
+
+    // A destination can still carry a slug here if the referenced assistant
+    // is genuinely absent (not in state, not in the local repo) rather than
+    // merely not-yet-applied. Sending that slug in the PATCH would 400 the
+    // whole push at the very end, after every other resource already
+    // applied — skip this tool and let a future push link it once the
+    // assistant exists.
+    const unresolvedSlugs = unresolvedDestinationSlugs(resolved.destinations);
+    if (unresolvedSlugs.length > 0) {
+      console.warn(
+        `  ⚠️  Tool "${resourceId}" still references unresolved assistant destination(s): ${unresolvedSlugs.join(", ")}. Leaving this tool's destinations untouched on the platform — they will link on a future push once those assistants exist.`,
+      );
+      continue;
+    }
 
     console.log(`  🔗 Linking tool ${resourceId} to assistant destinations`);
     const result = await vapiRequest("PATCH", `/tool/${uuid}`, {
