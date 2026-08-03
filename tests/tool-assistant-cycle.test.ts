@@ -20,6 +20,7 @@ process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
 const {
+  cleanDestinationAssistantIds,
   omitUnresolvedDestinations,
   unresolvedDestinationSlugs,
   updateToolAssistantRefs,
@@ -79,6 +80,28 @@ test("a trailing YAML comment on the reference still counts as resolved", async 
   const result = omitUnresolvedDestinations(payload, original);
 
   assert.ok("destinations" in result, "a resolved reference is still sent");
+});
+
+test("an unresolved slug authored with a trailing YAML comment still drops the whole destinations key", async () => {
+  // Resolution failure leaves the assistantId exactly as authored — comment
+  // included — in the resolved payload, same as the original. The comparison
+  // must clean both sides before checking equality, or the commented,
+  // uncleaned resolved value never matches the cleaned original and the
+  // destination is wrongly classified as resolved.
+  const commented = "clinical-stage-1 ## stage one";
+  const original = {
+    destinations: [{ type: "assistant", assistantId: commented }],
+  };
+  const payload = {
+    destinations: [{ type: "assistant", assistantId: commented }],
+  };
+
+  const result = omitUnresolvedDestinations(payload, original);
+
+  assert.ok(
+    !("destinations" in result),
+    "the key must be absent so PATCH leaves the platform value untouched",
+  );
 });
 
 test("one unresolved destination among several omits the key, not just that entry", async () => {
@@ -172,6 +195,42 @@ test("unresolvedDestinationSlugs: non-array input returns an empty list", () => 
   assert.deepEqual(unresolvedDestinationSlugs("not-an-array"), []);
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// `cleanDestinationAssistantIds` is the last line of defense before the
+// linking-pass PATCH body goes out: an untracked-but-valid raw UUID destination
+// authored with a trailing `## comment` fails resolution (left exactly as
+// authored) and passes `unresolvedDestinationSlugs` (which cleans before the
+// UUID check), so without this the comment would reach the API and 400.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("cleanDestinationAssistantIds: strips a trailing YAML comment from every destination's assistantId", () => {
+  const untrackedUuid = "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d";
+  const result = cleanDestinationAssistantIds([
+    {
+      type: "assistant",
+      assistantId: `${untrackedUuid} ## billing agent (unmanaged)`,
+    },
+    { type: "number", number: "+15550000000" },
+  ]);
+
+  assert.deepEqual(result, [
+    { type: "assistant", assistantId: untrackedUuid },
+    { type: "number", number: "+15550000000" },
+  ]);
+});
+
+test("cleanDestinationAssistantIds: a destination with no comment is a no-op", () => {
+  const result = cleanDestinationAssistantIds([
+    { type: "assistant", assistantId: UUID },
+  ]);
+  assert.deepEqual(result, [{ type: "assistant", assistantId: UUID }]);
+});
+
+test("cleanDestinationAssistantIds: non-array input is returned unchanged", () => {
+  assert.equal(cleanDestinationAssistantIds(undefined), undefined);
+  assert.equal(cleanDestinationAssistantIds(null), null);
+});
+
 function emptyState(): StateFile {
   return {
     credentials: {},
@@ -241,5 +300,55 @@ test("updateToolAssistantRefs: skips the PATCH and warns when the referenced ass
   } finally {
     globalThis.fetch = originalFetch;
     console.warn = originalWarn;
+  }
+});
+
+test("updateToolAssistantRefs: PATCH body strips a trailing YAML comment from an untracked-but-valid raw UUID destination", async () => {
+  // The UUID is untracked (no state.assistants entry) but still a valid UUID
+  // shape, so it passes unresolvedDestinationSlugs and the linking pass
+  // proceeds to PATCH — the comment must not ride along in the request body.
+  const untrackedUuid = "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d";
+  const state = emptyState();
+  state.tools["router"] = { uuid: UUID };
+
+  const tool: ResourceFile = {
+    resourceId: "router",
+    filePath: "/fake/tools/router.yml",
+    data: {
+      type: "transferCall",
+      destinations: [
+        {
+          type: "assistant",
+          assistantId: `${untrackedUuid} ## billing agent (unmanaged)`,
+        },
+      ],
+    },
+  };
+
+  const fetchCalls: unknown[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (...args: unknown[]) => {
+    fetchCalls.push(args);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: UUID }),
+      text: async () => "{}",
+    } as unknown as Response;
+  }) as typeof globalThis.fetch;
+
+  try {
+    await updateToolAssistantRefs([tool], state);
+
+    assert.equal(fetchCalls.length, 1, "the PATCH should still be sent");
+    const [, init] = fetchCalls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    assert.deepEqual(
+      body.destinations,
+      [{ type: "assistant", assistantId: untrackedUuid }],
+      "the PATCH body's assistantId must be the bare UUID, no trailing comment",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

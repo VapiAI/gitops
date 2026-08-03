@@ -209,9 +209,14 @@ test("updateStructuredOutputAssistantRefs: a partial resolution (one of two) ski
             typeof arg === "string" &&
             arg.includes("intake-schema") &&
             arg.includes("clinical-stage-1") &&
-            !arg.includes("clinical-stage-1, front-desk"),
+            !arg.includes("front-desk"),
         ),
       ),
+      // Checks that the resolved slug never appears in the warning at all —
+      // not just that it doesn't appear in one particular ordering. The
+      // implementation preserves authored order, so a buggy message naming
+      // both refs would read "front-desk, clinical-stage-1" (authored order)
+      // and slip past a check that only excluded "clinical-stage-1, front-desk".
       "the warning should name the unresolved ref but not the resolved one",
     );
   });

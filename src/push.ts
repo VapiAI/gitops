@@ -615,7 +615,12 @@ export async function applyTool(
 
 // A destination is unresolved when reference resolution left the assistantId
 // exactly as the file wrote it — i.e. the slug is not in state yet, so no UUID
-// could be substituted.
+// could be substituted. Both sides are cleaned of a trailing `## comment`
+// before comparing: an unresolved reference authored with a comment comes
+// back from `resolveReferences` with the comment still attached (resolution
+// failed, so the raw string is untouched), while the original is compared
+// clean — leaving the resolved side uncleaned made every commented-but-
+// unresolved reference compare unequal and misclassify as resolved.
 function isUnresolvedDestination(
   resolvedDest: Record<string, unknown> | undefined,
   originalDest: Record<string, unknown> | undefined,
@@ -624,8 +629,11 @@ function isUnresolvedDestination(
     return false;
   if (!originalDest || typeof originalDest.assistantId !== "string")
     return false;
-  const originalId = (originalDest.assistantId as string).split("##")[0]?.trim();
-  return resolvedDest.assistantId === originalId;
+  const resolvedId =
+    (resolvedDest.assistantId as string).split("##")[0]?.trim() ?? "";
+  const originalId =
+    (originalDest.assistantId as string).split("##")[0]?.trim() ?? "";
+  return resolvedId === originalId;
 }
 
 // Strip destinations with unresolved assistantIds (where original equals resolved = not found in state)
@@ -703,6 +711,32 @@ export function unresolvedDestinationSlugs(destinations: unknown): string[] {
     }
   }
   return slugs;
+}
+
+// Strip any trailing `## comment` from every destination's `assistantId`
+// before it goes out in a PATCH body. An untracked raw UUID authored with a
+// comment (`8f14…4e5f ## billing agent (unmanaged)`) fails resolution — it's
+// left exactly as authored — and passes `unresolvedDestinationSlugs` (which
+// cleans before checking the UUID shape), so without this the linking pass
+// would PATCH the comment straight to the API and 400. A no-op for entries
+// that already resolved to a bare UUID or never had a comment.
+export function cleanDestinationAssistantIds(destinations: unknown): unknown {
+  if (!Array.isArray(destinations)) return destinations;
+
+  return destinations.map((dest) => {
+    if (
+      !dest ||
+      typeof dest !== "object" ||
+      typeof (dest as Record<string, unknown>).assistantId !== "string"
+    ) {
+      return dest;
+    }
+    const assistantId =
+      ((dest as Record<string, unknown>).assistantId as string)
+        .split("##")[0]
+        ?.trim() ?? "";
+    return { ...(dest as Record<string, unknown>), assistantId };
+  });
 }
 
 // Count of authored `assistant_ids` entries — strings, cleaned of any
@@ -977,7 +1011,7 @@ export async function updateToolAssistantRefs(
 
     console.log(`  🔗 Linking tool ${resourceId} to assistant destinations`);
     const result = await vapiRequest("PATCH", `/tool/${uuid}`, {
-      destinations: resolved.destinations,
+      destinations: cleanDestinationAssistantIds(resolved.destinations),
     });
     // This PATCH mutates the platform AFTER the main upsert wrote its
     // baseline — refresh it from the linking response, or the next push would
