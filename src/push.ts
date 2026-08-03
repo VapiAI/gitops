@@ -705,6 +705,39 @@ export function unresolvedDestinationSlugs(destinations: unknown): string[] {
   return slugs;
 }
 
+// Count of authored `assistant_ids` entries — strings, cleaned of any
+// trailing `## comment`, non-empty after trim. Shared counting rule between
+// `omitUnresolvedAssistantIds` and `updateStructuredOutputAssistantRefs`.
+function countAuthoredAssistantRefs(assistantIds: unknown): number {
+  if (!Array.isArray(assistantIds)) return 0;
+  return assistantIds.filter(
+    (ref) => typeof ref === "string" && (ref.split("##")[0]?.trim() ?? "") !== "",
+  ).length;
+}
+
+// Same omit-not-filter rationale as `omitUnresolvedDestinations`: PATCH
+// replaces the keys it receives, so a partially-resolved `assistantIds`
+// array would wipe assistant links that are live on the dashboard whenever a
+// referenced assistant is merely untracked locally (a `--type structuredOutputs`
+// push, for instance). Omitting the key leaves the platform value untouched;
+// `updateStructuredOutputAssistantRefs` sets the real value once every
+// assistant exists.
+export function omitUnresolvedAssistantIds(
+  payload: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(original.assistant_ids)) return payload;
+  if (!Array.isArray(payload.assistantIds)) return payload;
+
+  const authoredCount = countAuthoredAssistantRefs(original.assistant_ids);
+  if ((payload.assistantIds as unknown[]).length >= authoredCount) {
+    return payload;
+  }
+
+  const { assistantIds: _omitted, ...rest } = payload;
+  return rest;
+}
+
 export async function applyStructuredOutput(
   resource: ResourceFile,
   state: StateFile,
@@ -725,7 +758,10 @@ export async function applyStructuredOutput(
     stateSection: state.structuredOutputs,
     fullState: state,
     updateEndpoint: `/structured-output/${existingUuid}?schemaOverride=true`,
-    updatePayload: removeExcludedKeys(payload, "structuredOutputs"),
+    updatePayload: omitUnresolvedAssistantIds(
+      removeExcludedKeys(payload, "structuredOutputs"),
+      data as Record<string, unknown>,
+    ),
     createEndpoint: "/structured-output",
     createPayload: payloadWithoutAssistants,
   });
@@ -954,6 +990,17 @@ export async function updateToolAssistantRefs(
 // Post-Apply: Update Structured Outputs with Assistant References
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Local mirror of the untracked-UUID / missing-slug check `resolveAssistantId`
+// (src/resolver.ts) applies, used only to name which authored refs failed to
+// resolve in the warning below — the skip decision itself is the plain length
+// comparison against `countAuthoredAssistantRefs`.
+function assistantRefIsTracked(ref: string, state: StateFile): boolean {
+  if (UUID_REGEX.test(ref)) {
+    return Object.values(state.assistants).some((entry) => entry.uuid === ref);
+  }
+  return !!state.assistants[ref]?.uuid;
+}
+
 export async function updateStructuredOutputAssistantRefs(
   structuredOutputs: ResourceFile[],
   state: StateFile,
@@ -973,11 +1020,33 @@ export async function updateStructuredOutputAssistantRefs(
     const uuid = state.structuredOutputs[resourceId]?.uuid;
     if (!uuid) continue;
 
+    const authoredRefs = (rawData.assistant_ids as unknown[])
+      .filter((ref): ref is string => typeof ref === "string")
+      .map((ref) => ref.split("##")[0]?.trim() ?? "")
+      .filter((ref) => ref !== "");
+
     // Resolve assistant IDs now that all assistants exist
     const assistantIds = resolveAssistantIds(
       rawData.assistant_ids as string[],
       state,
     );
+
+    if (assistantIds.length < authoredRefs.length) {
+      // A referenced assistant is genuinely absent (not in state, not in the
+      // local repo) — including a raw UUID that is untracked in state, which
+      // `resolveAssistantId` treats as "possibly deleted" and resolves to
+      // null. Sending the partial list would PATCH-replace `assistantIds` and
+      // wipe whatever assistant links are live on the dashboard; unlike tool
+      // destinations, there is no later pass that repairs a structured
+      // output's assistant links, so skip this one and warn instead.
+      const unresolved = authoredRefs.filter(
+        (ref) => !assistantRefIsTracked(ref, state),
+      );
+      console.warn(
+        `  ⚠️  Structured output "${resourceId}" still references unresolved assistant(s): ${unresolved.join(", ")}. Leaving this structured output's assistant links untouched on the platform — they will link on a future push once those assistants exist.`,
+      );
+      continue;
+    }
 
     if (assistantIds.length > 0) {
       console.log(`  🔗 Linking structured output ${resourceId} to assistants`);
