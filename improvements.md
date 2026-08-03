@@ -1451,17 +1451,17 @@ that anything had changed.
 
 ### Current behavior (Verified)
 
-- `omitUnresolvedAssistantIds` (`src/push.ts:725-739`) compares the resolved
+- `omitUnresolvedAssistantIds` (`src/push.ts:759-773`) compares the resolved
   `assistantIds` length against `countAuthoredAssistantRefs`
-  (`src/push.ts:711-716`, counts non-empty authored `assistant_ids` entries)
+  (`src/push.ts:745-750`, counts non-empty authored `assistant_ids` entries)
   and omits the `assistantIds` key from the update payload entirely when the
   resolved array is shorter. Wired into `applyStructuredOutput` at
-  `src/push.ts:761-764`.
-- `updateStructuredOutputAssistantRefs` (`src/push.ts:1004-1061`) applies the
-  same length check at `src/push.ts:1034-1049`: when `resolveAssistantIds`
+  `src/push.ts:795-798`.
+- `updateStructuredOutputAssistantRefs` (`src/push.ts:1038-1095`) applies the
+  same length check at `src/push.ts:1068-1083`: when `resolveAssistantIds`
   returns fewer entries than the cleaned, non-empty authored refs, it skips
   the PATCH for that structured output and logs a warning naming the
-  unresolved reference(s), via `assistantRefIsTracked` (`src/push.ts:997-1002`):
+  unresolved reference(s), via `assistantRefIsTracked` (`src/push.ts:1031-1036`):
 
   ```
   ⚠️  Structured output "<so-id>" still references unresolved assistant(s): <ref>. Leaving this structured output's assistant links untouched on the platform — they will link on a future push once those assistants exist.
@@ -1509,7 +1509,7 @@ been applied, had the identical gap for the same reason.
 
 ### Problem
 
-`updateToolAssistantRefs` (`src/push.ts:939-987`) resolves a tool's
+`updateToolAssistantRefs` (`src/push.ts:973-1021`) resolves a tool's
 `destinations` again once all assistants in the push have been applied, then
 PATCHed `{ destinations: resolved.destinations }` unconditionally. If a
 destination's `assistantId` is genuinely absent — not in state and not in the
@@ -1520,9 +1520,9 @@ linking pass sent that raw slug straight to the API.
 
 ### Current behavior (Verified)
 
-`unresolvedDestinationSlugs` (`src/push.ts:687-706`) scans
+`unresolvedDestinationSlugs` (`src/push.ts:695-714`) scans
 `resolved.destinations` for any `assistantId` that still isn't a UUID after
-resolution, and `updateToolAssistantRefs` (`src/push.ts:970-976`) skips that
+resolution, and `updateToolAssistantRefs` (`src/push.ts:1004-1010`) skips that
 tool's PATCH entirely when any are found, logging:
 
 ```
