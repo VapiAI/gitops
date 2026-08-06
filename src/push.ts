@@ -604,10 +604,36 @@ export async function applyTool(
     stateSection: state.tools,
     fullState: state,
     updateEndpoint: `/tool/${existingUuid}`,
-    updatePayload: removeExcludedKeys(payload, "tools"),
+    updatePayload: omitUnresolvedDestinations(
+      removeExcludedKeys(payload, "tools"),
+      data as Record<string, unknown>,
+    ),
     createEndpoint: "/tool",
     createPayload: payloadForCreate,
   });
+}
+
+// A destination is unresolved when reference resolution left the assistantId
+// exactly as the file wrote it — i.e. the slug is not in state yet, so no UUID
+// could be substituted. Both sides are cleaned of a trailing `## comment`
+// before comparing: an unresolved reference authored with a comment comes
+// back from `resolveReferences` with the comment still attached (resolution
+// failed, so the raw string is untouched), while the original is compared
+// clean — leaving the resolved side uncleaned made every commented-but-
+// unresolved reference compare unequal and misclassify as resolved.
+function isUnresolvedDestination(
+  resolvedDest: Record<string, unknown> | undefined,
+  originalDest: Record<string, unknown> | undefined,
+): boolean {
+  if (!resolvedDest || typeof resolvedDest.assistantId !== "string")
+    return false;
+  if (!originalDest || typeof originalDest.assistantId !== "string")
+    return false;
+  const resolvedId =
+    (resolvedDest.assistantId as string).split("##")[0]?.trim() ?? "";
+  const originalId =
+    (originalDest.assistantId as string).split("##")[0]?.trim() ?? "";
+  return resolvedId === originalId;
 }
 
 // Strip destinations with unresolved assistantIds (where original equals resolved = not found in state)
@@ -622,17 +648,128 @@ function stripUnresolvedAssistantDestinations(
   const originalDests = original.destinations as Record<string, unknown>[];
   const resolvedDests = resolved.destinations as Record<string, unknown>[];
 
-  // Filter out destinations where assistantId wasn't resolved (still matches original)
-  const filteredDests = resolvedDests.filter((dest, idx) => {
-    if (typeof dest.assistantId !== "string") return true;
-    const origDest = originalDests[idx];
-    if (!origDest || typeof origDest.assistantId !== "string") return true;
-    // Keep if resolved (UUID format) or no original assistantId
-    const originalId = (origDest.assistantId as string).split("##")[0]?.trim();
-    return dest.assistantId !== originalId;
-  });
+  const filteredDests = resolvedDests.filter(
+    (dest, idx) => !isUnresolvedDestination(dest, originalDests[idx]),
+  );
 
   return { ...resolved, destinations: filteredDests };
+}
+
+// The update-path counterpart, and the reason a first push into an empty org
+// used to fail with `400 Assistant with ID "<slug>" not found`.
+//
+// Tools are applied before assistants (tools are a dependency of assistants),
+// but a handoff/transfer tool references an assistant — a genuine cycle. On a
+// CREATE the unresolved destinations are stripped and `updateToolAssistantRefs`
+// links them once every assistant exists. The UPDATE path had no equivalent, so
+// it sent the raw slug, the API rejected it, and the push aborted before the
+// linking pass could run.
+//
+// This omits the whole `destinations` key rather than sending a filtered array:
+// PATCH replaces the keys it receives, so a filtered array would wipe
+// destinations that are live on the dashboard whenever the local assistant is
+// merely untracked (a `--type tools` push, for instance). Omitting the key
+// leaves the platform value untouched, and the linking pass sets the real value.
+export function omitUnresolvedDestinations(
+  payload: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(payload.destinations)) return payload;
+
+  const originalDests = Array.isArray(original.destinations)
+    ? (original.destinations as Record<string, unknown>[])
+    : [];
+  const anyUnresolved = (
+    payload.destinations as Record<string, unknown>[]
+  ).some((dest, idx) => isUnresolvedDestination(dest, originalDests[idx]));
+
+  if (!anyUnresolved) return payload;
+
+  const { destinations: _omitted, ...rest } = payload;
+  return rest;
+}
+
+// Destinations that survived resolution still carrying a slug — the
+// referenced assistant is in neither state nor the local repo. Cleaned of
+// any trailing `## comment` the author left on the reference.
+export function unresolvedDestinationSlugs(destinations: unknown): string[] {
+  if (!Array.isArray(destinations)) return [];
+
+  const slugs: string[] = [];
+  for (const dest of destinations as unknown[]) {
+    if (
+      !dest ||
+      typeof dest !== "object" ||
+      typeof (dest as Record<string, unknown>).assistantId !== "string"
+    ) {
+      continue;
+    }
+    const cleaned = (dest as Record<string, unknown>).assistantId as string;
+    const slug = cleaned.split("##")[0]?.trim() ?? "";
+    if (!UUID_REGEX.test(slug)) {
+      slugs.push(slug);
+    }
+  }
+  return slugs;
+}
+
+// Strip any trailing `## comment` from every destination's `assistantId`
+// before it goes out in a PATCH body. An untracked raw UUID authored with a
+// comment (`8f14…4e5f ## billing agent (unmanaged)`) fails resolution — it's
+// left exactly as authored — and passes `unresolvedDestinationSlugs` (which
+// cleans before checking the UUID shape), so without this the linking pass
+// would PATCH the comment straight to the API and 400. A no-op for entries
+// that already resolved to a bare UUID or never had a comment.
+export function cleanDestinationAssistantIds(destinations: unknown): unknown {
+  if (!Array.isArray(destinations)) return destinations;
+
+  return destinations.map((dest) => {
+    if (
+      !dest ||
+      typeof dest !== "object" ||
+      typeof (dest as Record<string, unknown>).assistantId !== "string"
+    ) {
+      return dest;
+    }
+    const assistantId =
+      ((dest as Record<string, unknown>).assistantId as string)
+        .split("##")[0]
+        ?.trim() ?? "";
+    return { ...(dest as Record<string, unknown>), assistantId };
+  });
+}
+
+// Count of authored `assistant_ids` entries — strings, cleaned of any
+// trailing `## comment`, non-empty after trim. Shared counting rule between
+// `omitUnresolvedAssistantIds` and `updateStructuredOutputAssistantRefs`.
+function countAuthoredAssistantRefs(assistantIds: unknown): number {
+  if (!Array.isArray(assistantIds)) return 0;
+  return assistantIds.filter(
+    (ref) => typeof ref === "string" && (ref.split("##")[0]?.trim() ?? "") !== "",
+  ).length;
+}
+
+// Same omit-not-filter rationale as `omitUnresolvedDestinations`: PATCH
+// replaces the keys it receives, so a partially-resolved `assistantIds`
+// array would wipe assistant links that are live on the dashboard whenever a
+// referenced assistant is merely untracked locally (a `--type structuredOutputs`
+// push, for instance). Omitting the key leaves the platform value untouched;
+// `updateStructuredOutputAssistantRefs` sets the real value once every
+// assistant exists.
+export function omitUnresolvedAssistantIds(
+  payload: Record<string, unknown>,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(original.assistant_ids)) return payload;
+  if (!Array.isArray(payload.assistantIds)) return payload;
+
+  const authoredCount = countAuthoredAssistantRefs(original.assistant_ids);
+  if ((payload.assistantIds as unknown[]).length >= authoredCount) {
+    return payload;
+  }
+
+  const { assistantIds: _omitted, ...rest } = payload;
+  return rest;
 }
 
 export async function applyStructuredOutput(
@@ -655,7 +792,10 @@ export async function applyStructuredOutput(
     stateSection: state.structuredOutputs,
     fullState: state,
     updateEndpoint: `/structured-output/${existingUuid}?schemaOverride=true`,
-    updatePayload: removeExcludedKeys(payload, "structuredOutputs"),
+    updatePayload: omitUnresolvedAssistantIds(
+      removeExcludedKeys(payload, "structuredOutputs"),
+      data as Record<string, unknown>,
+    ),
     createEndpoint: "/structured-output",
     createPayload: payloadWithoutAssistants,
   });
@@ -855,9 +995,23 @@ export async function updateToolAssistantRefs(
     // Resolve destinations now that all assistants exist
     const resolved = resolveReferences(rawData, state);
 
+    // A destination can still carry a slug here if the referenced assistant
+    // is genuinely absent (not in state, not in the local repo) rather than
+    // merely not-yet-applied. Sending that slug in the PATCH would 400 the
+    // whole push at the very end, after every other resource already
+    // applied — skip this tool and let a future push link it once the
+    // assistant exists.
+    const unresolvedSlugs = unresolvedDestinationSlugs(resolved.destinations);
+    if (unresolvedSlugs.length > 0) {
+      console.warn(
+        `  ⚠️  Tool "${resourceId}" still references unresolved assistant destination(s): ${unresolvedSlugs.join(", ")}. Leaving this tool's destinations untouched on the platform — they will link on a future push once those assistants exist.`,
+      );
+      continue;
+    }
+
     console.log(`  🔗 Linking tool ${resourceId} to assistant destinations`);
     const result = await vapiRequest("PATCH", `/tool/${uuid}`, {
-      destinations: resolved.destinations,
+      destinations: cleanDestinationAssistantIds(resolved.destinations),
     });
     // This PATCH mutates the platform AFTER the main upsert wrote its
     // baseline — refresh it from the linking response, or the next push would
@@ -869,6 +1023,17 @@ export async function updateToolAssistantRefs(
 // ─────────────────────────────────────────────────────────────────────────────
 // Post-Apply: Update Structured Outputs with Assistant References
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Local mirror of the untracked-UUID / missing-slug check `resolveAssistantId`
+// (src/resolver.ts) applies, used only to name which authored refs failed to
+// resolve in the warning below — the skip decision itself is the plain length
+// comparison against `countAuthoredAssistantRefs`.
+function assistantRefIsTracked(ref: string, state: StateFile): boolean {
+  if (UUID_REGEX.test(ref)) {
+    return Object.values(state.assistants).some((entry) => entry.uuid === ref);
+  }
+  return !!state.assistants[ref]?.uuid;
+}
 
 export async function updateStructuredOutputAssistantRefs(
   structuredOutputs: ResourceFile[],
@@ -889,11 +1054,33 @@ export async function updateStructuredOutputAssistantRefs(
     const uuid = state.structuredOutputs[resourceId]?.uuid;
     if (!uuid) continue;
 
+    const authoredRefs = (rawData.assistant_ids as unknown[])
+      .filter((ref): ref is string => typeof ref === "string")
+      .map((ref) => ref.split("##")[0]?.trim() ?? "")
+      .filter((ref) => ref !== "");
+
     // Resolve assistant IDs now that all assistants exist
     const assistantIds = resolveAssistantIds(
       rawData.assistant_ids as string[],
       state,
     );
+
+    if (assistantIds.length < authoredRefs.length) {
+      // A referenced assistant is genuinely absent (not in state, not in the
+      // local repo) — including a raw UUID that is untracked in state, which
+      // `resolveAssistantId` treats as "possibly deleted" and resolves to
+      // null. Sending the partial list would PATCH-replace `assistantIds` and
+      // wipe whatever assistant links are live on the dashboard; unlike tool
+      // destinations, there is no later pass that repairs a structured
+      // output's assistant links, so skip this one and warn instead.
+      const unresolved = authoredRefs.filter(
+        (ref) => !assistantRefIsTracked(ref, state),
+      );
+      console.warn(
+        `  ⚠️  Structured output "${resourceId}" still references unresolved assistant(s): ${unresolved.join(", ")}. Leaving this structured output's assistant links untouched on the platform — they will link on a future push once those assistants exist.`,
+      );
+      continue;
+    }
 
     if (assistantIds.length > 0) {
       console.log(`  🔗 Linking structured output ${resourceId} to assistants`);

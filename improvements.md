@@ -79,8 +79,12 @@ you which stack PR closes the row.**
 | 25  | Interactive flows lack automated coverage                | Picker/conflict-prompt regressions ship silently   | None       | Open — scheduled for the test-update iteration |
 | 26  | Rollback is snapshot replay, not transaction rollback     | Creates/deletes/state drift are not fully undone   | #3         | Open — document/plan transactional rollback     |
 | 27  | List endpoints read one unpaginated page at a time        | >100-resource fleets got truncated orphan detection | None       | RESOLVED 2026-08-01 (consumers gap open)        |
+| 28  | Handoff tools 400 on first push into an empty org          | Push aborts before the assistant-linking pass runs  | None       | RESOLVED 2026-08-01                             |
+| 29  | SO linking sent filtered `assistantIds` arrays              | Silent unlink of live-but-untracked assistants      | None       | RESOLVED 2026-08-03 (#51)                       |
+| 30  | Tool-linking pass could PATCH a raw assistant slug          | Mid-push 400 naming the wrong resource              | None       | RESOLVED 2026-08-03 (#51)                       |
+| 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Open                                            |
 
-**Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
+**Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
 ---
 
@@ -1363,6 +1367,282 @@ Two details are load-bearing, both covered by `tests/list-pagination.test.ts`:
 so they still report confidently on a partial view. `cleanup.ts` has its own local
 `vapiGet` and stays unpaginated (`src/cleanup.ts:193`); it fails safe, since a
 truncated listing finds *fewer* dashboard orphans to delete.
+
+## 28. Handoff/transfer tools 400 on a first push into an empty org
+
+**[RESOLVED 2026-08-01]**
+
+**Discovered:** on a customer repo. `PATCH /tool/d787c351… → 400 Assistant with
+ID "clinical-stage-1-a4598432" not found`, aborting the whole push.
+
+### Problem
+
+Tools are applied before assistants, because assistants reference tools. A
+handoff/transfer tool references an *assistant*, which inverts the dependency for
+that subset — a genuine cycle. The update path sent the unresolved assistant slug
+to the API, which rejected it.
+
+### Current behavior (Verified)
+
+The engine already resolves the cycle in two passes. `applyTool`
+(`src/push.ts`) strips unresolved assistant destinations from the **create**
+payload, and `updateToolAssistantRefs` PATCHes the real destinations once every
+assistant exists. The **update** payload had no equivalent: it was
+`removeExcludedKeys(payload, "tools")` with the raw slug still in
+`destinations[].assistantId`. Any tool that already existed on the platform while
+its referenced assistant was not yet in state produced a 400, and because
+`applyTool` rethrows, the push aborted before the linking pass ran.
+
+Reproduces whenever a tool exists remotely and its assistant does not exist
+locally in state — a first push into an empty org, a re-pointed handoff, or a
+`--type tools` push.
+
+### Risk
+
+A first push into a fresh org fails partway with an error that names an assistant
+rather than the tool, so the cause reads as an assistant problem. Resources
+applied before the failing tool stay applied, so the org is left half-configured.
+
+### Current mitigation
+
+Push assistants first (`npm run push -- <org> --type assistants`), then push
+everything.
+
+### Possible fix
+
+Implemented: `omitUnresolvedDestinations` drops the whole `destinations` key from
+the update payload when any entry is unresolved, letting the existing linking pass
+set the real value.
+
+Omitting the key matters more than filtering the array. Vapi PATCH replaces the
+keys it receives, so sending a filtered array would wipe destinations that are
+live on the dashboard whenever the referenced assistant is merely untracked
+locally. An absent key is left alone. Covered by
+`tests/tool-assistant-cycle.test.ts`.
+
+### Status
+
+**RESOLVED 2026-08-01.**
+
+---
+
+## 29. Structured-output assistant-link update/linking sent filtered `assistantIds` arrays — silent unlink of live-but-untracked assistants
+
+**[RESOLVED 2026-08-03] (#51)**
+
+**Discovered:** during the same audit that produced #30 — the tool-destination
+linking pass and the structured-output linking pass share the exact same
+circular-dependency shape, but the structured-output side had a materially
+worse version of the gap: `assistantIds` is a flat array with no per-entry
+"leave this one alone" marker, so the pre-fix code had no way to skip just the
+unresolved entry.
+
+### Problem
+
+`applyStructuredOutput`'s update path and `updateStructuredOutputAssistantRefs`'s
+linking pass both resolved `assistant_ids` with `resolveAssistantIds`
+(`src/resolver.ts:103-110`), which silently drops any entry that fails to
+resolve, then PATCHed the resulting array onto `assistantIds` regardless of
+whether it was shorter than what was authored. Vapi PATCH replaces the key it
+receives rather than merging, so a filtered array didn't just fail to add the
+unresolved assistant — on a resource that already existed, it removed that
+assistant's link on the dashboard if one was already there, with no warning
+that anything had changed.
+
+### Current behavior (Verified)
+
+- `omitUnresolvedAssistantIds` (`src/push.ts:759-773`) compares the resolved
+  `assistantIds` length against `countAuthoredAssistantRefs`
+  (`src/push.ts:745-750`, counts non-empty authored `assistant_ids` entries)
+  and omits the `assistantIds` key from the update payload entirely when the
+  resolved array is shorter. Wired into `applyStructuredOutput` at
+  `src/push.ts:795-798`.
+- `updateStructuredOutputAssistantRefs` (`src/push.ts:1038-1095`) applies the
+  same length check at `src/push.ts:1068-1083`: when `resolveAssistantIds`
+  returns fewer entries than the cleaned, non-empty authored refs, it skips
+  the PATCH for that structured output and logs a warning naming the
+  unresolved reference(s), via `assistantRefIsTracked` (`src/push.ts:1031-1036`):
+
+  ```
+  ⚠️  Structured output "<so-id>" still references unresolved assistant(s): <ref>. Leaving this structured output's assistant links untouched on the platform — they will link on a future push once those assistants exist.
+  ```
+
+- Unlike tool destinations, an **untracked raw UUID counts as unresolved**
+  here: `resolveAssistantId` (`src/resolver.ts:79-101`) warns and returns
+  `null` for an untracked UUID rather than passing it through. There is no
+  later pass that repairs a structured output's assistant links the way the
+  tool-linking pass repairs destinations, so the stricter rule is
+  intentional. Covered by `tests/so-assistant-omit.test.ts`.
+
+### Risk
+
+Silent — no error, no push-time signal. A structured output's live
+`assistant_ids` could shrink on any push where one authored reference was
+untracked, whether that reference was a typo, an assistant not yet pulled
+locally, or one that was deleted from the repo. The only symptom is a KPI or
+eval that quietly stops running against calls it used to cover.
+
+### Current mitigation
+
+Prior to the fix: audit each structured output's live `assistant_ids` against
+the dashboard after any push where an assistant reference changed, and keep
+`assistant_ids` and state in lockstep (see #11).
+
+### Possible fix
+
+Implemented: the omit-on-update / skip-and-warn-on-link guards above.
+
+### Status
+
+**RESOLVED 2026-08-03 (#51).**
+
+---
+
+## 30. Tool-destination linking pass could still PATCH a raw assistant slug when the assistant was genuinely absent
+
+**[RESOLVED 2026-08-03] (#51)**
+
+**Discovered:** while auditing #28's fix — that entry closed the gap in the
+tool's own create/update PATCH, but the separate linking pass
+(`updateToolAssistantRefs`), which runs after every assistant in the push has
+been applied, had the identical gap for the same reason.
+
+### Problem
+
+`updateToolAssistantRefs` (`src/push.ts:973-1021`) resolves a tool's
+`destinations` again once all assistants in the push have been applied, then
+PATCHed `{ destinations: resolved.destinations }` unconditionally. If a
+destination's `assistantId` is genuinely absent — not in state and not in the
+local repo, as opposed to merely not-yet-applied earlier in the same push —
+`resolveReferences` leaves the raw slug in place (`src/resolver.ts:244-256`:
+`if (resolvedId) { destination.assistantId = resolvedId }`, no `else`). The
+linking pass sent that raw slug straight to the API.
+
+### Current behavior (Verified)
+
+`unresolvedDestinationSlugs` (`src/push.ts:695-714`) scans
+`resolved.destinations` for any `assistantId` that still isn't a UUID after
+resolution, and `updateToolAssistantRefs` (`src/push.ts:1004-1010`) skips that
+tool's PATCH entirely when any are found, logging:
+
+```
+⚠️  Tool "<tool-id>" still references unresolved assistant destination(s): <slug>. Leaving this tool's destinations untouched on the platform — they will link on a future push once those assistants exist.
+```
+
+A destination that resolves to an untracked-but-valid UUID still flows
+through unchanged (untracked UUIDs may legitimately exist on the platform;
+only a still-a-slug value counts as unresolved — see #29 for why structured
+outputs made the opposite call). Covered by
+`tests/tool-assistant-cycle.test.ts`.
+
+### Risk
+
+`PATCH /tool/{uuid}` returned `400 Assistant with ID "<slug>" not found`, and
+because the linking pass runs as the last stage of `push`, the failure landed
+after every other resource in the push had already applied — the error named
+an assistant, not the tool, making the actual cause non-obvious.
+
+### Current mitigation
+
+Prior to the fix: push assistants first
+(`npm run push -- <org> --type assistants`) so no destination is ever
+genuinely unresolved by the time the linking pass runs.
+
+### Possible fix
+
+Implemented: the skip-and-warn guard above. No further action needed — the
+destinations link automatically once the referenced assistant is added to
+the repo and a subsequent push runs.
+
+### Status
+
+**RESOLVED 2026-08-03 (#51).**
+
+---
+
+## 31. Unresolved references are handled three different ways depending on the field, and `validate.ts` has no dangling-reference check
+
+**Discovered:** while fixing #29 and #30 — those two entries close the
+loudest and quietest failure modes for their specific fields, but the
+underlying question ("what happens when a reference resolves to nothing")
+still has a different answer per field, and nothing validates references
+before push time.
+
+### Problem
+
+Whether an unresolved reference is dropped, deferred, or 400s depends
+entirely on which field it's in. There's no single engine-wide rule, and
+`validate.ts` never checks that a referenced id resolves to anything before
+push.
+
+### Current behavior (Verified)
+
+Three distinct behaviors exist today, none of them a validation error:
+
+- **Silently filtered (array shrinks, no warning about the shrink itself):**
+  `model.toolIds` / root `toolIds` (`resolveToolIds`, `src/resolver.ts:46-50`),
+  `artifactPlan.structuredOutputIds` (`resolveStructuredOutputIds`,
+  `src/resolver.ts:52-77`), and structured-output `assistant_ids` →
+  `assistantIds` (`resolveAssistantIds`, `src/resolver.ts:103-110`) at the
+  point of first resolution in `resolveReferences`
+  (`src/resolver.ts:184-219`). Each resolver logs a per-item `⚠️` warning but
+  still returns a shorter array; callers other than the two guarded in
+  #29/#30 (e.g. `applyAssistant`'s `model.toolIds` /
+  `artifactPlan.structuredOutputIds`) send that shorter array straight
+  through with no further check.
+- **Left raw → mid-push 400:** `hooks[].do[].toolId`
+  (`src/resolver.ts:227-241`), squad `members[].assistantId` /
+  `assistantDestinations[].assistantId` (`src/resolver.ts:258-282`),
+  `personalityId` (`src/resolver.ts:284-290`), and `scenarioId`
+  (`src/resolver.ts:292-298`) all follow the pattern
+  `if (resolvedId) { field = resolvedId }` with no `else` — an unresolved
+  reference keeps its original slug and is sent to the API as-is, which 400s
+  on whichever endpoint receives it.
+- **Deferred to a linking pass:** tool `destinations[].assistantId` and
+  structured-output `assistant_ids`, per #29 and #30.
+
+`validate.ts` has no check that a referenced id resolves to something. Its
+existing reference-shaped checks stop short of it: `checkLockstep`'s forward
+pass explicitly steps around a missing reference —
+`if (!assistant) continue; // missing-reference is a different class`
+(`src/validate.ts:120`) — because the SO↔assistant lockstep check (#11) only
+validates that both sides of an edge agree, not that either side exists.
+`checkResourceRefs` (`src/validate.ts:456-483`, Check 6) already walks every
+reference field via `extractReferencedIds` (`src/resolver.ts:351-457`), but
+only to flag a reference matching `.vapi-ignore` — it doesn't flag a
+reference that resolves to nothing at all.
+
+### Risk
+
+The same authoring mistake — a typo'd resource id, a reference to a file that
+was deleted, a reference to a resource in the wrong org — surfaces three
+different ways depending on which field it's in: a silently smaller array, a
+mid-push 400 naming the wrong resource, or a skipped resource with a warning.
+Fixing one field's dangling reference gives no reason to expect a different
+field behaves completely differently.
+
+### Current mitigation
+
+Read `docs/learnings/tools.md` and `docs/learnings/structured-outputs.md` for
+the two guarded fields; for everything else, treat any reference to a
+resource that doesn't yet exist as unsafe to push until the referenced
+resource exists in state.
+
+### Possible fix
+
+Extend `checkResourceRefs` (`src/validate.ts:456-483`) — it already walks
+every reference field via `extractReferencedIds` for the ignored-reference
+check — to also flag any id that is not a UUID, is not present in the
+corresponding state section, and has no matching local resource file, as a
+blocking validation finding. The ignored-reference check and a
+dangling-reference check would share the same walk, just different match
+conditions; it doesn't require picking one runtime behavior (filter vs.
+defer vs. 400) for every field, since it stops the push before any of those
+three behaviors gets a chance to run.
+
+### Status
+
+**Open.**
 
 ---
 

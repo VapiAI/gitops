@@ -97,3 +97,47 @@ Structured outputs are the primary way to measure voice agent performance. Commo
 **Recommendation:** For squad-wide KPIs that must populate on **every** ending (VM-only, classifier-only, and live-agent), use **`squad.membersOverrides.analysisPlan.structuredDataPlan`** plus **`membersOverrides.artifactPlan.fullMessageHistoryEnabled: true`**. Remove per-assistant duplicate plans. Keep standalone structured outputs for evals, dashboard analytics, or schemas you want versioned as separate resources.
 
 Full YAML pattern and merge-order notes: [squads.md → Squad-level post-call extraction via `membersOverrides`](squads.md#squad-level-post-call-extraction-via-membersoverrides-multi-member-squads).
+
+---
+
+## assistant_ids and the update/linking cycle (dependency cycle)
+
+Structured outputs are pushed before assistants, same as tools — see
+[tools.md → "Handoff/transfer tools reference assistants (dependency
+cycle)"](tools.md#handofftransfer-tools-reference-assistants-dependency-cycle)
+for the general shape. A structured output's `assistant_ids` references an
+assistant, which inverts the push order for that field. The engine handles it
+the same two-pass way: on create, `assistantIds` is stripped entirely (no
+assistants exist yet); on update, it's resolved to whatever already exists in
+state. Either way, a linking pass then sets the real value once every
+assistant in the push has been applied.
+
+The difference from tool destinations is what happens when a reference still
+doesn't resolve. `assistantIds` is a flat array with no shape to signal "leave
+this one for later" — so instead of sending a shorter array, the engine omits
+the whole `assistantIds` key from the update PATCH whenever any authored
+`assistant_ids` entry fails to resolve. Sending a filtered array would PATCH-
+replace the platform's current list, silently unlinking every live-but-
+untracked assistant the array left out — the update never shrinks the
+dashboard's array as a side effect of an unrelated edit.
+
+The linking pass (which runs once every assistant in the push has been
+applied) can still find an unresolved reference — genuinely absent from both
+state and the local repo, not just not-yet-applied. When that happens it
+**skips that structured output** rather than PATCHing the partial list, and
+logs a warning naming the unresolved reference(s):
+
+```
+⚠️  Structured output "<so-id>" still references unresolved assistant(s): <ref>. Leaving this structured output's assistant links untouched on the platform — they will link on a future push once those assistants exist.
+```
+
+**One asymmetry worth knowing versus tool destinations:** for structured
+outputs, an **untracked raw UUID counts as unresolved**, not as a legitimate
+platform-only reference. Tool destinations let a raw UUID through even when
+it's untracked in state (it might be a real dashboard assistant the repo
+just doesn't manage). Structured outputs can't take that risk — there's no
+later repair pass for a structured output's assistant links the way there is
+for tool destinations, so if the linking pass got it wrong here, the wipe
+would be permanent until someone noticed and re-pushed by hand. Treating an
+untracked UUID as unresolved means it skips-and-warns instead of silently
+shipping a wipe.
