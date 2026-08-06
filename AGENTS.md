@@ -107,6 +107,8 @@ Drift direction is computed against the per-developer baseline store `.vapi-stat
 
 `--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
 
+**Listing completeness (applies to every command).** Vapi list endpoints cap a response at 100 items and expose no page cursor — only `createdAt` comparison filters. The engine pages backwards through `createdAt` until it gets a short page, so pull, push's invalid-mapping detection, `delete`'s orphan sweep, `audit`, and the credential reverse-map all see the whole type instead of the first hundred. When completeness cannot be proven — an endpoint that ignores the cursor params, a payload with no `createdAt`, or the page-count backstop — the engine says so on stderr. Treat that warning as "do not infer deletion from absence for this type".
+
 **Pull-output icon legend.** Distinct semantics in a single pulled-resource line:
 
 | Icon | Meaning |

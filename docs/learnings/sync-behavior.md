@@ -19,6 +19,11 @@ function of which of them exist and whether their contents agree.
 | **Baseline** (`B`) | `.vapi-state-hash/<org>/<uuid>` | **no** (per-developer, gitignored) | sha256 of the last platform content *you* saw (last pull or push) |
 | **Dashboard resource** (`D`) | Vapi platform | n/a | What's live |
 
+**One letter per artifact — the same letter for the thing and for its hash.**
+`L` means both the local file and the hash of its contents; `D` means both the
+live dashboard resource and the hash of its contents; `B` is a hash already.
+Comparisons below are always between hashes.
+
 The local **filename is organizational only** — content hashes never include
 it. The file↔UUID link is owned entirely by the state entry; the baseline is
 keyed by UUID, so renames don't invalidate it.
@@ -36,17 +41,17 @@ keyed by UUID, so renames don't invalidate it.
 ### The drift triangle
 
 With all four artifacts present, compare three hashes — local file (`L`),
-baseline (`B`), platform (`P`) — all computed in the same canonical basis
+baseline (`B`), dashboard (`D`) — all computed in the same canonical basis
 (`canonicalizeForHash`: server fields stripped, UUID refs → slugs, credential
 UUIDs → names):
 
-| L vs B | P vs B | Direction | Meaning |
+| L vs B | D vs B | Direction | Meaning |
 |---|---|---|---|
 | = | = | `clean` | Nobody changed anything |
 | ≠ | = | `local-ahead` | You edited locally; dashboard untouched → **your change is the natural next step UP** |
 | = | ≠ | `dashboard-ahead` | Someone edited the dashboard; you didn't → **their change is the natural next step DOWN** |
-| ≠ | ≠ (but L = P) | treated as `clean` | Both sides already agree; the baseline is just stale → self-heals, never blocks, never prompts |
-| ≠ | ≠ (and L ≠ P) | `both-diverged` | True 3-way conflict — the only case a human is ever asked about |
+| ≠ | ≠ (but L = D) | treated as `clean` | Both sides already agree; the baseline is just stale → self-heals, never blocks, never prompts |
+| ≠ | ≠ (and L ≠ D) | `both-diverged` | True 3-way conflict — the only case a human is ever asked about |
 
 > **The core principle:** a question is only ever asked **per resource**, and
 > only for `both-diverged`-class situations at push time. Everything else has
@@ -61,7 +66,7 @@ UUIDs → names):
 | Command | Behavior |
 |---|---|
 | `pull` | 📝 rewrites the file (content no-op), refreshes baseline from disk |
-| `push` | `P == B` → PATCH proceeds silently (content no-op), baseline := response hash |
+| `push` | `D == B` → PATCH proceeds silently (content no-op), baseline := response hash |
 | `apply` | both of the above; fully silent |
 
 ### 2. Local changed, dashboard didn't (`local-ahead`)
@@ -69,7 +74,7 @@ UUIDs → names):
 | Command | Behavior |
 |---|---|
 | `pull` | ⬆️ local file preserved as-is; baseline untouched |
-| `push` | `P == B` → **pushed silently, no question** (your edit is the natural next step); baseline := response hash |
+| `push` | `D == B` → **pushed silently, no question** (your edit is the natural next step); baseline := response hash |
 | `apply` | pull preserves → push silent |
 
 ### 3. Dashboard changed, local didn't (`dashboard-ahead`)
@@ -77,7 +82,7 @@ UUIDs → names):
 | Command | Behavior |
 |---|---|
 | `pull` | ⬇️ dashboard version **synced down over the unchanged local file**, baseline refreshed. Nothing is lost — local had no edits. (Mirror of the silent-push rule.) |
-| `push` (without pulling first) | `P ≠ B` → conflict path: TTY prompt / CI block. Note: choosing "push local" here would **revert** the dashboard edit — usually you want "keep dashboard", then pull. |
+| `push` (without pulling first) | `D ≠ B` → conflict path: TTY prompt / CI block. Note: choosing "push local" here would **revert** the dashboard edit — usually you want "keep dashboard", then pull. |
 | `apply` | pull stage syncs it down → push stage sees clean → **silent, no prompt** |
 
 ### 4. Both changed differently (`both-diverged`) — the only real conflict
@@ -94,7 +99,7 @@ UUIDs → names):
 | `apply` (default `--resolve=defer`) | pull defers → push prompts for **exactly the conflicted resources**; clean ones flow silently |
 | `apply --resolve=ours` | no questions: pull re-baselines, push runs with `--overwrite` (CI semantics; dashboard edits lose) |
 
-### 5. Both changed identically (L = P, stale baseline)
+### 5. Both changed identically (L = D, stale baseline)
 
 Both `pull` and `push` treat this as clean (live sides agree — nothing to
 reconcile). The no-op write/PATCH re-seeds the baseline, self-healing the
@@ -140,6 +145,21 @@ additional ownership boundary.
 |---|---|
 | `push` | drift GET hits 404 → stale state mapping dropped, baseline deleted, resource **skipped this run** with a warning. The file is now case A — the next push hits the orphan gate, and `--allow-new-files` recreates it (deliberately requires re-confirmation). |
 | `pull` | resource absent from the dashboard list → its state entry drops out of the rewritten state file; the local file remains and becomes case A |
+
+### Listing completeness
+
+Vapi list endpoints return at most 100 items per request and offer no page
+cursor, only `createdAt` comparison filters. `fetchAllResources` pages backwards
+through `createdAt` until a short page proves it reached the end, deduping by id
+(the cursor is inclusive, so an item sharing the boundary timestamp is re-read
+rather than skipped).
+
+If the walk cannot be completed — the endpoint ignores the cursor params, the
+payload carries no `createdAt`, or the page-count backstop trips — the engine
+warns and the listing must be treated as a partial view. Anything that reads
+"absent from the listing" as "deleted on the dashboard" is wrong on a partial
+view; that includes push's `missing_remote` detection and `delete`'s orphan
+sweep, which consume the resources today without consuming the verdict.
 
 ### E. Fresh clone / new developer (L + S committed, but B is per-dev and missing)
 
