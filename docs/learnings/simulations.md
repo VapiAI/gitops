@@ -208,6 +208,56 @@ The three artifacts above share a common shape: the audio is clean (the customer
 
 ---
 
+## Running Voice Simulations at Scale
+
+### Batch voice sims: the simulation cluster runs out of call workers
+
+**What you might expect:** The org's simulation entitlement queues anything above its limit, so launching a whole suite in voice mode is safe.
+
+**What actually happens:** Each voice sim (`vapi.websocket`) uses two calls (tester + target), and all orgs share one simulation cluster with a small warm call-worker pool. The entitlement does not protect you from that pool. In one measured run, about 18 concurrent voice sims (about 36 calls) pushed call queue wait from ~8 ms to 47-76 s for six minutes, and 11 of 36 items failed. Batches of 4-7 right afterwards were clean.
+
+**Recommendation:** Run voice sims in batches of **6 or fewer**, and start the next batch only after the current run reaches `status: "ended"`. Never launch two voice runs at once. Chat sims (`vapi.webchat`) use no call workers and can run in larger batches.
+
+### Recognize infrastructure failures before you score a run
+
+**What actually happens:** When no worker picks up the call within ~2.5 s, the item fails with no evaluation, and it reads like an assistant failure in the dashboard.
+
+Treat an item as an infra failure, not an assistant failure, when any of these hold:
+- `status: "failed"` with `results: null` or no evaluations
+- the call's `endedReason` is `call.in-progress.error-vapifault-worker-not-available` or `phone-call-provider-closed-websocket`
+- the transcript is empty and the call started and ended in the same second
+
+**Recommendation:** Collect only the infra-failed simulation IDs, wait for the queue to drain, and rerun them as explicit entries (`{"type": "simulation", "simulationId": "..."}`) in one small batch against the same target. Report reruns separately. Platform-side confirmation (Vapi internal telemetry): `vapi_call_queue_time_ms_gauge_max` and `vapi_call_worker_not_available_total` on the simulation cluster.
+
+### A 500 on create can still create the resource
+
+**What actually happens:** `POST /eval/simulation/scenario` and `POST /eval/simulation` can return 500 after the row was inserted. A blind retry leaves duplicates.
+
+**Recommendation:** Make creates idempotent. Before you retry, list scenarios and simulations by name, reuse the ones that exist, and delete only the duplicates you created.
+
+### Text judges miss voice-only failures
+
+This is the reverse of [the audio-vs-transcript gap](#the-audio-vs-transcript-gap): the transcript looks right, but the caller heard something wrong. Structured-output judges read the transcript text, which is the TTS input, not the audio. Failures the judge cannot see:
+- a symbols-only chunk (for example `! @ # $ % ^ &` after a colon) is dropped before TTS, so the caller hears silence while the transcript shows the symbols
+- `$4.99/month` next to an en or em dash skips dollar formatting and is spoken as "four point nine nine month"
+- `GHz`, raw URLs, and markdown links are read letter by letter or garbled
+
+**Recommendation:** For any scenario about prices, numbers, links, symbols, units, or language, review the audio, not only the judge result. Prompt the assistant to write these in spoken words ("four dollars and ninety-nine cents per month", "example dot com slash help", "exclamation point, at sign"). Add `voice.chunkPlan.formatPlan.replacements` as a backstop (for example `GHz` → ` gigahertz`). Replacements run after the built-in formatters.
+
+### Getting sim audio when the org stores recordings in its own bucket
+
+**What actually happens:** Sim calls record to the org's storage. If the org uses its own S3 bucket, Vapi cannot presign it: `GET /call/:id/{mono,stereo,assistant,customer}-recording` redirects to the raw bucket URL, which returns 403.
+
+**Recommendation:** Capture audio live from the run item's `metadata.call.monitor.listenUrl` while the sim runs:
+- The stream is interleaved stereo 16-bit PCM: left channel = tester (caller), right channel = target (assistant). A JSON `{"type": "start", "sampleRate": ...}` message comes first (44100 Hz observed).
+- Start polling `GET /eval/simulation/run/:id/item` as soon as you create the run. `listenUrl` appears when each call starts.
+- The handshake can time out when the load balancer lands on the wrong pod. Open several connection attempts in parallel (a 4 s open timeout) and keep the first one that connects.
+- Write the frames to a WAV file with 2 channels and 16-bit samples. Split the channels with `ffmpeg -af "pan=mono|c0=c1"` (assistant) before you transcribe.
+
+When you transcribe with Whisper, note that it rewrites spoken numbers as digits ("$49.99"), which hides how a price was actually spoken. Suppress digit and `$` tokens (`suppress_tokens`) to get a words-only transcript.
+
+---
+
 # API Endpoint Reference
 
 All simulation endpoints are **alpha-tier** (mounted at `/api-alpha` in Swagger, `ApiTags(..., AlphaTag)`), require Bearer auth (private API key OR org JWT), and are scoped to the caller's organization.
@@ -277,6 +327,8 @@ Returns the org's voice-simulation concurrency budget:
 ```
 
 > Voice simulations consume **two** call slots each (one for the tester, one for the target). Chat-mode simulations don't pull from voice concurrency in the same way — see existing gotchas section above.
+
+> **Known issue:** this route is currently shadowed by `GET /eval/simulation/:id` (declared first), so it returns `400 "id must be a valid UUID"`. Until that is fixed, budget from the numbers above (two slots per voice sim) and see [Batch voice sims](#batch-voice-sims-the-simulation-cluster-runs-out-of-call-workers).
 
 ---
 
