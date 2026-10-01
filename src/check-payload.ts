@@ -27,6 +27,7 @@ import {
   refResolve,
   serverFieldsStrip,
 } from "./check-payload-refs.ts";
+import { checkMocksApply } from "./check-mocks.ts";
 import { credentialForwardMap, replaceCredentialRefs } from "./credentials.ts";
 import type { PromotionBindingsResolved } from "./promotion.ts";
 import { promotionBindingsApply } from "./promotion.ts";
@@ -523,6 +524,13 @@ export function checkPayloadBuild(
     },
     iterations: input.check.iterations,
   };
+  // Last: the fail-closed tool and server policy (see check-mocks.ts).
+  checkMocksApply({
+    body,
+    check: input.check,
+    errors: ctx.errors,
+    warnings: ctx.warnings,
+  });
   // A backstop for reference fields the builder doesn't handle; run only
   // when nothing else failed, so a known problem isn't reported twice.
   if (ctx.errors.length === 0) leftoverReferencesCheck(ctx, body, "body");
