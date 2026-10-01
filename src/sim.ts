@@ -8,8 +8,21 @@ import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import {
+  simRunItemTerminal,
+  simRunVerdict,
+  type SimRun,
+  type SimRunItem,
+  type SimRunItemCounts,
+  type SimRunVerdict,
+} from "./sim-result.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet } from "./user-agent.ts";
+import {
+  VapiApiError,
+  vapiFetchJson,
+  type VapiConnection,
+} from "./vapi-client.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -40,14 +53,26 @@ export interface SimRunOptions {
   watch?: boolean;
   iterations?: number;
   transport?: "voice" | "chat";
+  // Give up (and cancel the run) after this long. Default 20 minutes.
+  timeoutMs?: number;
+  // Aborting cancels the run and reports it as incomplete (Ctrl-C).
+  signal?: AbortSignal;
+  pollIntervalMs?: number;
+  // How long to keep re-reading items after the run ends, while their
+  // results are still being written. Default 2 minutes.
+  hydrationMs?: number;
 }
 
 export interface SimRunSummary {
   runId: string;
+  // Dashboard link from the create response (GET doesn't return it).
+  url?: string;
   status: string;
-  pass: number;
-  fail: number;
-  skipped: number;
+  // Undefined when the run wasn't watched (`--no-watch`).
+  verdict?: SimRunVerdict;
+  counts?: SimRunItemCounts;
+  // True when this command canceled the run (timeout or interrupt).
+  canceled: boolean;
   durationMs: number;
 }
 
@@ -195,44 +220,95 @@ export function resolveSelection(
   throw new Error("Must specify --suite <name> or --simulations <name1,name2>");
 }
 
-interface SimRunResponse {
-  id?: string;
-  evalRunId?: string;
-  status?: string;
-  results?: Array<{ status?: string; isSkipped?: boolean }>;
-  endedReason?: string;
-  endedMessage?: string;
-  cost?: number;
-  [key: string]: unknown;
+// Fields of `POST /eval/simulation/run`'s response this runner reads. The
+// create response is the only place `url` and `simulationRunItemIds` appear.
+interface SimRunCreated extends SimRun {
+  url?: string;
+  simulationRunItemIds?: string[];
 }
 
 const POLL_INTERVAL_MS = 3000;
-const POLL_TIMEOUT_MS = 600_000;
+const DEFAULT_TIMEOUT_MS = 20 * 60_000;
+const DEFAULT_HYDRATION_MS = 2 * 60_000;
+// The API's maximum page size; one page covers nearly every run.
+const ITEM_PAGE_SIZE = 1000;
 
-async function fetchJson(
-  cfg: SimEnv,
-  method: "GET" | "POST",
-  endpoint: string,
-  body?: unknown,
-): Promise<unknown> {
-  const response = await fetch(`${cfg.baseUrl}${endpoint}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${cfg.token}`,
-      "Content-Type": "application/json",
-      "User-Agent": userAgentGet("sim"),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`API ${method} ${endpoint} → ${response.status}: ${text}`);
-  }
-  return response.json();
+function connectionFor(cfg: SimEnv): VapiConnection {
+  return {
+    token: cfg.token,
+    baseUrl: cfg.baseUrl,
+    userAgent: userAgentGet("sim"),
+  };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+// Resolves after `ms`, or early (to "aborted") when the signal fires.
+function sleepUnlessAborted(
+  ms: number,
+  signal?: AbortSignal,
+): Promise<"slept" | "aborted"> {
+  if (signal?.aborted) return Promise.resolve("aborted");
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve("slept");
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve("aborted");
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// Reads every item of a run. Accepts both the paginated shape
+// (`{ results, metadata }`, sent when `limit`/`page` are given) and a bare
+// array. Items are deduped by id because the API orders pages only by
+// creation time, and a run's items share it, so OFFSET pages can overlap.
+export async function simRunItemsFetch(
+  connection: VapiConnection,
+  runId: string,
+): Promise<SimRunItem[]> {
+  const byId = new Map<string, SimRunItem>();
+  for (let page = 1; page <= 100; page++) {
+    const response = await vapiFetchJson<
+      | SimRunItem[]
+      | { results?: SimRunItem[]; metadata?: { totalItems?: number } }
+    >(
+      connection,
+      "GET",
+      `/eval/simulation/run/${runId}/item?page=${page}&limit=${ITEM_PAGE_SIZE}`,
+    );
+    if (Array.isArray(response)) {
+      for (const item of response) byId.set(item.id, item);
+      break;
+    }
+    const results = response?.results ?? [];
+    for (const item of results) byId.set(item.id, item);
+    const total = response?.metadata?.totalItems;
+    if (results.length < ITEM_PAGE_SIZE) break;
+    if (total !== undefined && byId.size >= total) break;
+  }
+  return [...byId.values()];
+}
+
+// Cancels a run. Returns false (instead of throwing) when the run had
+// already ended or a concurrent cancel won the race (400 / 409).
+export async function simRunCancel(
+  connection: VapiConnection,
+  runId: string,
+): Promise<boolean> {
+  try {
+    await vapiFetchJson(connection, "PATCH", `/eval/simulation/run/${runId}`);
+    return true;
+  } catch (error) {
+    if (
+      error instanceof VapiApiError &&
+      (error.statusCode === 400 || error.statusCode === 409)
+    ) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export async function runSimulation(
@@ -241,6 +317,8 @@ export async function runSimulation(
   target: SimTarget,
   options: SimRunOptions = {},
 ): Promise<SimRunSummary> {
+  const connection = connectionFor(cfg);
+  const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
   const body: Record<string, unknown> = {
     simulations: selection.entries,
     target:
@@ -258,68 +336,135 @@ export async function runSimulation(
     `🧪 Starting simulation run — ${selection.label} → ${target.type}/${target.resourceName}`,
   );
   const start = Date.now();
-  const created = (await fetchJson(
-    cfg,
+  // Creating a run queues paid work before the response returns, so a 5xx
+  // here may still have started it: retry rate limits only.
+  const created = await vapiFetchJson<SimRunCreated>(
+    connection,
     "POST",
     "/eval/simulation/run",
     body,
-  )) as SimRunResponse;
-  const runId = created.evalRunId ?? created.id;
+    { retry: "rate-limit-only" },
+  );
+  const runId = created?.id;
   if (!runId) {
-    throw new Error(
-      `POST /eval/simulation/run returned no runId (keys: ${Object.keys(created).join(", ")})`,
-    );
+    throw new Error("POST /eval/simulation/run returned no run id");
   }
   console.log(`   Run ID: ${runId}`);
+  if (created.url) console.log(`   Run: ${created.url}`);
 
-  let last: SimRunResponse = created;
-  if (options.watch ?? true) {
-    while (Date.now() - start < POLL_TIMEOUT_MS) {
-      await sleep(POLL_INTERVAL_MS);
-      last = (await fetchJson(
-        cfg,
-        "GET",
-        `/eval/simulation/run/${runId}`,
-      )) as SimRunResponse;
-      const status = last.status ?? "running";
-      process.stdout.write(`\r   Status: ${status}     `);
-      if (status === "ended" || status === "failed" || status === "completed") {
-        process.stdout.write("\n");
-        break;
-      }
-    }
-    if (Date.now() - start >= POLL_TIMEOUT_MS) {
-      throw new Error(
-        `Simulation run ${runId} timed out after ${POLL_TIMEOUT_MS / 1000}s`,
-      );
-    }
+  const summary: SimRunSummary = {
+    runId,
+    url: created.url,
+    status: created.status ?? "queued",
+    counts: created.itemCounts,
+    canceled: false,
+    durationMs: 0,
+  };
+  if (!(options.watch ?? true)) {
+    summary.durationMs = Date.now() - start;
+    return summary;
   }
 
-  const results = Array.isArray(last.results) ? last.results : [];
-  const pass = results.filter(
-    (r) => r.status === "pass" && !r.isSkipped,
-  ).length;
-  const fail = results.filter(
-    (r) => r.status !== "pass" && !r.isSkipped,
-  ).length;
-  const skipped = results.filter((r) => r.isSkipped === true).length;
+  const deadline = start + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  let run: SimRun = created;
+  let stopReason: string | undefined;
+  while (run.status !== "ended") {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      stopReason = `timed out after ${Math.round((Date.now() - start) / 1000)}s`;
+      break;
+    }
+    const slept = await sleepUnlessAborted(
+      Math.min(pollIntervalMs, remaining),
+      options.signal,
+    );
+    if (slept === "aborted") {
+      stopReason = "interrupted";
+      break;
+    }
+    run = await vapiFetchJson<SimRun>(
+      connection,
+      "GET",
+      `/eval/simulation/run/${runId}`,
+    );
+    if (process.stdout.isTTY) {
+      process.stdout.write(`\r   Status: ${run.status ?? "unknown"}     `);
+    }
+  }
+  if (process.stdout.isTTY) process.stdout.write("\n");
 
-  return {
-    runId,
-    status: last.status ?? "unknown",
-    pass,
-    fail,
-    skipped,
-    durationMs: Date.now() - start,
-  };
+  if (stopReason) {
+    summary.canceled = await simRunCancel(connection, runId);
+    summary.status = run.status ?? "unknown";
+    summary.counts = run.itemCounts;
+    summary.verdict = {
+      status: "incomplete",
+      reason: `${stopReason}${summary.canceled ? "; run canceled" : ""}`,
+      failures: [],
+    };
+    summary.durationMs = Date.now() - start;
+    return summary;
+  }
+
+  // Items can lag the run: keep re-reading until every item is terminal and
+  // carries its results, or the hydration window closes.
+  const hydrationDeadline =
+    Date.now() + (options.hydrationMs ?? DEFAULT_HYDRATION_MS);
+  let items = await simRunItemsFetch(connection, runId);
+  while (
+    Date.now() < hydrationDeadline &&
+    (items.length < (run.itemCounts?.total ?? 0) ||
+      !items.every(simRunItemTerminal))
+  ) {
+    if (
+      (await sleepUnlessAborted(pollIntervalMs, options.signal)) === "aborted"
+    ) {
+      break;
+    }
+    items = await simRunItemsFetch(connection, runId);
+  }
+
+  summary.status = run.status ?? "unknown";
+  summary.counts = run.itemCounts;
+  summary.verdict = simRunVerdict({
+    run,
+    items,
+    expected: created.simulationRunItemIds?.length,
+  });
+  summary.durationMs = Date.now() - start;
+  return summary;
+}
+
+function valueFormat(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 export function formatSummary(summary: SimRunSummary): string {
-  const total = summary.pass + summary.fail + summary.skipped;
-  return [
-    `📊 Simulation summary (run ${summary.runId})`,
-    `   Status: ${summary.status}`,
-    `   Results: ${summary.pass}/${total} pass, ${summary.fail} fail${summary.skipped > 0 ? `, ${summary.skipped} skipped` : ""}`,
-    `   Duration: ${(summary.durationMs / 1000).toFixed(1)}s`,
-  ].join("\n");
+  const lines = [`📊 Simulation summary (run ${summary.runId})`];
+  if (summary.url) lines.push(`   Run: ${summary.url}`);
+  lines.push(`   Status: ${summary.status}`);
+  if (summary.counts) {
+    const c = summary.counts;
+    lines.push(
+      `   Items: ${c.passed} passed, ${c.failed} failed, ${c.canceled} canceled, ${c.running + c.queued} unfinished (of ${c.total})`,
+    );
+  }
+  if (summary.verdict) {
+    lines.push(
+      `   Verdict: ${summary.verdict.status} — ${summary.verdict.reason}`,
+    );
+    for (const failure of summary.verdict.failures) {
+      const detail =
+        failure.comparator !== undefined
+          ? ` (expected ${failure.comparator} ${valueFormat(failure.expected)}, got ${valueFormat(failure.extracted)})`
+          : "";
+      lines.push(
+        `   ✗ ${failure.item}: ${failure.evaluation}${detail}${failure.reason ? ` — ${failure.reason}` : ""}`,
+      );
+    }
+  } else {
+    lines.push("   Verdict: not watched (--no-watch)");
+  }
+  lines.push(`   Duration: ${(summary.durationMs / 1000).toFixed(1)}s`);
+  return lines.join("\n");
 }
