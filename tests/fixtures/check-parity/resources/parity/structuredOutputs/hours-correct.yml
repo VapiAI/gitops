@@ -1,0 +1,4 @@
+name: hours-correct
+schema:
+  type: boolean
+  description: "Did the clinic say it is open 8am to 5pm on Fridays?"

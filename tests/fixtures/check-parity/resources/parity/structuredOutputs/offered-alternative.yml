@@ -1,0 +1,4 @@
+name: offered-alternative
+schema:
+  type: boolean
+  description: "Did the clinic say Tuesday was unavailable and offer Wednesday at 11:00?"

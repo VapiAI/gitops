@@ -1,0 +1,25 @@
+name: Bright Smile Dental
+members:
+  - assistantId: receptionist
+  - assistantId: scheduler
+    assistantOverrides:
+      tools:append:
+        - type: function
+          function:
+            name: book_appointment
+            description: Book an appointment slot the caller has accepted.
+            parameters:
+              type: object
+              properties:
+                date:
+                  type: string
+                time:
+                  type: string
+                service:
+                  type: string
+                patientId:
+                  type: string
+              required: [date, time, service]
+          server:
+            url: https://vapi-gitops-ci.invalid
+            timeoutSeconds: 1

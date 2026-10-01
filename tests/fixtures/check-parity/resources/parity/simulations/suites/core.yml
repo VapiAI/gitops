@@ -1,0 +1,5 @@
+name: Core
+simulationIds:
+  - s1-book-cleaning
+  - s2-hours-question
+  - s3-alternative-slot

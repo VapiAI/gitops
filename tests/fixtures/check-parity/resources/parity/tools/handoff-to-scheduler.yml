@@ -1,0 +1,5 @@
+type: handoff
+destinations:
+  - type: assistant
+    assistantId: scheduler ## the squad's second member
+    description: Books and changes appointments, checks availability.

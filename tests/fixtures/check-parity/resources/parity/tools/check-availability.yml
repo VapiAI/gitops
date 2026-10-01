@@ -1,0 +1,15 @@
+type: function
+function:
+  name: check_availability
+  description: Check open appointment slots for a date and service.
+  parameters:
+    type: object
+    properties:
+      date:
+        type: string
+      service:
+        type: string
+    required: [date, service]
+server:
+  url: https://vapi-gitops-ci.invalid
+  timeoutSeconds: 1

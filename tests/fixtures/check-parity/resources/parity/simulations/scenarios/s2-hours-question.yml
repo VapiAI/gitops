@@ -1,0 +1,21 @@
+name: S2 hours question
+instructions: You are Sam Rivera, phone 206-555-0199. You only want to know the clinic's opening hours on Fridays. Do not book anything. After you hear the hours, say thanks and goodbye.
+evaluations:
+  - structuredOutputId: hours-correct
+    comparator: "="
+    value: true
+    required: true
+  - structuredOutputId: no-booking
+    comparator: "="
+    value: true
+    required: true
+toolMocks:
+  - toolName: lookup_patient
+    result: '{"found":false}'
+    enabled: true
+  - toolName: check_availability
+    result: '{"error":"unexpected call"}'
+    enabled: true
+  - toolName: book_appointment
+    result: '{"error":"unexpected call"}'
+    enabled: true

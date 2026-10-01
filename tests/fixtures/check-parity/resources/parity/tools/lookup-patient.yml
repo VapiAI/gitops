@@ -1,0 +1,13 @@
+type: function
+function:
+  name: lookup_patient
+  description: Look up the caller's patient record by phone number. Call this first.
+  parameters:
+    type: object
+    properties:
+      phone:
+        type: string
+    required: [phone]
+server:
+  url: https://vapi-gitops-ci.invalid
+  timeoutSeconds: 1
