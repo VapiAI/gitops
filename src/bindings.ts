@@ -30,10 +30,10 @@ export function updateEnvConnection(
 ): string {
   const preserved = existingContent
     .split("\n")
-    .filter((line) => !/^\s*VAPI_(TOKEN|BASE_URL)\s*=/.test(line))
+    .filter((line) => !/^\s*VAPI_(TOKEN|PRIVATE_API_KEY|BASE_URL)\s*=/.test(line))
     .join("\n")
     .trim();
-  const connection = [`VAPI_TOKEN=${token}`];
+  const connection = [`VAPI_PRIVATE_API_KEY=${token}`];
   if (baseUrl) connection.push(`VAPI_BASE_URL=${baseUrl}`);
   return `${connection.join("\n")}${preserved ? `\n\n${preserved}` : ""}\n`;
 }

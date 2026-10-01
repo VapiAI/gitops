@@ -1,3 +1,4 @@
+import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -268,19 +269,24 @@ export const {
   applyFilter: APPLY_FILTER,
 } = parseFlags();
 
+// The private API key: VAPI_PRIVATE_API_KEY (canonical) or VAPI_TOKEN (legacy).
+// Capture the real environment before .env files are merged in, so an
+// exported key of either name still beats a key in the .env file.
+const ENV_API_KEY = resolveApiKey(process.env);
+
 loadEnvFile(VAPI_ENV, BASE_DIR);
 
 // API configuration
-export const VAPI_TOKEN = process.env.VAPI_TOKEN;
+export const VAPI_TOKEN = ENV_API_KEY ?? resolveApiKey(process.env);
 export const VAPI_BASE_URL = process.env.VAPI_BASE_URL || "https://api.vapi.ai";
 
 if (!VAPI_TOKEN) {
-  console.error("❌ VAPI_TOKEN environment variable is required");
-  console.error(
-    `   Create a .env.${VAPI_ENV} file with: VAPI_TOKEN=your-token`,
-  );
+  console.error(`❌ ${missingApiKeyMessage(VAPI_ENV)}`);
   process.exit(1);
 }
+// Some call sites read process.env.VAPI_TOKEN directly; keep them working
+// when only VAPI_PRIVATE_API_KEY was provided.
+process.env.VAPI_TOKEN = VAPI_TOKEN;
 
 // Paths
 export const RESOURCES_DIR = join(BASE_DIR, "resources", VAPI_ENV);

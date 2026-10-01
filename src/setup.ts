@@ -4,8 +4,21 @@ import { existsSync, readdirSync } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import {
+  API_KEY_VAR,
+  API_KEYS_URL,
+  LEGACY_API_KEY_VAR,
+  resolveApiKey,
+} from "./api-key.ts";
 import { updateEnvConnection } from "./bindings.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
+import {
+  type DirectSetupOptions,
+  isPlaceholderToken,
+  parseSetupArgs,
+  readEnvValue,
+  SETUP_USAGE,
+} from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,6 +339,132 @@ function invokePull(slug: string, selectedIds: Set<string>): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Non-interactive setup (`npm run setup -- <org> [--region] [--resources]`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function runPullScript(args: string[]): void {
+  const binDir = join(BASE_DIR, "node_modules", ".bin");
+  const pathSep = process.platform === "win32" ? ";" : ":";
+  const env = {
+    ...process.env,
+    PATH: `${binDir}${pathSep}${process.env.PATH ?? ""}`,
+  };
+  execSync(["tsx", "src/pull.ts", ...args].join(" "), {
+    cwd: BASE_DIR,
+    stdio: "inherit",
+    env,
+  });
+}
+
+function fail(message: string): never {
+  console.error(c.red(`\n  ✗ ${message}\n`));
+  process.exit(1);
+}
+
+async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
+  const { slug, region, resources } = options;
+  const envPath = join(BASE_DIR, `.env.${slug}`);
+  const resourceDir = join(BASE_DIR, "resources", slug);
+  const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
+
+  console.log(c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`));
+
+  // Never clobber an org that already has local state. Re-running setup is
+  // a destructive operation in the wizard (it deletes and re-pulls), and an
+  // agent should not do that without a human deciding to.
+  if (existsSync(resourceDir) || existsSync(stateFile)) {
+    fail(
+      `Org "${slug}" is already set up locally (resources/${slug}/ or .vapi-state.${slug}.json exists).\n` +
+        `    To refresh it, run: npm run pull -- ${slug}\n` +
+        `    To start over, a human should run the interactive wizard: npm run setup`,
+    );
+  }
+
+  // ── Token: env var first, then an existing .env.<org> ────────────────
+  const envFileContent = existsSync(envPath)
+    ? await readFile(envPath, "utf-8")
+    : "";
+  const fromEnv = resolveApiKey(process.env);
+  const fromFile = resolveApiKey({
+    VAPI_PRIVATE_API_KEY: readEnvValue(envFileContent, "VAPI_PRIVATE_API_KEY"),
+    VAPI_TOKEN: readEnvValue(envFileContent, "VAPI_TOKEN"),
+  });
+  const token =
+    fromEnv && !isPlaceholderToken(fromEnv)
+      ? fromEnv
+      : fromFile && !isPlaceholderToken(fromFile)
+        ? fromFile
+        : undefined;
+
+  if (!token) {
+    fail(
+      `No Vapi private API key found.\n` +
+        `    Copy one from ${API_KEYS_URL} (Private API Keys section), then either:\n` +
+        `    • add it to .env.${slug} as ${API_KEY_VAR}=<private API key> (see .env.example), or\n` +
+        `    • export ${API_KEY_VAR}=<private API key> in the environment\n` +
+        `    Then re-run: npm run setup -- ${slug}`,
+    );
+  }
+  console.log(
+    c.dim(
+      `  Using API key from ${fromEnv && token === fromEnv ? `${process.env[API_KEY_VAR]?.trim() ? API_KEY_VAR : LEGACY_API_KEY_VAR} environment variable` : `.env.${slug}`}`,
+    ),
+  );
+
+  // ── Region: flag > VAPI_BASE_URL > auto-detect ────────────────────────
+  const configuredBase =
+    process.env.VAPI_BASE_URL?.trim() ||
+    readEnvValue(envFileContent, "VAPI_BASE_URL");
+  const candidates = region
+    ? [VAPI_REGIONS[region]!]
+    : configuredBase
+      ? [configuredBase]
+      : [VAPI_REGIONS.us!, VAPI_REGIONS.eu!];
+
+  let connected = false;
+  for (const base of candidates) {
+    vapiBaseUrl = base;
+    console.log(c.dim(`  Validating against ${base}…`));
+    if (await validateToken(token)) {
+      connected = true;
+      break;
+    }
+  }
+  if (!connected) {
+    fail(
+      `Could not authenticate against ${candidates.join(" or ")}.\n` +
+        `    Check that the key is a PRIVATE API key for the right org, and pass --region us|eu if needed.`,
+    );
+  }
+  console.log(c.green(`  ✓ Connected to Vapi (${vapiBaseUrl})\n`));
+
+  // ── Write env file + pull ─────────────────────────────────────────────
+  await writeEnvFile(slug, token, vapiBaseUrl);
+  console.log(c.green(`  ✓ Wrote .env.${slug} (gitignored)`));
+  await mkdir(resourceDir, { recursive: true });
+
+  // Child pulls give process env precedence over .env files, so pin the
+  // validated connection explicitly rather than inheriting a stale value.
+  process.env.VAPI_PRIVATE_API_KEY = token;
+  process.env.VAPI_TOKEN = token;
+  process.env.VAPI_BASE_URL = vapiBaseUrl;
+
+  // Same first step as the wizard: sync org-local bindings only.
+  runPullScript([slug, "--bootstrap", "--bindings-only"]);
+
+  if (resources === "all") {
+    // Plain (non-force) pull into the empty resources/<org>/ directory.
+    // Uses the engine's paginated list calls, so large orgs aren't truncated.
+    runPullScript([slug, "--skip-bindings"]);
+  } else {
+    // State-only: map names ↔ UUIDs without writing resource files.
+    runPullScript([slug, "--bootstrap", "--skip-bindings"]);
+  }
+
+  printSummary(slug);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Display helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -351,9 +490,37 @@ function resourceDisplayName(r: Record<string, unknown>): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const parsed = parseSetupArgs(process.argv.slice(2));
+
+  if (parsed.mode === "help") {
+    console.log(SETUP_USAGE);
+    return;
+  }
+  if (parsed.mode === "error") {
+    console.error(c.red(`\n  ✗ ${parsed.message}\n`));
+    console.error(SETUP_USAGE);
+    process.exit(1);
+  }
+
   if (!existsSync(join(BASE_DIR, "node_modules"))) {
     console.log(c.dim("\n  Installing dependencies...\n"));
     execSync("npm install", { cwd: BASE_DIR, stdio: "inherit" });
+  }
+
+  if (parsed.mode === "direct") {
+    await runDirectSetup(parsed.options);
+    return;
+  }
+
+  // The wizard needs a real terminal. Without one (AI agents, CI, piped
+  // stdin) the prompt library dies with an opaque "force closed" error,
+  // so explain the non-interactive path instead.
+  if (!process.stdin.isTTY) {
+    console.error(
+      c.red("\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n"),
+    );
+    console.error(SETUP_USAGE);
+    process.exit(1);
   }
 
   console.log("");
@@ -373,7 +540,7 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const apiKey = await password({
-      message: "Paste your Vapi private API key",
+      message: `Paste your Vapi private API key (from ${API_KEYS_URL})`,
       mask: "•",
       validate: (value) => {
         if (!value.trim()) return "API key is required";
@@ -617,13 +784,13 @@ function printSummary(slug: string): void {
   console.log("");
   console.log("  Next steps:");
   console.log(
-    `    ${c.cyan(`npm run pull -- ${slug}`)}             Pull latest from Vapi`,
+    `    ${c.cyan(`npm run validate -- ${slug}`)}         Schema-check local files (no network)`,
   );
   console.log(
-    `    ${c.cyan(`npm run push -- ${slug}`)}             Push local changes to Vapi`,
+    `    ${c.cyan(`npm run apply -- ${slug}`)}            Deploy local changes (pull → merge → push)`,
   );
   console.log(
-    `    ${c.cyan(`npm run pull -- ${slug} --force`)}     Force overwrite local files`,
+    `    ${c.cyan(`npm run pull -- ${slug}`)}             Pull latest from Vapi (keeps local edits)`,
   );
   console.log("");
 }

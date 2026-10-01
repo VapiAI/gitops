@@ -34,8 +34,8 @@ Manage Vapi resources via Git using YAML/Markdown as the source-of-truth.
 
 ### Prerequisites
 
-- Node.js installed
-- Vapi API token
+- Node.js 20.12+ or 22.13+ (`.nvmrc` pins 22 — run `nvm use`)
+- A Vapi **private API key** for each org you want to manage — create or copy one at [dashboard.vapi.ai/org/api-keys](https://dashboard.vapi.ai/org/api-keys) under **Private API Keys**
 
 ### Installation
 
@@ -53,13 +53,36 @@ npm run setup
 
 This will:
 
-1. Prompt for your Vapi API key (with region auto-detection)
+1. Prompt for your Vapi private API key (with region auto-detection)
 2. Ask for an org/folder name (e.g. `my-org`, `production`)
 3. Let you choose which resources to download (all or pick individually)
 4. Detect dependencies and offer to download them too
 5. Create `.env.<org>` and `resources/<org>/` for you
 
 You can run setup multiple times to add more orgs.
+
+### Non-interactive Setup (AI agents, CI)
+
+The wizard needs a real terminal. Coding agents (Claude Code, Cursor, Codex, …) and CI
+run commands without one, so pass the org name to skip every prompt:
+
+```bash
+# Option A — a human creates the env file, so the key never passes through the agent
+cp .env.example .env.my-org          # then paste the private API key into VAPI_PRIVATE_API_KEY
+npm run setup -- my-org
+
+# Option B — the key is already in the environment (CI secret, shell export)
+VAPI_PRIVATE_API_KEY=... npm run setup -- my-org
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--region us\|eu` | `VAPI_BASE_URL` if set, else auto-detect (US, then EU) | Which Vapi API to use |
+| `--resources all\|none` | `all` | `all` downloads every resource into `resources/<org>/`; `none` only seeds `.vapi-state.<org>.json` (use when you'll author from scratch) |
+
+The private API key is never accepted as a command-line flag (it would leak into shell history and
+agent transcripts). Non-interactive setup also refuses to run if `resources/<org>/` or
+`.vapi-state.<org>.json` already exists — use `npm run pull -- <org>` to refresh an existing org.
 
 ### Commands
 
@@ -260,7 +283,7 @@ npm run cleanup -- <org> --force --confirm <org>
 **Surgical alternative when the orphan set includes Vapi-default fixtures** (e.g. the seven undeletable stock simulation personalities — see `docs/learnings/simulations.md`): delete individual resources via direct API call, then refresh state:
 
 ```bash
-curl -X DELETE -H "Authorization: Bearer $VAPI_TOKEN" \
+curl -X DELETE -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
   https://api.vapi.ai/assistant/<orphan-uuid>
 npm run pull -- <org> --bootstrap
 ```
@@ -291,15 +314,15 @@ npm run push -- <org> --dry-run
 
 Resources are scoped by organization (not fixed `dev`/`stg`/`prod` names). Each org gets:
 
-- `.env.<org>` — API token and base URL
+- `.env.<org>` — private API key and base URL
 - `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
 - `.vapi-state-hash/<org>/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
 - `resources/<org>/` — all resource files
 
 ```
 vapi-gitops/
-├── .env.my-org                    # API token for my-org
-├── .env.production                # API token for production
+├── .env.my-org                    # Private API key for my-org
+├── .env.production                # Private API key for production
 ├── .vapi-state.my-org.json        # State file for my-org
 ├── .vapi-state.production.json    # State file for production
 ├── resources/
@@ -371,7 +394,7 @@ manual runs:
 
 1. Commit `promotion.yml`.
 2. Add a repository secret named `VAPI_PROMOTION_TOKENS` containing a JSON map
-   from org slug to that org's private API token, for example
+   from org slug to that org's private API key, for example
    `{"dev":"...","staging":"...","prod":"..."}`.
 3. Set the repository variable `VAPI_PROMOTION_ENABLED=true` to reconcile all
    adjacent transitions after changes land on `main`. This continuously
@@ -434,16 +457,16 @@ from the destination without touching unrelated destination resources.
 
 ## How to Use This Repo
 
-1. **Run `npm run setup`** to configure your first org
+1. **Run `npm run setup`** to configure your first org (or `npm run setup -- <org>` without a terminal)
 2. **Edit resources** in `resources/<org>/` (`.md` assistants, `.yml` tools/squads/etc.)
-3. **Push changes** with `npm run push` (interactive) or `npm run push -- <org>`
-4. **Pull updates** with `npm run pull` when the platform may have changed
+3. **Validate** with `npm run validate -- <org>`
+4. **Deploy** with `npm run apply -- <org>` (pull → merge → push)
 
 Use:
 
-- `pull` when Vapi might have changed
-- `push` for explicit deploys
-- `apply` (`pull -> merge -> push`) for sync + deploy in one command
+- `apply` for deploys — the default; safe against dashboard edits made since your last pull
+- `pull` when Vapi might have changed and you only want to sync down
+- `push` only right after a `pull`, when nothing else has touched the dashboard (see [When to use raw `push`](#when-to-use-raw-push-instead-of-apply))
 
 ### Bootstrap State Sync
 
@@ -759,9 +782,6 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 vapi-gitops/
 ├── docs/
 │   ├── Vapi Prompt Optimization Guide.md
-<<<<<<< HEAD
-│   └── changelog.md
-=======
 │   ├── changelog.md
 │   └── learnings/                      # Gotchas, recipes, troubleshooting per area
 │       ├── assistants.md
@@ -769,9 +789,9 @@ vapi-gitops/
 │       ├── squads.md
 │       ├── simulations.md
 │       └── ...
->>>>>>> e280ea5 (docs: align README and AGENTS with org-slug model and P0 fixes)
 ├── src/
-│   ├── setup.ts               # Interactive setup wizard
+│   ├── setup.ts               # Setup wizard (interactive) + non-interactive setup
+│   ├── setup-args.ts          # `npm run setup` argument parsing
 │   ├── interactive.ts          # Interactive pull/push/apply/call/cleanup flows
 │   ├── searchableCheckbox.ts   # Custom multi-select prompt component
 │   ├── pull.ts                 # Pull platform state
@@ -810,7 +830,7 @@ vapi-gitops/
 │   ├── path-matching.test.ts   # Short-form path matching (P0-7 regression suite)
 │   ├── cleanup-safety.test.ts  # --confirm + empty-state gates (P0-4 regression suite)
 │   └── cli-arg-parsing.test.ts # Bare-id refusal, --confirm pass-through (P0-7)
-├── .env.<org>                  # API token per org (gitignored)
+├── .env.<org>                  # Private API key per org (gitignored)
 └── .vapi-state.<org>.json      # State file per org
 ```
 
@@ -822,7 +842,7 @@ vapi-gitops/
 
 | Variable        | Required | Description                                      |
 | --------------- | -------- | ------------------------------------------------ |
-| `VAPI_TOKEN`    | ✅       | API authentication token                         |
+| `VAPI_PRIVATE_API_KEY`  | ✅       | Vapi private API key from [Private API Keys](https://dashboard.vapi.ai/org/api-keys). The legacy name `VAPI_TOKEN` is still accepted. |
 | `VAPI_BASE_URL` | ❌       | API base URL (defaults to `https://api.vapi.ai`) |
 
 These are stored in `.env.<org>` files, one per configured organization.

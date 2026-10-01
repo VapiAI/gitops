@@ -104,7 +104,7 @@ Simulations can target squads directly using `target.type: "squad"` with the squ
 
 ```bash
 curl -X POST "https://api.vapi.ai/eval/simulation/run" \
-  -H "Authorization: Bearer $VAPI_API_KEY" \
+  -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
         "simulations": [{"type": "simulationSuite", "simulationSuiteId": "your-suite-id"}],
@@ -362,7 +362,7 @@ Returns the org's voice-simulation concurrency budget:
 1. **Skip `--force` against fresh orgs** that haven't had their stock fixtures touched. The pending-deletions warning is harmless without `--force`.
 2. **To clean other orphans (real assistants, tools you removed locally) without tripping on defaults**, delete them via direct API call instead of `--force`:
    ```bash
-   curl -X DELETE -H "Authorization: Bearer $VAPI_TOKEN" \
+   curl -X DELETE -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
      https://api.vapi.ai/assistant/<orphan-uuid>
    ```
    Then `npm run pull -- <org> --bootstrap` to refresh state. This bypasses the engine's "delete all orphans" loop entirely.

@@ -1,3 +1,4 @@
+import { resolveApiKey } from "./api-key.ts";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -148,7 +149,10 @@ function connectionLoad(
 ): OrgConnection {
   const envPath = resolve(ROOT_DIR, `.env.${org}`);
   const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const envToken = envValue(envContent, "VAPI_TOKEN");
+  const envToken = resolveApiKey({
+    VAPI_PRIVATE_API_KEY: envValue(envContent, "VAPI_PRIVATE_API_KEY"),
+    VAPI_TOKEN: envValue(envContent, "VAPI_TOKEN"),
+  });
   const token = tokens.get(org) ?? envToken;
   if (!token)
     throw new Error(
@@ -168,6 +172,7 @@ function childRun(
 ): void {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
+    VAPI_PRIVATE_API_KEY: connection.token,
     VAPI_TOKEN: connection.token,
   };
   if (connection.baseUrl) environment.VAPI_BASE_URL = connection.baseUrl;

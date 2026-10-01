@@ -6,7 +6,7 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 
 **Prompt quality:** Whenever you create a new assistant or change an existing assistant’s system prompt, read **`docs/Vapi Prompt Optimization Guide.md`** first. It goes deeper on structure, voice constraints, tool usage, and evaluation than the summary in this file.
 
-**Org-scoped resources:** Resources live in `resources/<org>/` (e.g. `resources/my-org/`, `resources/my-org-prod/`). Each org directory is isolated — `npm run push -- my-org` only touches `resources/my-org/`. Run `npm run setup` to create a new org.
+**Org-scoped resources:** Resources live in `resources/<org>/` (e.g. `resources/my-org/`, `resources/my-org-prod/`). Each org directory is isolated — `npm run push -- my-org` only touches `resources/my-org/`. Run `npm run setup` to create a new org (interactive), or `npm run setup -- <org>` when you have no TTY — see **First-time setup (agents)** below.
 
 **Template-safe first run:** In a fresh clone, prefer `npm run pull -- <org> --bootstrap` to refresh `.vapi-state.<org>.json` and credential mappings without materializing the target org's resources into `resources/<org>/`. `npm run push -- <org>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
 
@@ -49,6 +49,23 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 
 ---
 
+## First-time setup (agents)
+
+You usually run without a TTY, so **do not run bare `npm run setup`** — the wizard will exit and tell you to use direct mode. Follow these steps instead:
+
+1. `nvm use` (or confirm `node --version` satisfies `engines` in `package.json`), then `npm install`.
+2. **Get the API key without handling it yourself.** Ask the human to create `.env.<org>` from `.env.example` and paste a Vapi **private API key** into `VAPI_PRIVATE_API_KEY`, or confirm `VAPI_PRIVATE_API_KEY` is already exported. Point them to https://dashboard.vapi.ai/org/api-keys → **Private API Keys** (a *public* key will not work). Do not ask them to paste the key into chat, and never pass it as a CLI argument (setup refuses `--token`).
+3. Ask the human whether to download the org's existing resources:
+   - Managing an existing org → `npm run setup -- <org>` (`--resources all`, the default).
+   - Authoring from scratch → `npm run setup -- <org> --resources none` (state only, no files).
+   Add `--region eu` for EU orgs if auto-detection picks the wrong one.
+4. Verify: `npm run validate -- <org>` should pass, and `resources/<org>/` plus `.vapi-state.<org>.json` should exist.
+5. Commit `resources/<org>/` and `.vapi-state.<org>.json`. Never commit `.env.<org>` (it is gitignored).
+
+If setup reports the org is "already set up locally", do not delete anything to work around it — run `npm run pull -- <org>` instead, or ask the human.
+
+---
+
 ## Quick Reference
 
 | I want to...                        | What to do                                                                    |
@@ -60,6 +77,7 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 | Create a multi-agent squad          | Create `resources/<org>/squads/<name>.yml`                                        |
 | Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
 | Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
+| First-time setup without a TTY      | `npm run setup -- <org> [--resources none] [--region eu]` — private API key from `VAPI_PRIVATE_API_KEY` or `.env.<org>` |
 | Promote resources across orgs       | `npm run promote -- --pipeline <name> --from <org-a> --to <org-b> --apply`        |
 | Deploy local changes (default)      | `npm run apply -- <org>` — pull → merge → push, safe against dashboard drift       |
 | Pre-flight schema check (no network) | `npm run validate -- <org>` — run before every `apply`                            |
@@ -863,7 +881,7 @@ Concrete example conversations showing expected behavior.
 
 ```bash
 # Setup
-npm run setup                                      # Interactive wizard: API key, org slug, resource selection
+npm run setup                                      # Interactive wizard: private API key, org slug, resource selection
 
 # Sync
 npm run pull -- <org>                              # Pull from Vapi (preserve local changes)

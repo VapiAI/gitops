@@ -1,3 +1,4 @@
+import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
@@ -164,11 +165,9 @@ function loadOrgEnv(slug: string): { token: string; baseUrl: string } {
     vars[trimmed.slice(0, eq).trim()] = val;
   }
 
-  const token = vars.VAPI_TOKEN;
+  const token = resolveApiKey(vars);
   if (!token) {
-    throw new Error(
-      `.env.${slug} is missing VAPI_TOKEN. Run "npm run setup" to fix.`,
-    );
+    throw new Error(missingApiKeyMessage(slug));
   }
 
   return {
@@ -517,7 +516,7 @@ export async function runInteractivePull(): Promise<void> {
         if (fetchFailed) {
           console.log(
             c.red(
-              "\n  ⚠ API authentication failed. Check your VAPI_TOKEN in .env." +
+              "\n  ⚠ API authentication failed. Check the private API key (VAPI_PRIVATE_API_KEY) in .env." +
                 slug,
             ),
           );

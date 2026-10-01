@@ -137,7 +137,7 @@ provisioning resources:
    dashboard names on first discovery.
 2. A previously generated alias is preserved by UUID even if its dashboard
    name changes.
-3. The marked block in `.env.<org>` is replaced while `VAPI_TOKEN`, custom
+3. The marked block in `.env.<org>` is replaced while `VAPI_PRIVATE_API_KEY`, custom
    settings, and manual bindings outside the block are preserved.
 4. Unnamed phone numbers and ambiguous duplicate names are omitted with a
    warning instead of being guessed.

@@ -342,7 +342,7 @@ voice:
 
 ```bash
 curl -X POST "https://api.vapi.ai/provider/cartesia/pronunciation-dictionary" \
-  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Pronunciation Dictionary",
@@ -358,7 +358,7 @@ curl -X POST "https://api.vapi.ai/provider/cartesia/pronunciation-dictionary" \
 ```bash
 curl -X PATCH \
   "https://api.vapi.ai/provider/cartesia/pronunciation-dictionary/<vapi-resource-uuid>" \
-  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "itemsToAdd": [{ "text": "NewTerm", "alias": "new-term" }],
@@ -380,7 +380,7 @@ ElevenLabs dictionaries use `rules` instead of `items`. The `rules` field suppor
 
 ```bash
 curl -X POST "https://api.vapi.ai/provider/11labs/pronunciation-dictionary" \
-  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My ElevenLabs Dictionary",
@@ -395,7 +395,7 @@ curl -X POST "https://api.vapi.ai/provider/11labs/pronunciation-dictionary" \
 ```bash
 curl -X PATCH \
   "https://api.vapi.ai/provider/11labs/pronunciation-dictionary/<vapi-resource-uuid>" \
-  -H "Authorization: Bearer $VAPI_TOKEN" \
+  -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "rules": [

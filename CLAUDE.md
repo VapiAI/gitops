@@ -21,7 +21,7 @@ This wiped three live-production assistants' system prompts on 2026-05-13 (gitop
 
 ```bash
 # 1. GET the full resource first
-ASSISTANT=$(curl -H "Authorization: Bearer $VAPI_TOKEN" https://api.vapi.ai/assistant/$id)
+ASSISTANT=$(curl -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" https://api.vapi.ai/assistant/$id)
 
 # 2. Modify in place — keep every other field
 MODEL=$(echo "$ASSISTANT" | jq '.model | .model = "gpt-4.1"')
