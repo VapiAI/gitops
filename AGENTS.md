@@ -90,7 +90,7 @@ If setup reports the org is "already set up locally", do not delete anything to 
 | Push with new resources             | `npm run push -- <org> --allow-new-files` — bypass orphan-YAML gate. **AI agents**: do NOT auto-pass this flag; confirm with the human first (see push section below) |
 | Test a call                         | `npm run call -- <org> -a <assistant-name>` or `-s <squad-name>`                  |
 | Run a simulation suite              | `npm run sim -- <org> --suite <name> --target <assistant-name>`                   |
-| Build PR-check payloads offline     | `npm run check -- <check> --dry-run` (or `--all`); `--print-payload` writes the JSON |
+| Run PR simulation checks            | `npm run check -- <check>` (or `--all`); `--dry-run` builds the payloads offline, `--print-payload` writes them |
 | Migrate a legacy state file         | `npm run migrate` — one-shot, all orgs; required once after upgrading to the hash-store engine |
 
 ---
@@ -904,7 +904,8 @@ npm run validate -- <org>                          # Lint resources locally (fai
 npm run audit -- <org>                             # Read-only drift detector: orphan YAML, state ghosts, content-identical clusters, sibling base-slugs, dashboard orphans, inline model.tools. Exit 1 on findings.
 npm run audit -- <org> --type assistants           # Scope audit to a single resource type
 npm run sim -- <org> --suite <name> --target <name>  # Run a simulation suite against an assistant/squad (exit 0 pass, 1 fail, 3 incomplete; --timeout <min>)
-npm run check -- <check> --dry-run                 # Build a vapi-checks.yml check's inline run payload offline (exit 0 built, 2 config/build error; --print-payload [dir])
+npm run check -- <check>                          # Run a vapi-checks.yml check inline against the local files (exit 0 pass, 1 fail, 2 config/build error, 3 incomplete; --changed-since <ref>, --budget-minutes <n>, --json <path>)
+npm run check -- <check> --dry-run                # Build the check's inline run payloads offline, no key needed (--print-payload [dir])
 npm run rollback -- <org> --to <ISO-timestamp>     # Re-apply a snapshot taken before a push
 npm run rollback -- <org> --list                   # List available snapshots
 

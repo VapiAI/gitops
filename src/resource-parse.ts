@@ -359,8 +359,8 @@ export function ignorePatternsRead(resourcesDir: string): string[] {
 }
 
 // Convert a gitignore-flavored glob to a RegExp. We keep the implementation
-// intentionally small (no node_modules) since pull.ts is the only consumer.
-function compilePattern(pattern: string): RegExp {
+// intentionally small (no node_modules). Also matches check trigger paths.
+export function compilePattern(pattern: string): RegExp {
   // Escape regex metacharacters except the glob ones we handle explicitly.
   // `*` and `?` are translated below; everything else is literal.
   let regex = "";
