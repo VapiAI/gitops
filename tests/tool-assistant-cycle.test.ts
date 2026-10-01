@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tools are applied before assistants because assistants reference tools. But a
@@ -26,9 +26,15 @@ const {
   updateToolAssistantRefs,
 } = await import("../src/push.ts");
 
+import { deleteBaseline } from "../src/hash-store.ts";
 import type { ResourceFile, StateFile } from "../src/types.ts";
 
 const UUID = "8f14e45f-ceea-467a-9f1b-1a1b2c3d4e5f";
+
+// updateToolAssistantRefs records a drift baseline for every PATCH it sends, and
+// the hash store resolves beside src/ — not under a temp dir — so remove the
+// one these tests write rather than leave it in the developer's real store.
+after(() => deleteBaseline("test-fixture-org", UUID));
 
 test("an unresolved assistant destination drops the whole destinations key", async () => {
   // Unresolved = resolution left the slug exactly as written, because the

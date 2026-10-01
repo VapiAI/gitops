@@ -152,13 +152,19 @@ async function runClobberScenario(
   writeFileSync(join(assistantsDir, "riley.md"), PREEXISTING_RILEY_MD);
 
   // Seed state: slug `riley` already maps to UUID A.
+  // The drift baseline lives in the hash store, not the state file. The
+  // engine runs from the copied src/, so its store resolves under `dir`.
+  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  mkdirSync(hashStore, { recursive: true });
+  writeFileSync(join(hashStore, UUID_A), "stale-hash-A\n");
+
   writeFileSync(
     join(dir, `.vapi-state.${ENV}.json`),
     JSON.stringify(
       {
         credentials: {},
         assistants: {
-          riley: { uuid: UUID_A, lastPulledHash: "stale-hash-A" },
+          riley: { uuid: UUID_A },
         },
         structuredOutputs: {},
         tools: {},

@@ -125,15 +125,24 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
   mkdirSync(assistantsDir, { recursive: true });
   writeFileSync(join(assistantsDir, `${SLUG}.md`), LOCAL_MD);
 
+  // The drift baseline lives in the hash store, not the state file. The
+  // engine runs from the copied src/, so its store resolves under `dir`.
+  // It is deliberately stale: it equals neither the local file's hash nor
+  // the canonicalized dashboard hash.
+  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  mkdirSync(hashStore, { recursive: true });
+  writeFileSync(join(hashStore, UUID), "stale-older-basis-hash\n");
+
   writeFileSync(
     join(dir, `.vapi-state.${ENV}.json`),
     JSON.stringify(
       {
-        credentials: {},
-        // The baseline is deliberately stale: it equals neither the local
-        // file's hash nor the canonicalized dashboard hash.
+        // A non-empty credentials section keeps push from treating state as
+        // uninitialized; otherwise its bootstrap pull rewrites the baseline
+        // before the drift check and the stale case is never exercised.
+        credentials: { "unused-credential": { uuid: "cred-uuid-unused" } },
         assistants: {
-          [SLUG]: { uuid: UUID, lastPulledHash: "stale-older-basis-hash" },
+          [SLUG]: { uuid: UUID },
         },
         structuredOutputs: {},
         tools: {},
@@ -190,6 +199,11 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
       res.status,
       0,
       `push must exit 0 (no phantom block)\n${out}`,
+    );
+    assert.doesNotMatch(
+      out,
+      /Bootstrap state sync required/,
+      `push must reach the drift check with the stale baseline intact, not re-pull first\n${out}`,
     );
     assert.doesNotMatch(
       out,

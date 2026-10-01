@@ -6,6 +6,14 @@ import {
   upsertState,
 } from "../src/state-serialize.ts";
 import type { ResourceState } from "../src/types.ts";
+import {
+  deleteBaseline,
+  hashStoreDir,
+  readBaseline,
+  writeBaseline,
+} from "../src/hash-store.ts";
+import { rmSync } from "node:fs";
+import { after } from "node:test";
 
 // Stack G — drift unit tests.
 // `checkDriftForUpdate` itself fires GET against the Vapi platform; a unit
@@ -20,8 +28,8 @@ import type { ResourceState } from "../src/types.ts";
 //
 // In-scope for this test file:
 //   1. `classifyDrift` truth table — every cell of the 3-hash decision matrix,
-//      including the both-diverged edge where local == platform but both
-//      diverge from the baseline.
+//      including the converged edge where local == platform but both diverge
+//      from the baseline (pinned as clean: live agreement is never drift).
 //   2. `formatDriftLabel` — non-empty + operator-actionable phrasing per
 //      direction. The exact wording is the implementer's choice; the contract
 //      is that the operator can read the label and know which command to run.
@@ -67,10 +75,8 @@ const { classifyDrift, formatDriftLabel, checkDriftForUpdate } =
     resourceLabel: string;
     resourceType: string;
     resourceId: string;
-    state: Record<
-      string,
-      Record<string, { uuid: string; lastPulledHash?: string }>
-    >;
+    state: Record<string, Record<string, { uuid: string }>>;
+    env: string;
     overwrite: boolean;
   }) => Promise<{
     ok: boolean;
@@ -84,10 +90,8 @@ const { classifyDrift, formatDriftLabel, checkDriftForUpdate } =
 // every resource-type section via buildReverseMap and `credentialReverseMap`
 // reads `.credentials`, so a partial object throws. `inject` seeds one section.
 function driftState(
-  inject: Partial<
-    Record<string, Record<string, { uuid: string; lastPulledHash?: string }>>
-  > = {},
-): Record<string, Record<string, { uuid: string; lastPulledHash?: string }>> {
+  inject: Partial<Record<string, Record<string, { uuid: string }>>> = {},
+): Record<string, Record<string, { uuid: string }>> {
   return {
     tools: {},
     structuredOutputs: {},
@@ -100,11 +104,16 @@ function driftState(
     evals: {},
     credentials: {},
     ...inject,
-  } as Record<
-    string,
-    Record<string, { uuid: string; lastPulledHash?: string }>
-  >;
+  } as Record<string, Record<string, { uuid: string }>>;
 }
+
+// Drift baselines live in the hash store (.vapi-state-hash/<org>/<uuid>), which
+// resolves beside src/ rather than under a temp dir. Seed them under an org slug
+// no real checkout uses, and remove the whole folder when the file finishes.
+const HASH_STORE_TEST_ENV = `drift-test-${process.pid}`;
+after(() => {
+  rmSync(hashStoreDir(HASH_STORE_TEST_ENV), { recursive: true, force: true });
+});
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {
   const prior = {
@@ -312,19 +321,20 @@ test("classifyDrift: both-diverged — local, platform, lastPulled all differ", 
   assert.equal(direction, "both-diverged");
 });
 
-test("classifyDrift: both-diverged edge — local == platform but both diverged from baseline", () => {
-  // Real edge: two independent edits happen to converge on the same content
-  // (e.g. both sides corrected the same typo). The classifier must still
-  // report both-diverged — the baseline is what the operator pulled, and
-  // BOTH sides have moved past it. Treating this as `clean` would lose the
-  // signal that the operator's state pointer is stale.
+test("classifyDrift: converged edge — local == platform but both diverged from baseline is clean", () => {
+  // Two independent edits converged on the same content (e.g. both sides
+  // fixed the same typo), or a push made the dashboard match local while the
+  // baseline still held the previous pull's hash. Live agreement is never
+  // drift: callers treat `clean` as "refresh the baseline", which self-heals
+  // the stale pointer. Reporting both-diverged here manufactured a phantom
+  // conflict on every untouched resource after a hash-basis change.
   assert.ok(classifyDrift, "classifyDrift export missing from src/drift.ts");
   const direction = classifyDrift!({
     localHash: H_CONVERGED,
     lastPulledHash: H_BASE,
     platformHash: H_CONVERGED,
   });
-  assert.equal(direction, "both-diverged");
+  assert.equal(direction, "clean");
 });
 
 test("classifyDrift: no-baseline — lastPulledHash is undefined", () => {
@@ -506,7 +516,7 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
   // dashboard-ahead (local clean, platform moved).
   const remote = { name: "intake-bot", systemPrompt: "hello" };
   // A baseline that cannot equal the canonicalized platform hash → drift.
-  const lastPulledHash = "stale-baseline-hash-deadbeef";
+  await writeBaseline(HASH_STORE_TEST_ENV, "test-uuid", "stale-baseline-hash-deadbeef");
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = makeFetchStub(remote) as typeof globalThis.fetch;
@@ -517,8 +527,9 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
       resourceType: "assistants",
       resourceId: "intake-bot",
       state: driftState({
-        assistants: { "intake-bot": { uuid: "test-uuid", lastPulledHash } },
+        assistants: { "intake-bot": { uuid: "test-uuid" } },
       }),
+      env: HASH_STORE_TEST_ENV,
       overwrite: false,
     });
     assert.equal(result.ok, false, "drift should be blocked");
@@ -531,6 +542,7 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
     );
   } finally {
     globalThis.fetch = originalFetch;
+    await deleteBaseline(HASH_STORE_TEST_ENV, "test-uuid");
   }
 });
 
@@ -569,7 +581,7 @@ test("checkDriftForUpdate: canonicalizes the platform payload (tool UUID → res
     name: "intake-bot",
     model: { provider: "openai", toolIds: ["my-tool-abc12345"] },
   };
-  const baseline = hashPayload(canonicalForm);
+  await writeBaseline(HASH_STORE_TEST_ENV, "assistant-uuid", hashPayload(canonicalForm));
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = makeFetchStub(remoteRaw) as typeof globalThis.fetch;
@@ -581,10 +593,11 @@ test("checkDriftForUpdate: canonicalizes the platform payload (tool UUID → res
       resourceId: "intake-bot",
       state: driftState({
         assistants: {
-          "intake-bot": { uuid: "assistant-uuid", lastPulledHash: baseline },
+          "intake-bot": { uuid: "assistant-uuid" },
         },
         tools: { "my-tool-abc12345": { uuid: "tool-uuid-xyz" } },
       }),
+      env: HASH_STORE_TEST_ENV,
       overwrite: false,
     });
     assert.equal(
@@ -595,12 +608,13 @@ test("checkDriftForUpdate: canonicalizes the platform payload (tool UUID → res
     assert.equal(result.ok, true);
   } finally {
     globalThis.fetch = originalFetch;
+    await deleteBaseline(HASH_STORE_TEST_ENV, "assistant-uuid");
   }
 });
 
 test("checkDriftForUpdate: no-baseline path returns early without fetching", async () => {
-  // Regression guard — when there's no lastPulledHash, the function returns
-  // early without fetching.
+  // Regression guard — when the hash store holds no baseline for the
+  // resource, the function returns early without fetching.
   assert.ok(
     checkDriftForUpdate,
     "checkDriftForUpdate export missing from src/drift.ts",
@@ -619,8 +633,9 @@ test("checkDriftForUpdate: no-baseline path returns early without fetching", asy
       resourceType: "assistants",
       resourceId: "new-bot",
       state: driftState({
-        assistants: { "new-bot": { uuid: "test-uuid" } }, // no lastPulledHash
+        assistants: { "new-bot": { uuid: "never-seeded-uuid" } },
       }),
+      env: HASH_STORE_TEST_ENV,
       overwrite: false,
     });
     assert.equal(result.ok, true);
@@ -767,96 +782,35 @@ test("canonicalizeForHash: strips server-managed fields (id, orgId, createdAt, u
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Section J (added 2026-05-20): classifier short-circuit state preservation.
+// Section J (added 2026-05-20, reworked for the hash store): classifier
+// short-circuit baseline preservation.
 //
 // Regression coverage for a bug introduced by the drift-direction-classifier
 // PR (#38) and caught by the E2E both-diverged smoke test on mudflap-iform-test:
+// pull rebuilds each state section from EMPTY, and the classifier short-circuit
+// branches wrote back a bare `{ uuid }` — dropping the baseline, so the next
+// pull classified the resource as `no-baseline` and could never detect drift
+// on it again.
 //
-// pull.ts `newStateSection` starts EMPTY for a full pull (line 769). The
-// classifier short-circuit branches (`dashboard-ahead`, `local-ahead`,
-// `both-diverged`) previously called `upsertState(newStateSection, id, { uuid })`
-// against this empty section — dropping `lastPulledHash` and `lastPulledAt`
-// from state. The `both-diverged` branch was worse: it called no upsert at all,
-// so the entry vanished entirely.
-//
-// After the per-type loop, `state[type] = newStateSection` (line 1040)
-// persists the loss. The operator's NEXT pull sees no baseline → `no-baseline`
-// classification → the classifier can never detect drift on this resource
-// again until something writes a fresh baseline.
-//
-// These tests pin the upsertState patch SHAPE that the fix uses, plus the
-// bare-{ uuid }-only failure mode so a future contributor can't silently
-// revert without breaking a test.
+// Baselines now live in the hash store, keyed by uuid, so rebuilding a state
+// section cannot touch them. This pins that separation: if a future change
+// moves the baseline back into the state entry, or makes upsertState clear the
+// store, the short-circuit regression returns and this test fails.
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("classifier short-circuit: full patch (uuid + lastPulledHash + lastPulledAt) survives empty newStateSection", () => {
-  const newStateSection: Record<string, ResourceState> = {};
-  upsertState(newStateSection, "r1", {
-    uuid: "u1",
-    lastPulledHash: "h-baseline",
-    lastPulledAt: "2026-01-01T00:00:00.000Z",
-  });
-  assert.equal(newStateSection.r1?.uuid, "u1");
-  assert.equal(
-    newStateSection.r1?.lastPulledHash,
-    "h-baseline",
-    "dashboard-ahead / local-ahead branches MUST pass lastPulledHash through; otherwise next pull sees no-baseline",
-  );
-  assert.equal(newStateSection.r1?.lastPulledAt, "2026-01-01T00:00:00.000Z");
-});
-
-test("classifier short-circuit: bare { uuid }-only patch DROPS lastPulledHash on empty section (regression hazard)", () => {
-  // Pins the failure mode — if a future contributor reverts to passing only
-  // { uuid: resource.id } to upsertState (the shape the original PR shipped
-  // with), this test catches it. The fix is in the CALLER (pull.ts classifier
-  // branches); upsertState's merge semantics are correct as-is.
-  const newStateSection: Record<string, ResourceState> = {};
-  upsertState(newStateSection, "r1", { uuid: "u1" });
-  assert.equal(newStateSection.r1?.uuid, "u1");
-  assert.equal(
-    newStateSection.r1?.lastPulledHash,
-    undefined,
-    "bare patch must NOT magically materialize lastPulledHash — fix lives in the caller's patch",
-  );
-});
-
-test("classifier both-diverged: direct assignment from existing state preserves all fields verbatim", () => {
-  // both-diverged path does NOT call upsertState (resolveBothDivergedResources
-  // takes over post-loop, with per-resolve-mode state mutation). Without the
-  // preservation assignment in the branch, the entry vanishes from
-  // newStateSection. With it, the operator can re-run pull with --resolve and
-  // still have the baseline to compare against.
-  const existingState: Record<string, ResourceState> = {
-    r1: {
-      uuid: "u1",
-      lastPulledHash: "h-baseline",
-      lastPulledAt: "2026-01-01T00:00:00.000Z",
-    },
-  };
-  const newStateSection: Record<string, ResourceState> = {};
-  const existing = existingState.r1;
-  if (existing) {
-    newStateSection.r1 = existing;
+test("classifier short-circuit: rebuilding a state section from empty keeps the resource's baseline", async () => {
+  const uuid = "short-circuit-uuid";
+  await writeBaseline(HASH_STORE_TEST_ENV, uuid, "h-baseline");
+  try {
+    const newStateSection: Record<string, ResourceState> = {};
+    upsertState(newStateSection, "r1", { uuid });
+    assert.deepEqual(newStateSection.r1, { uuid });
+    assert.equal(
+      readBaseline(HASH_STORE_TEST_ENV, uuid),
+      "h-baseline",
+      "a bare { uuid } state write must not drop the baseline; otherwise the next pull sees no-baseline",
+    );
+  } finally {
+    await deleteBaseline(HASH_STORE_TEST_ENV, uuid);
   }
-  assert.deepEqual(
-    newStateSection.r1,
-    existing,
-    "both-diverged branch MUST preserve the existing entry verbatim; saveState writes newStateSection over state[type] at end of loop",
-  );
-});
-
-test("upsertState merge: pre-existing entry + new patch produces union, NOT replacement", () => {
-  // Sanity-check that upsertState's documented merge semantic still holds.
-  // If a future refactor switches to replacement semantics, the classifier
-  // short-circuits would lose lastPulledHash on subsequent calls.
-  const section: Record<string, ResourceState> = {
-    r1: {
-      uuid: "u1",
-      lastPulledHash: "h-old",
-      lastPulledAt: "2026-01-01T00:00:00.000Z",
-    },
-  };
-  upsertState(section, "r1", { uuid: "u1", lastPulledAt: "2026-02-01T00:00:00.000Z" });
-  assert.equal(section.r1?.lastPulledHash, "h-old", "upsertState must preserve fields not in the patch");
-  assert.equal(section.r1?.lastPulledAt, "2026-02-01T00:00:00.000Z", "upsertState must overwrite fields in the patch");
 });

@@ -10,24 +10,30 @@ import type { ResourceState } from "../src/types.ts";
 
 // Stack F — state schema migration coverage.
 //
-// The architectural pivot wraps each state value as a ResourceState. Legacy
-// state files (Record<string, string>) must keep loading cleanly so the
-// rollout is a no-op for customers until their first pull populates the
-// hash fields. These specs pin the behavior of the public helpers without
-// importing the full state.ts module (which loads config.ts and exits).
+// Each state value is a ResourceState — a pure `{ uuid }`. Drift baselines
+// moved to the per-developer hash store (.vapi-state-hash/), so the helpers
+// must strip any legacy hash/timestamp field rather than carry it forward:
+// saveState must never re-emit one. These specs pin the behavior of the public
+// helpers without importing the full state.ts module (which loads config.ts
+// and exits).
 
 test("asResourceState: wraps a bare string UUID as { uuid }", () => {
   const result = asResourceState("uuid-abc-123");
   assert.deepEqual(result, { uuid: "uuid-abc-123" });
 });
 
-test("asResourceState: passes through a ResourceState object", () => {
-  const input: ResourceState = {
+test("asResourceState: keeps only the uuid of an object entry", () => {
+  assert.deepEqual(asResourceState({ uuid: "u" }), { uuid: "u" });
+});
+
+test("asResourceState: strips legacy hash/timestamp fields", () => {
+  const legacy = {
     uuid: "u",
     lastPulledHash: "h",
     lastPulledAt: "2026-04-30T12:00:00Z",
+    lastPushedHash: "p",
   };
-  assert.equal(asResourceState(input), input);
+  assert.deepEqual(asResourceState(legacy), { uuid: "u" });
 });
 
 test("asResourceState: rejects non-string-non-object values", () => {
@@ -44,24 +50,13 @@ test("upsertState: creates a new entry when none exists", () => {
   assert.deepEqual(section["agent-a"], { uuid: "u1" });
 });
 
-test("upsertState: preserves prior fields not being patched", () => {
-  const section: Record<string, ResourceState> = {
-    "agent-a": {
-      uuid: "u1",
-      lastPulledHash: "old-hash",
-      lastPulledAt: "2026-04-29T00:00:00Z",
-    },
-  };
-  upsertState(section, "agent-a", {
-    uuid: "u1",
-    lastPushedHash: "new-push-hash",
-  });
-  assert.deepEqual(section["agent-a"], {
-    uuid: "u1",
-    lastPulledHash: "old-hash",
-    lastPulledAt: "2026-04-29T00:00:00Z",
-    lastPushedHash: "new-push-hash",
-  });
+test("upsertState: writes only the uuid, even when the patch carries legacy fields", () => {
+  // A caller still holding an old-shaped object must not smuggle a hash back
+  // into the state file; baselines belong to the hash store.
+  const section: Record<string, ResourceState> = {};
+  const legacyPatch = { uuid: "u1", lastPushedHash: "new-push-hash" };
+  upsertState(section, "agent-a", legacyPatch);
+  assert.deepEqual(section["agent-a"], { uuid: "u1" });
 });
 
 test("upsertState: overwrites uuid if it changes", () => {

@@ -169,10 +169,10 @@ for (const rtype of RTYPES) {
       harness: h,
     });
 
-    // Canonical key now points at the adopted UUID (with lastPushedHash
-    // populated after applyFn success).
-    assert.equal(h.state[rtype]["my-resource"]?.uuid, sharedUuid);
-    assert.ok(h.state[rtype]["my-resource"]?.lastPushedHash);
+    // Canonical key now points at the adopted UUID. The entry is a bare
+    // { uuid }: the drift baseline is recorded by applyFn's own push path in
+    // the hash store, never in state.
+    assert.deepEqual(h.state[rtype]["my-resource"], { uuid: sharedUuid });
     // Alias was deleted.
     assert.equal(h.state[rtype]["my-resource-12345678"], undefined);
     // Both keys marked touched: the deletion AND the new canonical entry.
@@ -304,11 +304,9 @@ for (const rtype of RTYPES) {
       harness: h,
     });
 
-    assert.equal(
-      h.state[rtype]["brand-new"]?.uuid,
-      "33333333-3333-3333-3333-333333333aaa",
-    );
-    assert.ok(h.state[rtype]["brand-new"]?.lastPushedHash);
+    assert.deepEqual(h.state[rtype]["brand-new"], {
+      uuid: "33333333-3333-3333-3333-333333333aaa",
+    });
     assert.equal(h.applied[rtype], 1);
     assert.equal(h.autoAppliedList.length, 1);
     assert.ok(h.autoApplied.has(`${rtype}:brand-new`));
