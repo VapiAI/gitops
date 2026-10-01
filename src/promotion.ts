@@ -11,6 +11,7 @@ import { dirname, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { FOLDER_MAP, VALID_EXTENSIONS } from "./resource-parse.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 
 type BindingPolicy = "bind" | "omit";
@@ -71,25 +72,13 @@ interface PromotionResource {
   id: string;
 }
 
-interface PromotionBindingsResolved {
+export interface PromotionBindingsResolved {
   credentialReverse: Map<string, string>;
   sourcePhones: Map<string, string>;
   targetPhones: Map<string, string>;
 }
 
-const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-const FOLDER_MAP: Record<ResourceType, string> = {
-  tools: "tools",
-  structuredOutputs: "structuredOutputs",
-  assistants: "assistants",
-  squads: "squads",
-  personalities: "simulations/personalities",
-  scenarios: "simulations/scenarios",
-  simulations: "simulations/tests",
-  simulationSuites: "simulations/suites",
-  evals: "evals",
-};
-const VALID_EXTENSIONS: readonly string[] = [".yml", ".yaml", ".ts", ".md"];
+export const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const REFERENCE_FIELDS: Record<string, ResourceType> = {
   toolId: "tools",
   toolIds: "tools",
@@ -145,7 +134,7 @@ function bindingMap(
   };
 }
 
-function bindings(value: unknown): PromotionBindings {
+export function promotionBindingsParse(value: unknown): PromotionBindings {
   const raw = value === undefined ? {} : object(value, "bindings");
   return {
     credentials: bindingMap(raw.credentials, "bind", "bindings.credentials"),
@@ -165,7 +154,7 @@ export function promotionConfigParse(content: string): PromotionConfig {
       throw new Error(`org ${slug}.baseUrl must be a string`);
     orgs[slug] = {
       baseUrl: typeof org.baseUrl === "string" ? org.baseUrl : undefined,
-      bindings: bindings(org.bindings),
+      bindings: promotionBindingsParse(org.bindings),
     };
   }
   const pipelinesRaw = object(raw.pipelines, "promotion.yml pipelines");
@@ -351,7 +340,7 @@ function envBindings(content: string, prefix: string): Map<string, string> {
   return result;
 }
 
-async function bindingsResolve(
+export async function promotionBindingsResolve(
   root: string,
   source: string,
   target: string,
@@ -383,7 +372,7 @@ function policyFor(map: PromotionBindingMap, alias: string): BindingPolicy {
   return map.aliases[alias] ?? map.aliases[alias.toUpperCase()] ?? map.default;
 }
 
-function bindingsApply(
+export function promotionBindingsApply(
   value: unknown,
   bindings: PromotionBindings,
   resolved: PromotionBindingsResolved,
@@ -582,7 +571,7 @@ export async function promotionPlanBuild(
       }
     }
   }
-  const resolved = await bindingsResolve(
+  const resolved = await promotionBindingsResolve(
     options.rootDir,
     options.source,
     options.target,
@@ -594,7 +583,7 @@ export async function promotionPlanBuild(
   for (const file of wanted.values()) {
     const parsed = await resourceData(file, options.rootDir, options.source);
     const canonical = referencesCanonicalize(parsed.data, options.sourceState);
-    const transformed = bindingsApply(
+    const transformed = promotionBindingsApply(
       canonical,
       bindings,
       resolved,

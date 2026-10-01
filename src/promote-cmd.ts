@@ -1,8 +1,8 @@
-import { resolveApiKey } from "./api-key.ts";
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { OrgConnection } from "./org-connection.ts";
+import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
 import {
   promotionConfigParse,
@@ -25,11 +25,6 @@ interface PromotionTransition {
   source: string;
   target: string;
   definition: PromotionPipeline;
-}
-
-interface OrgConnection {
-  token: string;
-  baseUrl?: string;
 }
 
 const ROOT_DIR = resolve(
@@ -106,87 +101,29 @@ function transitionsBuild(
   return transitions;
 }
 
-function envValue(content: string, key: string): string | undefined {
-  const line = content
-    .split("\n")
-    .find((candidate) => candidate.trimStart().startsWith(`${key}=`));
-  if (!line) return undefined;
-  const value = line.slice(line.indexOf("=") + 1).trim();
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  )
-    return value.slice(1, -1);
-  return value || undefined;
-}
+const TOKENS_ENV = "VAPI_PROMOTION_TOKENS";
 
-function tokensParse(): Map<string, string> {
-  const configured = process.env.VAPI_PROMOTION_TOKENS;
-  if (!configured) return new Map();
-  let raw: unknown;
-  try {
-    raw = JSON.parse(configured);
-  } catch {
-    throw new Error("VAPI_PROMOTION_TOKENS must be valid JSON");
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    throw new Error("VAPI_PROMOTION_TOKENS must map org slugs to tokens");
-  const tokens = new Map<string, string>();
-  for (const [org, token] of Object.entries(raw)) {
-    if (typeof token !== "string" || token.length === 0)
-      throw new Error(
-        `VAPI_PROMOTION_TOKENS entry for ${org} must be a non-empty token string`,
-      );
-    tokens.set(org, token);
-  }
-  return tokens;
-}
-
-function connectionLoad(
+function orgConnection(
   config: PromotionConfig,
   org: string,
   tokens: Map<string, string>,
 ): OrgConnection {
-  const envPath = resolve(ROOT_DIR, `.env.${org}`);
-  const envContent = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-  const envToken = resolveApiKey({
-    VAPI_PRIVATE_API_KEY: envValue(envContent, "VAPI_PRIVATE_API_KEY"),
-    VAPI_TOKEN: envValue(envContent, "VAPI_TOKEN"),
+  return connectionLoad({
+    rootDir: ROOT_DIR,
+    org,
+    tokens,
+    tokensEnvName: TOKENS_ENV,
+    baseUrl: config.orgs[org]?.baseUrl,
   });
-  const token = tokens.get(org) ?? envToken;
-  if (!token)
-    throw new Error(
-      `Missing token for org ${org}; set VAPI_PROMOTION_TOKENS or .env.${org}`,
-    );
-  return {
-    token,
-    baseUrl: config.orgs[org]?.baseUrl ?? envValue(envContent, "VAPI_BASE_URL"),
-  };
 }
 
-function childRun(
+function orgScriptRun(
   script: string,
   org: string,
   connection: OrgConnection,
   args: string[],
 ): void {
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    VAPI_PRIVATE_API_KEY: connection.token,
-    VAPI_TOKEN: connection.token,
-  };
-  if (connection.baseUrl) environment.VAPI_BASE_URL = connection.baseUrl;
-  if (!connection.baseUrl) delete environment.VAPI_BASE_URL;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", script, org, ...args],
-    { cwd: ROOT_DIR, env: environment, stdio: "inherit" },
-  );
-  if (result.error)
-    throw new Error(
-      `Failed to run ${script} for ${org}: ${result.error.message}`,
-    );
-  if (result.status !== 0) throw new Error(`${script} failed for ${org}`);
+  childRun({ rootDir: ROOT_DIR, script, org, connection, args });
 }
 
 function stateLoad(org: string) {
@@ -206,16 +143,16 @@ async function transitionRun(
   allowEmptySourceDeletion: boolean,
 ): Promise<boolean> {
   if (apply) {
-    childRun(
+    orgScriptRun(
       "src/pull.ts",
       transition.source,
-      connectionLoad(config, transition.source, tokens),
+      orgConnection(config, transition.source, tokens),
       ["--bootstrap", "--bindings-only"],
     );
-    childRun(
+    orgScriptRun(
       "src/pull.ts",
       transition.target,
-      connectionLoad(config, transition.target, tokens),
+      orgConnection(config, transition.target, tokens),
       ["--bootstrap", "--bindings-only"],
     );
   }
@@ -240,10 +177,10 @@ async function transitionRun(
   const changedPaths = plan.changes.map(
     (change) => `resources/${transition.target}/${change.path}`,
   );
-  childRun(
+  orgScriptRun(
     "src/apply.ts",
     transition.target,
-    connectionLoad(config, transition.target, tokens),
+    orgConnection(config, transition.target, tokens),
     ["--force", "--allow-new-files", "--resolve=ours", ...changedPaths],
   );
   return plan.changes.some((change) => change.kind === "delete");
@@ -257,8 +194,10 @@ export async function promotionCommandRun(
   if (!existsSync(configPath))
     throw new Error("promotion.yml is required at the repository root");
   const config = promotionConfigParse(readFileSync(configPath, "utf8"));
-  const tokens = parsed.apply ? tokensParse() : new Map<string, string>();
-  delete process.env.VAPI_PROMOTION_TOKENS;
+  const tokens = parsed.apply
+    ? tokensParse(TOKENS_ENV)
+    : new Map<string, string>();
+  delete process.env[TOKENS_ENV];
   // Applying a deletion removes the intermediate org's state entry. Carry the
   // reviewed authorization forward so the same deletion can reach later orgs.
   const deletionAuthorizedSources = new Set<string>();

@@ -3,6 +3,10 @@ import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import type { Environment, ResourceType } from "./types.ts";
+import {
+  ignorePatternsRead,
+  matchesIgnore as matchesIgnorePatterns,
+} from "./resource-parse.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,74 +330,18 @@ export function removeExcludedKeys(
 // ─────────────────────────────────────────────────────────────────────────────
 // Ignore Patterns (.vapi-ignore)
 //
-// Resources matching any pattern in resources/<env>/.vapi-ignore are skipped
-// during pull (never written, never tracked). This is the explicit opt-out
-// mechanism for resources that exist on the dashboard but should not be
-// managed by this repo.
-//
-// Pattern syntax (gitignore-flavored, simplified):
-//   - Matches against `<folderPath>/<resourceId>` (no extension)
-//     e.g. `assistants/ab-assistant-56b80091`
-//   - `*`  matches any run of characters within a single path segment
-//   - `**` matches across path segments (zero or more)
-//   - Lines starting with `#` are comments
-//   - Blank lines are ignored
-//   - Leading `!` is reserved for future negation; treated as a comment today
+// Syntax and matching live in resource-parse.ts (config-free); this binds
+// them to the configured org's resources directory and caches the read.
 // ─────────────────────────────────────────────────────────────────────────────
 
 let cachedIgnorePatterns: string[] | null = null;
 
-function getIgnoreFilePath(): string {
-  return join(BASE_DIR, "resources", VAPI_ENV, ".vapi-ignore");
-}
-
 export function loadIgnorePatterns(): string[] {
   if (cachedIgnorePatterns !== null) return cachedIgnorePatterns;
-
-  const path = getIgnoreFilePath();
-  if (!existsSync(path)) {
-    cachedIgnorePatterns = [];
-    return cachedIgnorePatterns;
-  }
-
-  const raw = readFileSync(path, "utf-8");
-  cachedIgnorePatterns = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line.length > 0 && !line.startsWith("#") && !line.startsWith("!"),
-    );
-
+  cachedIgnorePatterns = ignorePatternsRead(
+    join(BASE_DIR, "resources", VAPI_ENV),
+  );
   return cachedIgnorePatterns;
-}
-
-// Convert a gitignore-flavored glob to a RegExp. We keep the implementation
-// intentionally small (no node_modules) since pull.ts is the only consumer.
-function compilePattern(pattern: string): RegExp {
-  // Escape regex metacharacters except the glob ones we handle explicitly.
-  // `*` and `?` are translated below; everything else is literal.
-  let regex = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === "*") {
-      // `**` → match any characters including path separators
-      // `*`  → match any characters within a single segment (no `/`)
-      if (pattern[i + 1] === "*") {
-        regex += ".*";
-        i++; // consume the second `*`
-      } else {
-        regex += "[^/]*";
-      }
-    } else if (c === "?") {
-      regex += "[^/]";
-    } else if ("\\^$.|+(){}[]".includes(c as string)) {
-      regex += `\\${c}`;
-    } else {
-      regex += c;
-    }
-  }
-  return new RegExp(`^${regex}$`);
 }
 
 // Check whether a resource at `<folderPath>/<resourceId>` matches the ignore list.
@@ -403,12 +351,7 @@ export function matchesIgnore(
   resourceId: string,
   patterns: string[] = loadIgnorePatterns(),
 ): string | null {
-  if (patterns.length === 0) return null;
-  const target = `${folderPath}/${resourceId}`;
-  for (const pattern of patterns) {
-    if (compilePattern(pattern).test(target)) return pattern;
-  }
-  return null;
+  return matchesIgnorePatterns(folderPath, resourceId, patterns);
 }
 
 // Test-only: clear the cache. Production code does not need to call this.

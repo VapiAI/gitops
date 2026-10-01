@@ -1,5 +1,12 @@
 import { DRY_RUN, VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
 import type { VapiResponse } from "./types.ts";
+import {
+  INITIAL_DELAY_MS,
+  MAX_RETRIES,
+  parseApiMessage,
+  shouldRetry,
+  VapiApiError,
+} from "./vapi-client.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dry-run accounting
@@ -40,32 +47,11 @@ function formatBodyPreview(body: Record<string, unknown>): string {
 // HTTP Client for Vapi API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class VapiApiError extends Error {
-  constructor(
-    public readonly method: string,
-    public readonly endpoint: string,
-    public readonly statusCode: number,
-    public readonly apiMessage: string,
-    public readonly rawBody: string,
-  ) {
-    super(`API ${method} ${endpoint} failed (${statusCode}): ${apiMessage}`);
-    this.name = "VapiApiError";
-  }
-}
+// The error class, message parsing and retry policy are shared with the
+// config-free client in vapi-client.ts. VapiApiError is re-exported so
+// existing importers and `instanceof` checks see one class.
+export { VapiApiError };
 
-function parseApiMessage(body: string): string {
-  try {
-    const parsed = JSON.parse(body);
-    if (typeof parsed.message === "string") return parsed.message;
-    if (Array.isArray(parsed.message)) return parsed.message.join("; ");
-  } catch {
-    /* not JSON, use raw body */
-  }
-  return body;
-}
-
-const MAX_RETRIES = 5;
-const INITIAL_DELAY_MS = 2000;
 const REQUEST_DELAY_MS = 700; // Delay between requests to avoid rate limits
 
 let lastRequestTime = 0;
@@ -81,13 +67,6 @@ async function throttle(): Promise<void> {
     await sleep(REQUEST_DELAY_MS - timeSinceLastRequest);
   }
   lastRequestTime = Date.now();
-}
-
-// 429 = rate limit. 5xx = transient server error (gateway timeout, upstream
-// hiccup, deploy in progress). Both are worth retrying with backoff; surfacing
-// a 502 as a hard failure forces the operator to re-run the entire push.
-function shouldRetry(status: number): boolean {
-  return status === 429 || (status >= 500 && status < 600);
 }
 
 export async function vapiRequest<T = VapiResponse>(

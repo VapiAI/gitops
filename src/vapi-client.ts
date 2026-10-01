@@ -3,7 +3,8 @@
 // api.ts is the engine's client, but it imports config.ts, which parses
 // argv and exits at import time and binds a single org. Code that must run
 // for several orgs, without a token, or from tests (sim.ts, the check
-// runner) uses this client instead.
+// runner) uses this client instead. api.ts imports the error class and retry
+// policy from here, so both clients fail and retry the same way.
 
 export interface VapiConnection {
   token: string;
@@ -48,7 +49,8 @@ export function parseApiMessage(body: string): string {
 }
 
 // 429 = rate limit. 5xx = transient server error (gateway timeout, upstream
-// hiccup, deploy in progress).
+// hiccup, deploy in progress). Both are worth retrying with backoff; surfacing
+// a 502 as a hard failure forces the operator to re-run the entire push.
 export function shouldRetry(status: number): boolean {
   return status === 429 || (status >= 500 && status < 600);
 }

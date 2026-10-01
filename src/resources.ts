@@ -1,130 +1,25 @@
-import { existsSync, readFileSync } from "fs";
-import { readdir, readFile, stat } from "fs/promises";
-import { basename, dirname, extname, join, relative, resolve } from "path";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
+import { basename, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
+import {
+  FOLDER_MAP,
+  type LoadOptions,
+  markdownResourceParse,
+  parseResourceDataFromFile,
+  resourceDirLoad,
+  VALID_EXTENSIONS,
+} from "./resource-parse.ts";
 import { isBackupCopyFile } from "./slug-utils.ts";
 import { stateUuid } from "./state.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
 
-// Options bag for the load functions. `ignorePatterns` is the symmetric
-// counterpart to pull's filter: when present, ids matching any pattern are
-// dropped from the returned array (with a skip-log) before any caller sees
-// them. Push wires this from `loadIgnorePatterns()`; pass `[]` (or omit) to
-// preserve the pre-change behavior.
-export interface LoadOptions {
-  ignorePatterns?: string[];
-  // Suppress per-file "📦 Loaded" / "📁 No <type> directory" chatter. Used by
-  // scoped (single-file / --type) pushes: the FULL set is still loaded for
-  // reference resolution, but printing every file makes the blast radius look
-  // larger than it is — the caller prints the scoped selection instead.
-  quiet?: boolean;
-}
-
-// Map resource types to their folder paths (relative to resources/)
-export const FOLDER_MAP: Record<ResourceType, string> = {
-  tools: "tools",
-  structuredOutputs: "structuredOutputs",
-  assistants: "assistants",
-  squads: "squads",
-  personalities: "simulations/personalities",
-  scenarios: "simulations/scenarios",
-  simulations: "simulations/tests",
-  simulationSuites: "simulations/suites",
-  evals: "evals",
-};
-
-// Reverse map: folder path to resource type
-const FOLDER_TO_TYPE: Record<string, ResourceType> = Object.entries(
-  FOLDER_MAP,
-).reduce(
-  (acc, [type, folder]) => {
-    acc[folder] = type as ResourceType;
-    return acc;
-  },
-  {} as Record<string, ResourceType>,
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Resource Loading
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Single source of truth for resource file extensions. Imported by
-// `recanonicalize.ts` so the precondition-5 "both files exist" check
-// stays in lockstep with the loader — without this, a `.ts`-authored
-// resource paired with a UUID-suffixed `.ts` twin would be invisible to
-// the safety check and silently allow the data-loss shape the
-// recanonicalize header explicitly refuses.
-export const VALID_EXTENSIONS: readonly string[] = [
-  ".yml",
-  ".yaml",
-  ".ts",
-  ".md",
-];
-
-/**
- * Parse a markdown file with YAML frontmatter
- * Format:
- * ---
- * key: value
- * ---
- * Markdown content (becomes system prompt)
- */
-function parseFrontmatter(content: string): {
-  config: Record<string, unknown>;
-  body: string;
-} {
-  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
-
-  if (!match) {
-    throw new Error(
-      "Invalid frontmatter format - expected YAML between --- delimiters",
-    );
-  }
-
-  const yamlContent = match[1] ?? "";
-  const body = match[2] ?? "";
-  const config = parseYaml(yamlContent) as Record<string, unknown>;
-
-  return { config, body: body.trim() };
-}
-
-function parseResourceDataFromFile(filePath: string): Record<string, unknown> {
-  const ext = extname(filePath);
-
-  if (ext === ".md") {
-    const content = readFileSync(filePath, "utf-8");
-    const { config, body } = parseFrontmatter(content);
-
-    if (body) {
-      const model = (config.model as Record<string, unknown>) || {};
-      const existingMessages = Array.isArray(model.messages)
-        ? model.messages
-        : [];
-      model.messages = [
-        { role: "system", content: body },
-        ...existingMessages.filter(
-          (m: { role?: string }) => m.role !== "system",
-        ),
-      ];
-      config.model = model;
-    }
-
-    return config;
-  }
-
-  const content = readFileSync(filePath, "utf-8");
-  const data = parseYaml(content) as Record<string, unknown>;
-  if (data === null || data === undefined) {
-    throw new Error(`Empty or invalid YAML in ${filePath}`);
-  }
-  if (typeof data !== "object" || Array.isArray(data)) {
-    throw new Error(`YAML must be an object in ${filePath}`);
-  }
-  return data;
-}
+// The file-reading half lives in resource-parse.ts (config-free). These are
+// re-exported so existing importers keep working.
+export { FOLDER_MAP, VALID_EXTENSIONS };
+export type { LoadOptions };
 
 function findLocalResourceFile(
   type: ResourceType,
@@ -153,171 +48,11 @@ export function hashLocalResource(
   }
 }
 
-/**
- * Recursively scan a directory for resource files (.yml, .yaml, .ts)
- * Warns about unsupported files found in resource directories
- */
-async function scanDirectory(dir: string, baseDir: string): Promise<string[]> {
-  // Sort entries so iteration order is identical across filesystems/CI runners.
-  // readdir() returns entries in OS-dependent order (APFS sorts, ext4 doesn't),
-  // and downstream push order affects which resource is created first when
-  // multiple files declare the same resourceId — non-determinism makes that
-  // bug class hard to reproduce.
-  const entries = (await readdir(dir)).slice().sort();
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    // Skip hidden files and directories (e.g., .DS_Store, .gitkeep)
-    if (entry.startsWith(".")) {
-      continue;
-    }
-
-    // Skip dashboard-backup siblings written by the push conflict prompt
-    // ("create local copy + manual merge"). They're reference material for a
-    // hand-merge, not resources — loading one would re-create it on the
-    // platform as a duplicate.
-    if (isBackupCopyFile(entry)) {
-      continue;
-    }
-
-    const fullPath = join(dir, entry);
-    const stats = await stat(fullPath);
-    const relativePath = relative(baseDir, fullPath);
-
-    if (stats.isDirectory()) {
-      // Recursively scan subdirectories
-      const subFiles = await scanDirectory(fullPath, baseDir);
-      files.push(...subFiles);
-    } else {
-      const ext = extname(entry);
-      if (VALID_EXTENSIONS.includes(ext)) {
-        files.push(fullPath);
-      } else {
-        // Warn about unsupported files
-        console.warn(
-          `  ⚠️  Skipping unsupported file: ${relativePath} (expected ${VALID_EXTENSIONS.join(", ")})`,
-        );
-      }
-    }
-  }
-
-  return files;
-}
-
 export async function loadResources<T>(
   type: ResourceType,
   options: LoadOptions = {},
 ): Promise<ResourceFile<T>[]> {
-  const folderPath = FOLDER_MAP[type];
-  const resourceDir = join(RESOURCES_DIR, folderPath);
-  const ignorePatterns = options.ignorePatterns ?? [];
-
-  if (!existsSync(resourceDir)) {
-    if (!options.quiet) console.log(`📁 No ${type} directory found, skipping...`);
-    return [];
-  }
-
-  const filePaths = await scanDirectory(resourceDir, resourceDir);
-  const resources: ResourceFile<T>[] = [];
-  const seenIds = new Map<string, string>(); // resourceId -> filePath
-
-  for (const filePath of filePaths) {
-    const ext = extname(filePath);
-
-    // Compute resourceId as path relative to the resource type directory, without extension
-    // e.g., /resources/<org>/assistants/support/intake.yml → support/intake
-    // e.g., /resources/<org>/assistants/inbound-support.yml → inbound-support
-    const relativePath = relative(resourceDir, filePath);
-    const resourceId = relativePath.slice(0, -ext.length);
-
-    // Symmetric ignore: drop matched ids before duplicate-detection and
-    // parsing so the rest of the pipeline never sees the file. Caller passes
-    // `[]` (or omits) to opt out — preserves the pre-change behavior.
-    if (ignorePatterns.length > 0) {
-      const matched = matchesIgnore(folderPath, resourceId, ignorePatterns);
-      if (matched) {
-        console.log(`  🚫 ${resourceId} (matched .vapi-ignore: ${matched})`);
-        continue;
-      }
-    }
-
-    // Check for duplicate resourceIds (e.g., foo.yml and foo.yaml in same directory)
-    if (seenIds.has(resourceId)) {
-      throw new Error(
-        `Duplicate resource ID "${resourceId}" found:\n` +
-          `  - ${seenIds.get(resourceId)}\n` +
-          `  - ${filePath}\n` +
-          `Each resource must have a unique path-based identifier.`,
-      );
-    }
-    seenIds.set(resourceId, filePath);
-
-    let data: T;
-    if (ext === ".ts") {
-      // Dynamic import for TypeScript files
-      try {
-        const module = await import(filePath);
-        data = module.default as T;
-        if (data === undefined) {
-          throw new Error(`No default export found in ${relativePath}`);
-        }
-      } catch (error) {
-        throw new Error(
-          `Failed to import TypeScript resource "${relativePath}": ${error}`,
-        );
-      }
-    } else if (ext === ".md") {
-      // Parse Markdown files with YAML frontmatter (for assistants with system prompts)
-      try {
-        const content = await readFile(filePath, "utf-8");
-        const { config, body } = parseFrontmatter(content);
-
-        // Inject markdown body as system message if present
-        if (body) {
-          const model = (config.model as Record<string, unknown>) || {};
-          const existingMessages = Array.isArray(model.messages)
-            ? model.messages
-            : [];
-          model.messages = [
-            { role: "system", content: body },
-            ...existingMessages.filter(
-              (m: { role?: string }) => m.role !== "system",
-            ),
-          ];
-          config.model = model;
-        }
-
-        data = config as T;
-      } catch (error) {
-        throw new Error(
-          `Failed to parse Markdown resource "${relativePath}": ${error}`,
-        );
-      }
-    } else {
-      // Parse YAML files
-      try {
-        const content = await readFile(filePath, "utf-8");
-        data = parseYaml(content) as T;
-        if (data === null || data === undefined) {
-          throw new Error(`Empty or invalid YAML`);
-        }
-        if (typeof data !== "object" || Array.isArray(data)) {
-          throw new Error(
-            `YAML must be an object, got ${Array.isArray(data) ? "array" : typeof data}`,
-          );
-        }
-      } catch (error) {
-        throw new Error(
-          `Failed to parse YAML resource "${relativePath}": ${error}`,
-        );
-      }
-    }
-
-    resources.push({ resourceId, filePath, data });
-    if (!options.quiet) console.log(`  📦 Loaded ${resourceId}`);
-  }
-
-  return resources;
+  return resourceDirLoad<T>(type, RESOURCES_DIR, options);
 }
 
 // Match a CLI-supplied path against a folder name. Shared by push (load
@@ -527,23 +262,7 @@ export async function loadSingleResource(
   } else if (ext === ".md") {
     try {
       const content = await readFile(absolutePath, "utf-8");
-      const { config, body } = parseFrontmatter(content);
-
-      if (body) {
-        const model = (config.model as Record<string, unknown>) || {};
-        const existingMessages = Array.isArray(model.messages)
-          ? model.messages
-          : [];
-        model.messages = [
-          { role: "system", content: body },
-          ...existingMessages.filter(
-            (m: { role?: string }) => m.role !== "system",
-          ),
-        ];
-        config.model = model;
-      }
-
-      data = config;
+      data = markdownResourceParse(content);
     } catch (error) {
       throw new Error(
         `Failed to parse Markdown resource "${filePath}": ${error}`,
