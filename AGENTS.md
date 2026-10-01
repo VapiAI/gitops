@@ -54,7 +54,7 @@ If you're unsure where something goes, default to `docs/learnings/`. The README 
 You usually run without a TTY, so **do not run bare `npm run setup`** — the wizard will exit and tell you to use direct mode. Follow these steps instead:
 
 1. `nvm use` (or confirm `node --version` satisfies `engines` in `package.json`), then `npm install`.
-2. **Get the API key without handling it yourself.** Ask the human to create `.env.<org>` from `.env.example` and paste their Vapi **private** key into `VAPI_TOKEN`, or confirm `VAPI_TOKEN` is already exported. Do not ask them to paste the key into chat, and never pass it as a CLI argument (setup refuses `--token`).
+2. **Get the API key without handling it yourself.** Ask the human to create `.env.<org>` from `.env.example` and paste a Vapi **private API key** into `VAPI_PRIVATE_API_KEY`, or confirm `VAPI_PRIVATE_API_KEY` is already exported. Point them to https://dashboard.vapi.ai/org/api-keys → **Private API Keys** (a *public* key will not work). Do not ask them to paste the key into chat, and never pass it as a CLI argument (setup refuses `--token`).
 3. Ask the human whether to download the org's existing resources:
    - Managing an existing org → `npm run setup -- <org>` (`--resources all`, the default).
    - Authoring from scratch → `npm run setup -- <org> --resources none` (state only, no files).
@@ -77,7 +77,7 @@ If setup reports the org is "already set up locally", do not delete anything to 
 | Create a multi-agent squad          | Create `resources/<org>/squads/<name>.yml`                                        |
 | Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
 | Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
-| First-time setup without a TTY      | `npm run setup -- <org> [--resources none] [--region eu]` — key from `VAPI_TOKEN` or `.env.<org>` |
+| First-time setup without a TTY      | `npm run setup -- <org> [--resources none] [--region eu]` — private API key from `VAPI_PRIVATE_API_KEY` or `.env.<org>` |
 | Promote resources across orgs       | `npm run promote -- --pipeline <name> --from <org-a> --to <org-b> --apply`        |
 | Deploy local changes (default)      | `npm run apply -- <org>` — pull → merge → push, safe against dashboard drift       |
 | Pre-flight schema check (no network) | `npm run validate -- <org>` — run before every `apply`                            |
@@ -881,7 +881,7 @@ Concrete example conversations showing expected behavior.
 
 ```bash
 # Setup
-npm run setup                                      # Interactive wizard: API key, org slug, resource selection
+npm run setup                                      # Interactive wizard: private API key, org slug, resource selection
 
 # Sync
 npm run pull -- <org>                              # Pull from Vapi (preserve local changes)

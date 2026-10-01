@@ -20,7 +20,10 @@ test("updateEnvConnection replaces auth settings without clobbering bindings", (
 
   const result = updateEnvConnection(existing, "new-token");
 
-  assert.match(result, /^VAPI_TOKEN=new-token$/m);
+  // Writes the canonical name and drops the legacy one, so a re-run of
+  // setup migrates old .env files instead of leaving two keys behind.
+  assert.match(result, /^VAPI_PRIVATE_API_KEY=new-token$/m);
+  assert.doesNotMatch(result, /^VAPI_TOKEN=/m);
   assert.doesNotMatch(result, /^VAPI_BASE_URL=/m);
   assert.match(result, /^CUSTOM_SETTING=keep-me$/m);
   assert.match(result, /^VAPI_PHONE_NUMBER_SUPPORT_LINE=phone-1$/m);

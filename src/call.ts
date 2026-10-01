@@ -1,3 +1,4 @@
+import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
@@ -147,13 +148,12 @@ function loadEnvFile(env: string): { token: string; baseUrl: string } {
     }
   }
 
-  const token = process.env.VAPI_TOKEN || envVars.VAPI_TOKEN;
+  const token = resolveApiKey(process.env, envVars);
   const baseUrl =
     process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
 
   if (!token) {
-    console.error("❌ VAPI_TOKEN environment variable is required");
-    console.error(`   Create a .env.${env} file with: VAPI_TOKEN=your-token`);
+    console.error(`❌ ${missingApiKeyMessage(env)}`);
     process.exit(1);
   }
 

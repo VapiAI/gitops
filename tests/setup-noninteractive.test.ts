@@ -116,6 +116,7 @@ function sandbox(): { dir: string; cleanup: () => void } {
 function runSetup(cwd: string, args: string[], env: Record<string, string> = {}) {
   const baseEnv = { ...process.env };
   delete baseEnv.VAPI_TOKEN;
+  delete baseEnv.VAPI_PRIVATE_API_KEY;
   delete baseEnv.VAPI_BASE_URL;
   const result = spawnSync("node", ["--import", "tsx", "src/setup.ts", ...args], {
     cwd,
@@ -149,8 +150,10 @@ test("direct setup without any API key fails with actionable guidance", () => {
   try {
     const res = runSetup(fx.dir, ["my-org"]);
     assert.equal(res.code, 1);
-    assert.match(res.output, /No Vapi API key found/);
+    assert.match(res.output, /No Vapi private API key found/);
     assert.match(res.output, /\.env\.my-org/);
+    assert.match(res.output, /dashboard\.vapi\.ai\/org\/api-keys/);
+    assert.match(res.output, /VAPI_PRIVATE_API_KEY=/);
   } finally {
     fx.cleanup();
   }
@@ -161,11 +164,11 @@ test("direct setup treats the copied .env.example placeholder as no key", () => 
   try {
     writeFileSync(
       join(fx.dir, ".env.my-org"),
-      "VAPI_TOKEN=your-vapi-private-key-here\n",
+      "VAPI_PRIVATE_API_KEY=your-vapi-private-key-here\n",
     );
     const res = runSetup(fx.dir, ["my-org"]);
     assert.equal(res.code, 1);
-    assert.match(res.output, /No Vapi API key found/);
+    assert.match(res.output, /No Vapi private API key found/);
   } finally {
     fx.cleanup();
   }
@@ -175,7 +178,7 @@ test("direct setup refuses to touch an org that already exists locally", () => {
   const fx = sandbox();
   try {
     mkdirSync(join(fx.dir, "resources", "my-org"), { recursive: true });
-    const res = runSetup(fx.dir, ["my-org"], { VAPI_TOKEN: "fake-not-used" });
+    const res = runSetup(fx.dir, ["my-org"], { VAPI_PRIVATE_API_KEY: "fake-not-used" });
     assert.equal(res.code, 1);
     assert.match(res.output, /already set up locally/);
     assert.match(res.output, /npm run pull -- my-org/);

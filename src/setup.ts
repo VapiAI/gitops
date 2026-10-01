@@ -4,6 +4,12 @@ import { existsSync, readdirSync } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import {
+  API_KEY_VAR,
+  API_KEYS_URL,
+  LEGACY_API_KEY_VAR,
+  resolveApiKey,
+} from "./api-key.ts";
 import { updateEnvConnection } from "./bindings.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import {
@@ -378,8 +384,11 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const envFileContent = existsSync(envPath)
     ? await readFile(envPath, "utf-8")
     : "";
-  const fromEnv = process.env.VAPI_TOKEN?.trim();
-  const fromFile = readEnvValue(envFileContent, "VAPI_TOKEN");
+  const fromEnv = resolveApiKey(process.env);
+  const fromFile = resolveApiKey({
+    VAPI_PRIVATE_API_KEY: readEnvValue(envFileContent, "VAPI_PRIVATE_API_KEY"),
+    VAPI_TOKEN: readEnvValue(envFileContent, "VAPI_TOKEN"),
+  });
   const token =
     fromEnv && !isPlaceholderToken(fromEnv)
       ? fromEnv
@@ -389,15 +398,16 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
 
   if (!token) {
     fail(
-      `No Vapi API key found. Provide one of:\n` +
-        `    • VAPI_TOKEN=<private key> in the environment, or\n` +
-        `    • a .env.${slug} file containing VAPI_TOKEN=<private key> (see .env.example)\n` +
+      `No Vapi private API key found.\n` +
+        `    Copy one from ${API_KEYS_URL} (Private API Keys section), then either:\n` +
+        `    • add it to .env.${slug} as ${API_KEY_VAR}=<private API key> (see .env.example), or\n` +
+        `    • export ${API_KEY_VAR}=<private API key> in the environment\n` +
         `    Then re-run: npm run setup -- ${slug}`,
     );
   }
   console.log(
     c.dim(
-      `  Using API key from ${fromEnv && token === fromEnv ? "VAPI_TOKEN environment variable" : `.env.${slug}`}`,
+      `  Using API key from ${fromEnv && token === fromEnv ? `${process.env[API_KEY_VAR]?.trim() ? API_KEY_VAR : LEGACY_API_KEY_VAR} environment variable` : `.env.${slug}`}`,
     ),
   );
 
@@ -435,6 +445,7 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
 
   // Child pulls give process env precedence over .env files, so pin the
   // validated connection explicitly rather than inheriting a stale value.
+  process.env.VAPI_PRIVATE_API_KEY = token;
   process.env.VAPI_TOKEN = token;
   process.env.VAPI_BASE_URL = vapiBaseUrl;
 
@@ -529,7 +540,7 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const apiKey = await password({
-      message: "Paste your Vapi private API key",
+      message: `Paste your Vapi private API key (from ${API_KEYS_URL})`,
       mask: "•",
       validate: (value) => {
         if (!value.trim()) return "API key is required";
