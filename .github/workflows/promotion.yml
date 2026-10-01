@@ -56,6 +56,12 @@ jobs:
 
       - name: Reconcile configured promotions
         id: promotion
+        # A safety net only, on the step rather than the job so a timeout
+        # still leaves the always() commit step below time to run. Gate
+        # checks bound themselves (promotionGateRun's deadline), and their
+        # combined budget is checked against 300 minutes when the config
+        # loads, so this cap doesn't cut short a long ungated promotion.
+        timeout-minutes: 330
         shell: bash
         run: |
           set -euo pipefail

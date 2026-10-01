@@ -29,6 +29,9 @@ export interface PromotionBindings {
 export interface PromotionOrg {
   baseUrl?: string;
   bindings: PromotionBindings;
+  // A vapi-checks.yml check that must pass in this org before anything is
+  // promoted out of it.
+  check?: string;
 }
 
 export interface PromotionPipeline {
@@ -142,6 +145,8 @@ export function promotionBindingsParse(value: unknown): PromotionBindings {
   };
 }
 
+const PROMOTION_ORG_KEYS = ["baseUrl", "bindings", "check"];
+
 export function promotionConfigParse(content: string): PromotionConfig {
   const raw = object(parseYaml(content), "promotion.yml");
   if (raw.version !== 1) throw new Error("promotion.yml version must be 1");
@@ -150,11 +155,25 @@ export function promotionConfigParse(content: string): PromotionConfig {
   for (const [slug, value] of Object.entries(orgsRaw)) {
     if (!SLUG_RE.test(slug)) throw new Error(`Invalid org slug: ${slug}`);
     const org = object(value ?? {}, `org ${slug}`);
+    // A typo (`checks:`, `Check:`) must not quietly drop a safety gate.
+    for (const key of Object.keys(org))
+      if (!PROMOTION_ORG_KEYS.includes(key))
+        throw new Error(
+          `org ${slug} has unknown key "${key}" (allowed: ${PROMOTION_ORG_KEYS.join(", ")})`,
+        );
     if (org.baseUrl !== undefined && typeof org.baseUrl !== "string")
       throw new Error(`org ${slug}.baseUrl must be a string`);
+    if (
+      org.check !== undefined &&
+      (typeof org.check !== "string" || !SLUG_RE.test(org.check))
+    )
+      throw new Error(
+        `org ${slug}.check must be a check name from vapi-checks.yml`,
+      );
     orgs[slug] = {
       baseUrl: typeof org.baseUrl === "string" ? org.baseUrl : undefined,
       bindings: promotionBindingsParse(org.bindings),
+      ...(typeof org.check === "string" ? { check: org.check } : {}),
     };
   }
   const pipelinesRaw = object(raw.pipelines, "promotion.yml pipelines");
