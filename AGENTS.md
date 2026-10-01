@@ -1032,4 +1032,4 @@ When transferring to human:
 2. Create scenarios (what the simulated caller says + evaluation criteria)
 3. Create simulations (pair personality + scenario)
 4. Create suites (batch simulations together)
-5. Run via Vapi dashboard or API
+5. Run against the deployed resources with `npm run sim`, or against the local files (nothing deployed) with `npm run check` — see "PR Checks" in the README. The PR workflow runs `npm run check` on every affected PR when `VAPI_CHECKS_ENABLED=true`

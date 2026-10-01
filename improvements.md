@@ -85,6 +85,7 @@ you which stack PR closes the row.**
 | 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Open                                            |
 | 32  | Test suite never ran in CI; 20 tests rotted after the hash store | Regression guards for #22/#23 silently stopped running | None | RESOLVED 2026-09-30 (#56)                      |
 | 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
+| 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1766,6 +1767,54 @@ None needed once the fix below lands.
 - `src/vapi-client.ts`: a config-free client that never retries run
   creation on a 5xx (the run may already be queued).
 - Exit codes: 0 passed, 1 failed, 2 usage, 3 incomplete.
+
+### Status
+
+**RESOLVED 2026-10-01.**
+
+---
+
+## 34. No pre-merge simulation signal; simulations only tested what was deployed
+
+**[RESOLVED 2026-10-01]**
+
+**Discovered:** 2026-10-01, TEST-141 (and PAL-608, where customers hand-maintain shell workflows for this).
+
+### Problem
+
+Nothing told a PR author that a change to an assistant, squad, tool or
+structured output broke behaviour before it merged. `npm run sim` runs a
+suite against the *deployed* target by ID, so it can only test a change
+after `apply`, and it couldn't see the PR branch at all.
+
+### Current behavior (Verified, before the fix)
+
+- `src/sim.ts` sent `target: {assistantId | squadId}` and suite IDs: the
+  platform's stored copies, never the branch's files.
+- No workflow ran simulations on pull requests, and nothing posted a commit
+  status or linked a run.
+
+### Risk
+
+Behaviour regressions merged green and reached production through
+`apply` or promotion.
+
+### Current mitigation
+
+None needed once the fix below lands.
+
+### Possible fix (landed)
+
+- `npm run check` (`src/check-*.ts`) builds each `vapi-checks.yml` target and
+  its tests from the branch's files and sends them inline in one run per
+  target, so nothing is deployed or left behind. Tools are mocked fail-closed
+  and servers dead-ended (`src/check-mocks.ts`); the verdict is the strict
+  `simRunVerdict` from #33.
+- `.github/workflows/vapi-checks.yml` (opt-in via `VAPI_CHECKS_ENABLED`) runs
+  affected checks on each PR and posts `Vapi Evals` commit statuses that link
+  straight to the run; forks and Dependabot get a keyless dry run.
+- Docs: README "PR Checks", `docs/learnings/simulations.md` "Inline PR
+  Checks".
 
 ### Status
 

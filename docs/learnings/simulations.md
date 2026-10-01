@@ -227,6 +227,51 @@ Base URL: `https://api.vapi.ai`
 
 ---
 
+## Inline PR Checks (`npm run check`)
+
+`npm run check` sends the target and its tests **inline** in one
+`POST /eval/simulation/run` (`target.assistant` / `target.squad`, and
+`{type: "simulation", name, scenario, personality}` entries), built from the
+branch's files. Setup is in the README's "PR Checks" section; these are the
+behaviours worth knowing when a check surprises you.
+
+- **Inline matches stored, with two known differences.** A 2026-10-01 parity
+  run (TEST-141) scored inline and stored versions of the same squad 15/15
+  each, with the same handoff and business-tool sequences. The differences:
+  - **Generated handoff names:** `handoff_to_<assistantName>` inline vs
+    `handoff_to_<uuid>` stored. A prompt or judge that names the generated
+    function behaves differently — give the handoff an explicit
+    `function.name`. The check warns when it sees `handoff_to_` in text.
+  - **Tool order** decides which tool the model reaches for. The runtime
+    puts `model.tools` first, then `toolIds` in order, then `toolRefs`; the
+    check builds inline tools in that same order.
+- **Tool mocks fail closed.** Function tools are mocked by `function.name`,
+  `apiRequest` tools by their top-level `name`. A tool the scenario doesn't
+  mock answers `{"error":"vapi-gitops-ci: <tool> is not mocked in this
+  scenario"}`, and the report lists it as "unmocked tool called". A scenario
+  mock with `enabled: false` is replaced by that error.
+- **Hook-fired tools bypass scenario mocks.** Scenario `toolMocks` apply on
+  the LLM tool-call path; tools fired from an assistant's `hooks[].do[]`
+  probably don't consult them. Their safeguard is the dead server: expect an
+  error result for them in transcripts, not a mock.
+- **Servers are replaced, never deleted.** Every assistant and function tool
+  gets `server: https://vapi-gitops-ci.invalid` (1 s timeout) and
+  `serverMessages: []`. A *deleted* server falls back to the phone number's
+  or the org's server URL, which would leak the conversation.
+- **Transfers can't happen.** `transferCall` becomes a mocked dead-server
+  function under the same name. A scenario that needs a real transfer fails.
+- **What still reaches real systems** in the run org: custom LLM, voice and
+  transcriber providers, org-wide and assistant monitors, and
+  `observabilityPlan` exports. Use a dedicated CI org (`runOrg`) to avoid
+  them.
+- **Over chat**, `messages-with-audio` judges and scenario `hooks` don't
+  work, and a scenario with no required text judge can't fail; the build
+  refuses all three.
+- **Run items echo the scenario.** `metadata.scenario.toolMocks` includes the
+  default error mocks whether or not a tool was called; read tool results
+  from `metadata.call.messages` (`tool_calls` carry the ids and names,
+  `tool_call_result` the answers by `toolCallId`).
+
 ## Simulations (`/eval/simulation`)
 
 ### Create simulation — `POST /eval/simulation`

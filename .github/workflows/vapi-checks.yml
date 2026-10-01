@@ -1,0 +1,118 @@
+name: Vapi checks
+
+# Runs the simulation checks in vapi-checks.yml against the PR branch's own
+# files: each target is built inline and sent in one simulation run, so
+# nothing is deployed. Opt in with the repository variable
+# VAPI_CHECKS_ENABLED=true; see "PR checks" in the README.
+#
+# Never `pull_request_target`: the branch's code runs here, so it must only
+# ever get this repository's secrets when the branch is this repository's.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      check:
+        description: >-
+          Check name from vapi-checks.yml. Leave blank to run every check and
+          update the Vapi Evals status on the dispatched commit.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  # Only to post the `Vapi Evals` commit statuses that link to each run.
+  statuses: write
+
+concurrency:
+  group: vapi-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vapi-checks:
+    if: vars.VAPI_CHECKS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # The run step's budget (22 min) leaves time to cancel runs and report.
+    timeout-minutes: 30
+    env:
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Look for vapi-checks.yml
+        id: config
+        shell: bash
+        run: |
+          if [[ -f vapi-checks.yml ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No vapi-checks.yml at the repository root; nothing to check."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Live runs only for this repository's own branches (not forks, not
+      # Dependabot) and for manual dispatch. Everything else builds the
+      # payloads without a key, and an affected PR gets an error status
+      # until a maintainer dispatches the check on it.
+      - name: Choose live or dry run
+        id: mode
+        if: steps.config.outputs.present == 'true'
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          ACTOR: ${{ github.actor }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          live=false
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            live=true
+          elif [[ "$HEAD_REPO" == "$GITHUB_REPOSITORY" && "$ACTOR" != "dependabot[bot]" && "$AUTHOR" != "dependabot[bot]" ]]; then
+            live=true
+          fi
+          echo "live=$live" >> "$GITHUB_OUTPUT"
+          echo "Live run: $live"
+
+      - uses: actions/setup-node@v4
+        if: steps.config.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+        if: steps.config.outputs.present == 'true'
+
+      - name: Run Vapi checks
+        if: steps.config.outputs.present == 'true'
+        shell: bash
+        env:
+          LIVE: ${{ steps.mode.outputs.live }}
+          CHECK: ${{ inputs.check }}
+          BASE_REF: ${{ github.base_ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+          VAPI_CHECK_TOKENS: ${{ steps.mode.outputs.live == 'true' && secrets.VAPI_CHECK_TOKENS || '' }}
+          VAPI_PRIVATE_API_KEY: ${{ steps.mode.outputs.live == 'true' && secrets.VAPI_PRIVATE_API_KEY || '' }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$CHECK" ]]; then args+=("$CHECK"); else args+=(--all); fi
+          if [[ "$LIVE" == "true" ]]; then
+            args+=(--refresh-bindings)
+          else
+            args+=(--dry-run)
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]] &&
+            git rev-parse --verify --quiet "origin/$BASE_REF" > /dev/null; then
+            args+=(--changed-since "origin/$BASE_REF")
+          fi
+          [[ -n "$VAPI_CHECK_TOKENS" ]] || unset VAPI_CHECK_TOKENS
+          [[ -n "$VAPI_PRIVATE_API_KEY" ]] || unset VAPI_PRIVATE_API_KEY
+          # exec, so GitHub's cancel signal (a newer push) reaches node,
+          # which cancels its in-flight simulation runs.
+          exec node --import tsx src/check-cmd.ts "${args[@]}" --budget-minutes 22
