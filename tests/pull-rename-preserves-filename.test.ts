@@ -134,13 +134,19 @@ test("pull: dashboard rename of tracked resource preserves the local filename (n
   mkdirSync(assistantsDir, { recursive: true });
   writeFileSync(join(assistantsDir, `${TRACKED_SLUG}.md`), PREEXISTING_MD);
 
+  // The drift baseline lives in the hash store, not the state file. The
+  // engine runs from the copied src/, so its store resolves under `dir`.
+  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  mkdirSync(hashStore, { recursive: true });
+  writeFileSync(join(hashStore, UUID_X), "stale-hash-X\n");
+
   writeFileSync(
     join(dir, `.vapi-state.${ENV}.json`),
     JSON.stringify(
       {
         credentials: {},
         assistants: {
-          [TRACKED_SLUG]: { uuid: UUID_X, lastPulledHash: "stale-hash-X" },
+          [TRACKED_SLUG]: { uuid: UUID_X },
         },
         structuredOutputs: {},
         tools: {},

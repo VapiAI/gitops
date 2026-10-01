@@ -79,6 +79,11 @@ export interface AuditOptions {
   // frontmatter parsing of the assistant file on disk. Sync OR async return
   // is accepted so tests can keep their fixtures plain-object.
   readAssistantTools?: (resourceId: string) => unknown[] | Promise<unknown[]>;
+  // DI seam: swap the drift-baseline lookup. Defaults to the per-developer
+  // hash store (.vapi-state-hash/<env>/<uuid>), which resolves beside src/
+  // rather than under any temp dir — so in-process tests must inject this
+  // instead of seeding baseline files.
+  baselineReader?: (uuid: string) => string | undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,10 +248,11 @@ function checkStateUuidCollisions(
 function checkContentIdentical(
   type: ResourceType,
   state: StateFile,
+  baselineReader: (uuid: string) => string | undefined,
 ): { findings: AuditFinding[]; identicalSlugs: Set<string> } {
   const byHash = new Map<string, string[]>();
   for (const [resourceId, entry] of Object.entries(state[type])) {
-    const hash = readBaseline(VAPI_ENV, entry.uuid);
+    const hash = baselineReader(entry.uuid);
     if (!hash) continue;
     const slugs = byHash.get(hash) ?? [];
     slugs.push(resourceId);
@@ -368,6 +374,7 @@ function checkContentDrift(
   state: StateFile,
   remote: VapiResource[],
   localIds: string[],
+  baselineReader: (uuid: string) => string | undefined,
 ): AuditFinding[] {
   const remoteByUuid = new Map(remote.map((r) => [r.id, r]));
   const credReverse = credentialReverseMap(state);
@@ -390,7 +397,7 @@ function checkContentDrift(
     );
     const direction = classifyDrift({
       localHash,
-      lastPulledHash: readBaseline(VAPI_ENV, entry.uuid),
+      lastPulledHash: baselineReader(entry.uuid),
       platformHash,
     });
     if (direction === "clean") continue;
@@ -466,6 +473,8 @@ export async function runAudit(
   const remoteFetcher = opts.remoteFetcher ?? fetchAllResources;
   const readAssistantTools =
     opts.readAssistantTools ?? defaultReadAssistantTools;
+  const baselineReader =
+    opts.baselineReader ?? ((uuid: string) => readBaseline(VAPI_ENV, uuid));
 
   const state = stateLoader();
 
@@ -519,13 +528,15 @@ export async function runAudit(
       const remoteUuids = new Set(remote.map((r) => r.id));
       findings.push(...checkStateGhosts(type, state, remoteUuids));
       findings.push(...checkDashboardOrphans(type, state, remote));
-      findings.push(...checkContentDrift(type, state, remote, localIds));
+      findings.push(
+        ...checkContentDrift(type, state, remote, localIds, baselineReader),
+      );
     }
 
     findings.push(...checkStateUuidCollisions(type, state));
 
     const { findings: identicalFindings, identicalSlugs } =
-      checkContentIdentical(type, state);
+      checkContentIdentical(type, state, baselineReader);
     findings.push(...identicalFindings);
 
     findings.push(...checkSiblingBaseSlug(type, state, identicalSlugs));

@@ -83,6 +83,7 @@ you which stack PR closes the row.**
 | 29  | SO linking sent filtered `assistantIds` arrays              | Silent unlink of live-but-untracked assistants      | None       | RESOLVED 2026-08-03 (#51)                       |
 | 30  | Tool-linking pass could PATCH a raw assistant slug          | Mid-push 400 naming the wrong resource              | None       | RESOLVED 2026-08-03 (#51)                       |
 | 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Open                                            |
+| 32  | Test suite never ran in CI; 20 tests rotted after the hash store | Regression guards for #22/#23 silently stopped running | None | RESOLVED 2026-09-30 (#56)                      |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1643,6 +1644,70 @@ three behaviors gets a chance to run.
 ### Status
 
 **Open.**
+
+---
+
+## 32. The test suite never ran in CI, so 20 tests rotted unnoticed after the hash-store migration
+
+**[RESOLVED 2026-09-30] (#56)**
+
+### Problem
+
+`npm test` was not wired into any workflow — `.github/workflows/` held only
+`promotion.yml` — so nothing stopped a merge that broke tests. The
+hash-store migration (#41) moved drift baselines out of the state file into
+`.vapi-state-hash/<org>/<uuid>` and made the sync commands refuse legacy
+state, and 20 tests failed from that merge onward without anyone noticing.
+
+### Current behavior (Verified, before the fix)
+
+- All 20 failures were stale tests, not engine bugs: fixtures still wrote
+  `lastPulledHash` / `lastPushedHash` into state (now stripped by
+  `asResourceState` / `upsertState`, or refused by the legacy-state gate),
+  the `checkDriftForUpdate` tests omitted the new required `env`, and one
+  test pinned `both-diverged` for the converged edge that
+  `src/drift.ts:50` now deliberately classifies as `clean`.
+- Three of the dead tests were the regression guards #41 itself added for
+  #22 (dashboard rename keeps the local filename, same-name clobber) and #23
+  (stale baseline must not block a push). They had never passed.
+- `push-stale-baseline-noop` would not have exercised its case even with a
+  migrated fixture: empty `credentials` makes `maybeBootstrapState`
+  (`src/push.ts:509-525`) treat state as uninitialized, and the bootstrap pull
+  rewrites the stale baseline before the drift check runs.
+- The hash store resolves beside `src/` (`src/hash-store.ts:26-31`), not
+  under a temp dir, so in-process tests that push write baselines into the
+  developer's real store — `tool-assistant-cycle.test.ts` left one under
+  `.vapi-state-hash/test-fixture-org/` on every run.
+
+### Risk
+
+Any engine regression could merge green. The rename, clobber and
+phantom-drift fixes had no working coverage.
+
+### Current mitigation
+
+None needed once the fix below lands; CI now fails the PR.
+
+### Possible fix (landed)
+
+- `.github/workflows/ci.yml` runs `npm run build` and `npm test` on every PR
+  and on pushes to `main`, on Node 20 and 22 (the `engines` range).
+- Fixtures moved to the hash store: spawn-based tests seed
+  `<tmp>/.vapi-state-hash/<env>/<uuid>` (the engine runs from the copied
+  `src/`), `drift.test.ts` seeds through `writeBaseline` under a throwaway
+  org slug and removes it, and `audit.ts` gained a `baselineReader` DI seam
+  (`src/audit.ts:86`) beside `stateLoader` / `listLocalIds`.
+- `push-stale-baseline-noop` seeds a credential so no bootstrap pull runs, and
+  asserts that. Removing the agree-gate now fails it, as it does the
+  converged-edge `classifyDrift` test.
+- `tool-assistant-cycle.test.ts` deletes the baseline it writes.
+
+### Status
+
+**RESOLVED 2026-09-30.** Tests are still outside `tsconfig.json`'s `include`,
+so `npm run build` never typechecks them and the compiler could not have
+caught these stale fixture shapes. Including them surfaces 37 existing type
+errors today; widening `include` is a separate change.
 
 ---
 

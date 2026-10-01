@@ -24,8 +24,20 @@ import type { ResourceState, ResourceType, StateFile } from "../src/types.ts";
 // Helpers — keep fixtures DI-friendly and avoid filesystem / network.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Drift baselines live in the per-developer hash store, not the state file, so
+// fixtures record them here and `baseOpts` serves them via `baselineReader`.
+// A hash-less entry clears its uuid so a baseline can't leak between tests
+// that reuse the same fixture uuid.
+const baselines = new Map<string, string>();
+
 function makeStateEntry(uuid: string, hash?: string): ResourceState {
-  return hash ? { uuid, lastPulledHash: hash } : { uuid };
+  if (hash) baselines.set(uuid, hash);
+  else baselines.delete(uuid);
+  return { uuid };
+}
+
+function readFixtureBaseline(uuid: string): string | undefined {
+  return baselines.get(uuid);
 }
 
 // All sections start empty so callers only populate the type(s) under test.
@@ -54,6 +66,7 @@ function baseOpts(state: StateFile) {
     stateLoader: () => state,
     listLocalIds: (_t: ResourceType) => [] as string[],
     readAssistantTools: (_id: string) => [] as unknown[],
+    baselineReader: readFixtureBaseline,
   };
 }
 
@@ -440,6 +453,7 @@ test("inline-tools: assistant with empty model.tools array → 0 findings", asyn
   const findings = await runAudit({
     ...baseOpts(state),
     readAssistantTools: () => [],
+    baselineReader: readFixtureBaseline,
   });
   const inline = findings.filter((f) => f.rule === "inline-tools");
   assert.equal(inline.length, 0);
@@ -455,6 +469,7 @@ test("inline-tools: readAssistantTools returns non-array (treated as no inline t
   const findings = await runAudit({
     ...baseOpts(state),
     readAssistantTools: () => [],
+    baselineReader: readFixtureBaseline,
   });
   const inline = findings.filter((f) => f.rule === "inline-tools");
   assert.equal(inline.length, 0);
@@ -505,6 +520,7 @@ test("integration: orphan-yaml + collision + content-identical(4) + sibling-base
     // 1 orphan-yaml: a local file with no state entry.
     listLocalIds: (t) => (t === "assistants" ? ["stray-local"] : []),
     readAssistantTools: () => [],
+    baselineReader: readFixtureBaseline,
   });
 
   // Total: 1 orphan-yaml + 1 collision + 2 content-identical + 1 sibling
