@@ -86,6 +86,7 @@ you which stack PR closes the row.**
 | 32  | Test suite never ran in CI; 20 tests rotted after the hash store | Regression guards for #22/#23 silently stopped running | None | RESOLVED 2026-09-30 (#56)                      |
 | 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
 | 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
+| 35  | A failed promotion pushed nothing, not even state       | git lost track of resources already on the platform | None       | RESOLVED 2026-10-01                             |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1815,6 +1816,68 @@ None needed once the fix below lands.
   straight to the run; forks and Dependabot get a keyless dry run.
 - Docs: README "PR Checks", `docs/learnings/simulations.md` "Inline PR
   Checks".
+
+### Status
+
+**RESOLVED 2026-10-01.**
+
+---
+
+## 35. A failed promotion pushed nothing, not even state
+
+**[RESOLVED 2026-10-01]**
+
+**Discovered:** 2026-10-01, while planning the promotion check gate (TEST-141).
+
+### Problem
+
+When a multi-transition promotion failed partway, the workflow meant to
+commit the UUID state and leave resource files alone. But the failing
+transition had already rewritten tracked files in its target org, so the
+commit step's `git pull --rebase` refused ("You have unstaged changes") and
+the job pushed nothing: not the state, and not the files of the transitions
+that had already reached the platform.
+
+### Current behavior (Verified, before the fix)
+
+- `.github/workflows/promotion.yml` "Commit reconciled files and UUID state"
+  staged only `.vapi-state.*.json` on a non-success outcome, then ran
+  `git pull --rebase origin main` with the failed transition's rewrites
+  still in the working tree.
+- `promotionPlanApply` writes target files before `apply.ts` runs, so any
+  update to an existing target file left a tracked modification behind.
+- Reproduced in a scratch repo: transitions a→b (applies) then b→c (fails
+  with an existing file in c) → `error: cannot pull with rebase`, exit 128,
+  origin unchanged.
+
+### Risk
+
+Git and the platform disagree after any partial failure: b's resources are
+live but not in git, and the next promotion plans from stale files.
+
+### Current mitigation
+
+None needed once the fix below lands.
+
+### Possible fix (landed)
+
+- `src/promote-cmd.ts` truncates `tmp/promotion-applied.txt` at the start of
+  each `--apply` run and, after each successful `apply.ts`, records every path
+  `git status` reports under `resources/<target>/` — read from git rather
+  than the plan, because apply's own pull and push can rewrite other files —
+  together with its content at that moment, written to git's object store
+  (`git hash-object -w`; `-` for a deleted file).
+- On a non-success outcome the commit step stages the state files plus
+  exactly those recorded blobs (`git update-index --cacheinfo`), commits, then
+  `git reset --hard HEAD && git clean -fd -- resources` before rebasing, so the
+  failed transition's rewrites can't block the push. Because it stages the
+  recorded content rather than the working tree, a later failed transition
+  that rewrote the same file (two pipelines promoting into one org in one
+  `--all` run) can't replace what was actually applied.
+- `promotionCommandRun(args, deps)` takes an injectable child runner for
+  tests (`tests/promote-cmd.test.ts`). `tests/promotion-workflow-commit.test.ts`
+  runs the workflow's real commit step against a bare origin, including the
+  same-org case.
 
 ### Status
 
