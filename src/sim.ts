@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import type { StateFile } from "./types.ts";
+import { userAgentGet } from "./user-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -219,6 +220,7 @@ async function fetchJson(
     headers: {
       Authorization: `Bearer ${cfg.token}`,
       "Content-Type": "application/json",
+      "User-Agent": userAgentGet("sim"),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });

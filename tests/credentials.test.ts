@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { replaceCredentialRefs } from "../src/credentials.ts";
+import {
+  credentialForwardMap as forwardMap,
+  credentialReverseMap as reverseMap,
+  replaceCredentialRefs,
+} from "../src/credentials.ts";
 import type { StateFile } from "../src/types.ts";
 
 // Regression tests for P0-1.
@@ -14,9 +18,12 @@ import type { StateFile } from "../src/types.ts";
 // API then rejects on POST/PATCH. These tests lock in the scoped semantics
 // (only swap at exactly `credentialId` / `credentialIds` keys).
 
+// Takes `name → uuid` for brevity and builds the `{ uuid }` state shape.
 function makeState(creds: Record<string, string>): StateFile {
   return {
-    credentials: creds,
+    credentials: Object.fromEntries(
+      Object.entries(creds).map(([name, uuid]) => [name, { uuid }]),
+    ),
     assistants: {},
     structuredOutputs: {},
     tools: {},
@@ -27,22 +34,6 @@ function makeState(creds: Record<string, string>): StateFile {
     simulationSuites: {},
     evals: {},
   };
-}
-
-function reverseMap(state: StateFile): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const [name, uuid] of Object.entries(state.credentials)) {
-    m.set(uuid, name);
-  }
-  return m;
-}
-
-function forwardMap(state: StateFile): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const [name, uuid] of Object.entries(state.credentials)) {
-    m.set(name, uuid);
-  }
-  return m;
 }
 
 test("replaceCredentialRefs swaps at credentialId keys", () => {

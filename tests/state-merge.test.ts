@@ -37,46 +37,43 @@ function emptyTouched(): TouchedSets {
   };
 }
 
+// State entries hold only `{ uuid }`, so these tests mark which copy
+// `mergeScoped` kept with distinct UUIDs: `-disk` for the on-disk entry,
+// `-mem` for the in-memory one.
+
 test("mergeScoped: untouched entries copied from on-disk state", () => {
   const onDisk = emptyState();
-  onDisk.assistants["unrelated-1"] = { uuid: "u-1", lastPulledHash: "h-1" };
-  onDisk.assistants["unrelated-2"] = { uuid: "u-2", lastPulledHash: "h-2" };
+  onDisk.assistants["unrelated-1"] = { uuid: "u-1-disk" };
+  onDisk.assistants["unrelated-2"] = { uuid: "u-2-disk" };
 
   const inMemory = emptyState();
-  // In-memory state has unrelated-1 with a different hash (drift) and a
-  // newly-touched assistant. mergeScoped should copy unrelated-1 from disk
-  // (untouched), and only take touched-agent from in-memory.
-  inMemory.assistants["unrelated-1"] = { uuid: "u-1", lastPulledHash: "h-X" };
-  inMemory.assistants["touched-agent"] = {
-    uuid: "u-3",
-    lastPushedHash: "fresh",
-  };
+  // In-memory state has a drifted unrelated-1 and a newly-touched
+  // assistant. mergeScoped should copy unrelated-1 from disk (untouched),
+  // and only take touched-agent from in-memory.
+  inMemory.assistants["unrelated-1"] = { uuid: "u-1-mem" };
+  inMemory.assistants["touched-agent"] = { uuid: "u-3-mem" };
 
   const touched = emptyTouched();
   touched.assistants.add("touched-agent");
 
   const merged = mergeScoped(onDisk, inMemory, touched);
-  assert.equal(merged.assistants["unrelated-1"]!.lastPulledHash, "h-1");
-  assert.equal(merged.assistants["unrelated-2"]!.lastPulledHash, "h-2");
-  assert.equal(merged.assistants["touched-agent"]!.lastPushedHash, "fresh");
+  assert.equal(merged.assistants["unrelated-1"]!.uuid, "u-1-disk");
+  assert.equal(merged.assistants["unrelated-2"]!.uuid, "u-2-disk");
+  assert.equal(merged.assistants["touched-agent"]!.uuid, "u-3-mem");
 });
 
 test("mergeScoped: touched entries take in-memory version", () => {
   const onDisk = emptyState();
-  onDisk.assistants["agent-a"] = { uuid: "u-1", lastPulledHash: "old" };
+  onDisk.assistants["agent-a"] = { uuid: "u-1-disk" };
 
   const inMemory = emptyState();
-  inMemory.assistants["agent-a"] = {
-    uuid: "u-1",
-    lastPulledHash: "old",
-    lastPushedHash: "new",
-  };
+  inMemory.assistants["agent-a"] = { uuid: "u-1-mem" };
 
   const touched = emptyTouched();
   touched.assistants.add("agent-a");
 
   const merged = mergeScoped(onDisk, inMemory, touched);
-  assert.equal(merged.assistants["agent-a"]!.lastPushedHash, "new");
+  assert.equal(merged.assistants["agent-a"]!.uuid, "u-1-mem");
 });
 
 test("mergeScoped: credentials always refreshed from in-memory", () => {
@@ -111,26 +108,20 @@ test("mergeScoped: empty touched preserves all on-disk state", () => {
 
 test("mergeScoped: cross-section isolation (touched assistants do NOT affect tools section)", () => {
   const onDisk = emptyState();
-  onDisk.tools["unrelated-tool"] = {
-    uuid: "u-tool",
-    lastPulledHash: "tool-hash",
-  };
-  onDisk.assistants["agent-a"] = { uuid: "u-old" };
+  onDisk.tools["unrelated-tool"] = { uuid: "u-tool-disk" };
+  onDisk.assistants["agent-a"] = { uuid: "u-agent-disk" };
 
   const inMemory = emptyState();
-  inMemory.assistants["agent-a"] = { uuid: "u-old", lastPushedHash: "fresh" };
+  inMemory.assistants["agent-a"] = { uuid: "u-agent-mem" };
   // In-memory has an unrelated drift in tools section that should NOT bleed in
-  inMemory.tools["unrelated-tool"] = {
-    uuid: "u-tool",
-    lastPulledHash: "drifted",
-  };
+  inMemory.tools["unrelated-tool"] = { uuid: "u-tool-mem" };
 
   const touched = emptyTouched();
   touched.assistants.add("agent-a"); // ONLY assistants touched
 
   const merged = mergeScoped(onDisk, inMemory, touched);
   // tools section preserved from disk
-  assert.equal(merged.tools["unrelated-tool"]!.lastPulledHash, "tool-hash");
+  assert.equal(merged.tools["unrelated-tool"]!.uuid, "u-tool-disk");
   // assistants section: touched entry takes in-memory
-  assert.equal(merged.assistants["agent-a"]!.lastPushedHash, "fresh");
+  assert.equal(merged.assistants["agent-a"]!.uuid, "u-agent-mem");
 });
