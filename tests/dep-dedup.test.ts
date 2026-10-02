@@ -65,7 +65,7 @@ test("findExistingResourceByName: assistant payload (top-level name only)", () =
 
 test("findExistingResourceByName: state-only match", () => {
   const m = findExistingResourceByName({
-    localResourceId: "b2b-invoice-end-call",
+    localResourceId: "billing-end-call",
     localPayload: { function: { name: "end-call" } },
     stateSection: {
       "end-call-67aea057": { uuid: "uuid-aaa" },
@@ -157,7 +157,7 @@ test("findExistingResourceByName: ambiguous across state vs dashboard → lex-sm
   // the SAME uuid appears in both — here the winner appears in only one,
   // so source is whichever side it came from.
   const m = findExistingResourceByName({
-    localResourceId: "b2b-invoice-end-call",
+    localResourceId: "billing-end-call",
     localPayload: { function: { name: "end-call" } },
     stateSection: { "end-call-67aea057": { uuid: "uuid-zzz" } },
     remoteList: [{ id: "uuid-aaa", function: { name: "end-call" } }],

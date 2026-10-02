@@ -10,7 +10,7 @@
 //   (c) MOVED file — file copied without the state entry being rekeyed
 //
 // Silently treating every orphan as case (a) is what produced the duplicate
-// fleet we surfaced during the gitops-mudflap working session 2026-05-13.
+// fleet we surfaced in a customer working session on 2026-05-13.
 // Flow F (`mv foo.md bar.md` + push), Flow G (dashboard rename → pull writes
 // new file but leaves stale YAML), and Flow M (`apply` compresses Flow G into
 // one click) all share this shape.

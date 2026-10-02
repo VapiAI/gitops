@@ -36,7 +36,7 @@ const UUID_2 = "1a2b3c4d-5e6f-4a1b-9c2d-3e4f5a6b7c8d";
 
 test("one unresolved ref among the authored assistant_ids drops the whole assistantIds key", () => {
   const original = {
-    assistant_ids: ["front-desk", "clinical-stage-1"],
+    assistant_ids: ["front-desk", "intake-stage-1"],
   };
   const payload = {
     name: "intake-schema",
@@ -53,7 +53,7 @@ test("one unresolved ref among the authored assistant_ids drops the whole assist
 });
 
 test("a fully resolved assistantIds array is sent unchanged", () => {
-  const original = { assistant_ids: ["front-desk", "clinical-stage-1"] };
+  const original = { assistant_ids: ["front-desk", "intake-stage-1"] };
   const payload = { assistantIds: [UUID, UUID_2] };
 
   const result = omitUnresolvedAssistantIds(payload, original);
@@ -186,12 +186,12 @@ test("updateStructuredOutputAssistantRefs: a partial resolution (one of two) ski
   const state = emptyState();
   state.structuredOutputs["intake-schema"] = { uuid: UUID };
   state.assistants["front-desk"] = { uuid: UUID_2 };
-  // "clinical-stage-1" is deliberately untracked.
+  // "intake-stage-1" is deliberately untracked.
 
   const so: ResourceFile = {
     resourceId: "intake-schema",
     filePath: "/fake/structured-outputs/intake-schema.yml",
-    data: { assistant_ids: ["front-desk", "clinical-stage-1"] },
+    data: { assistant_ids: ["front-desk", "intake-stage-1"] },
   };
 
   await withFetchAndWarnRecorders(async ({ fetchCalls, warnings }) => {
@@ -208,15 +208,15 @@ test("updateStructuredOutputAssistantRefs: a partial resolution (one of two) ski
           (arg) =>
             typeof arg === "string" &&
             arg.includes("intake-schema") &&
-            arg.includes("clinical-stage-1") &&
+            arg.includes("intake-stage-1") &&
             !arg.includes("front-desk"),
         ),
       ),
       // Checks that the resolved slug never appears in the warning at all —
       // not just that it doesn't appear in one particular ordering. The
       // implementation preserves authored order, so a buggy message naming
-      // both refs would read "front-desk, clinical-stage-1" (authored order)
-      // and slip past a check that only excluded "clinical-stage-1, front-desk".
+      // both refs would read "front-desk, intake-stage-1" (authored order)
+      // and slip past a check that only excluded "intake-stage-1, front-desk".
       "the warning should name the unresolved ref but not the resolved one",
     );
   });

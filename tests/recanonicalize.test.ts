@@ -48,14 +48,14 @@ function makeFileExists(paths: Set<string>) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("recanonicalize: collapses UUID-suffixed key to canonical when local file present and canonical slot empty (the duplicate-generation root cause)", () => {
-  // State has `foo-vmd-004c5108` (rekey'd by a prior pull during a name
+  // State has `foo-vmd-0a1b2c3d` (rekey'd by a prior pull during a name
   // collision). The conflicting twin has since been deleted on the
   // dashboard. Local has only `squads/foo-vmd.md`. Canonical slot in state
   // is empty. We should collapse.
   const state = makeStateFile({
     squads: {
-      "foo-vmd-004c5108": makeStateEntry(
-        "004c5108-aaaa-bbbb-cccc-dddddddddddd",
+      "foo-vmd-0a1b2c3d": makeStateEntry(
+        "0a1b2c3d-aaaa-bbbb-cccc-dddddddddddd",
       ),
     },
   });
@@ -64,13 +64,13 @@ test("recanonicalize: collapses UUID-suffixed key to canonical when local file p
     fileExists: makeFileExists(new Set(["squads/foo-vmd.yml"])),
   });
   assert.equal(report.rekeys.length, 1);
-  assert.equal(report.rekeys[0]!.fromKey, "foo-vmd-004c5108");
+  assert.equal(report.rekeys[0]!.fromKey, "foo-vmd-0a1b2c3d");
   assert.equal(report.rekeys[0]!.toKey, "foo-vmd");
   assert.equal(report.conflicts.length, 0);
   assert.deepEqual(Object.keys(state.squads), ["foo-vmd"]);
   assert.equal(
     state.squads["foo-vmd"]!.uuid,
-    "004c5108-aaaa-bbbb-cccc-dddddddddddd",
+    "0a1b2c3d-aaaa-bbbb-cccc-dddddddddddd",
   );
 });
 
@@ -141,12 +141,12 @@ test("recanonicalize: applies uniformly across every resource type", () => {
 
 test("recanonicalize: refuses when UUID suffix doesn't match entry's UUID prefix (user-named resource that coincidentally ends in -<8hex>)", () => {
   // The key looks suffixed but the captured 8 hex chars (`deadbeef`) are
-  // NOT the prefix of the entry's UUID (`004c5108...`). This is a
+  // NOT the prefix of the entry's UUID (`0a1b2c3d...`). This is a
   // user-given name like "my-tool-deadbeef" — DO NOT touch it.
   const state = makeStateFile({
     tools: {
       "my-tool-deadbeef": makeStateEntry(
-        "004c5108-aaaa-bbbb-cccc-dddddddddddd",
+        "0a1b2c3d-aaaa-bbbb-cccc-dddddddddddd",
       ),
     },
   });
@@ -237,15 +237,15 @@ test("recanonicalize: refuses when canonical local file is missing (would create
 test("recanonicalize: skips UUID-suffixed keys when only the matching local file exists (normal post-pull layout)", () => {
   const state = makeStateFile({
     assistants: {
-      "call-transfer-test-c95f4c6b": makeStateEntry(
-        "c95f4c6b-bfde-4e90-af7e-ea8870b9f2d6",
+      "call-transfer-test-d3adb33f": makeStateEntry(
+        "d3adb33f-0000-4000-8000-000000000000",
       ),
     },
   });
   const report = recanonicalizeStateKeys({
     state,
     fileExists: makeFileExists(
-      new Set(["assistants/call-transfer-test-c95f4c6b.md"]),
+      new Set(["assistants/call-transfer-test-d3adb33f.md"]),
     ),
   });
   assert.equal(report.rekeys.length, 0);
@@ -354,28 +354,28 @@ test("recanonicalize: handles UUID prefix match case-insensitively", () => {
 
 test("recanonicalize: collapses multi-dash base slug ('foo-vmd-<uuid8>') — the exact shape the orphan-gate pairing missed", () => {
   // From the live incident: state key was
-  // `iform-voicemail-triage-squad-llm-only-vmd-004c5108`. The orphan-gate's
+  // `voicemail-triage-squad-llm-only-vmd-0a1b2c3d`. The orphan-gate's
   // extractBaseSlug pairing failed because base = "...-vmd" not "...".
   // This pass operates on raw UUID-suffix shape, so it recanonicalizes
   // regardless of how many dash-segments precede the UUID8 — as long as
   // the canonical local file exists.
   const state = makeStateFile({
     squads: {
-      "iform-voicemail-triage-squad-llm-only-vmd-004c5108": makeStateEntry(
-        "004c5108-aaaa-bbbb-cccc-dddddddddddd",
+      "voicemail-triage-squad-llm-only-vmd-0a1b2c3d": makeStateEntry(
+        "0a1b2c3d-aaaa-bbbb-cccc-dddddddddddd",
       ),
     },
   });
   const report = recanonicalizeStateKeys({
     state,
     fileExists: makeFileExists(
-      new Set(["squads/iform-voicemail-triage-squad-llm-only-vmd.yml"]),
+      new Set(["squads/voicemail-triage-squad-llm-only-vmd.yml"]),
     ),
   });
   assert.equal(report.rekeys.length, 1);
   assert.equal(
     report.rekeys[0]!.toKey,
-    "iform-voicemail-triage-squad-llm-only-vmd",
+    "voicemail-triage-squad-llm-only-vmd",
   );
   assert.equal(report.conflicts.length, 0);
 });
