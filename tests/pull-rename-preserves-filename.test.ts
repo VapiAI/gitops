@@ -22,12 +22,12 @@ import { Worker } from "node:worker_threads";
 // rename or recreate the local file. The filename slug is a stable local
 // handle, decoupled from the dashboard `name`.
 //
-// Scenario: state maps `call-transfer-test-c95f4c6b` → UUID X. On disk,
-// `call-transfer-test-c95f4c6b.md` holds X's content. The dashboard renames
+// Scenario: state maps `call-transfer-test-d3adb33f` → UUID X. On disk,
+// `call-transfer-test-d3adb33f.md` holds X's content. The dashboard renames
 // the resource to "Call Transfer Test 1". A correct pull must:
-//   1. Keep `call-transfer-test-c95f4c6b.md` (update its content in place).
-//   2. NOT create a second file `call-transfer-test-1-c95f4c6b.md`.
-//   3. Keep state keyed `call-transfer-test-c95f4c6b` → X.
+//   1. Keep `call-transfer-test-d3adb33f.md` (update its content in place).
+//   2. NOT create a second file `call-transfer-test-1-d3adb33f.md`.
+//   3. Keep state keyed `call-transfer-test-d3adb33f` → X.
 //
 // Before the fix, pull discarded the tracked resourceId on name mismatch,
 // minted a name-derived slug, and wrote a duplicate file — leaving two files
@@ -86,8 +86,8 @@ function startStub(
 }
 
 const ENV = "test-rename";
-const UUID_X = "c95f4c6b-bfde-4e90-af7e-ea8870b9f2d6";
-const TRACKED_SLUG = "call-transfer-test-c95f4c6b";
+const UUID_X = "d3adb33f-0000-4000-8000-000000000000";
+const TRACKED_SLUG = "call-transfer-test-d3adb33f";
 // The name-derived slug that the buggy behavior would have produced.
 const NAME_DERIVED_SLUG = `call-transfer-test-1-${UUID_X.slice(0, 8)}`;
 

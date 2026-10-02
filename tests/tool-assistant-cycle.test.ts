@@ -11,7 +11,7 @@ import test, { after } from "node:test";
 // once every assistant exists. The UPDATE path had no equivalent, so a first
 // push into an empty org sent the raw slug and the API answered:
 //
-//   PATCH /tool/<uuid> → 400 Assistant with ID "clinical-stage-1-a4598432" not found
+//   PATCH /tool/<uuid> → 400 Assistant with ID "intake-stage-1-7c6d5e4f" not found
 //
 // which aborted the push before the linking pass could run.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,11 +41,11 @@ test("an unresolved assistant destination drops the whole destinations key", asy
   // assistant is not in state yet.
   const original = {
     type: "transferCall",
-    destinations: [{ type: "assistant", assistantId: "clinical-stage-1" }],
+    destinations: [{ type: "assistant", assistantId: "intake-stage-1" }],
   };
   const payload = {
     type: "transferCall",
-    destinations: [{ type: "assistant", assistantId: "clinical-stage-1" }],
+    destinations: [{ type: "assistant", assistantId: "intake-stage-1" }],
   };
 
   const result = omitUnresolvedDestinations(payload, original);
@@ -59,7 +59,7 @@ test("an unresolved assistant destination drops the whole destinations key", asy
 
 test("a resolved destination is sent unchanged", async () => {
   const original = {
-    destinations: [{ type: "assistant", assistantId: "clinical-stage-1" }],
+    destinations: [{ type: "assistant", assistantId: "intake-stage-1" }],
   };
   const payload = {
     destinations: [{ type: "assistant", assistantId: UUID }],
@@ -73,12 +73,12 @@ test("a resolved destination is sent unchanged", async () => {
 });
 
 test("a trailing YAML comment on the reference still counts as resolved", async () => {
-  // `assistantId: clinical-stage-1 ## human note` — the comment is part of the
+  // `assistantId: intake-stage-1 ## human note` — the comment is part of the
   // authored string, so the comparison has to strip it or every reference would
   // look unresolved.
   const original = {
     destinations: [
-      { type: "assistant", assistantId: "clinical-stage-1 ## stage one" },
+      { type: "assistant", assistantId: "intake-stage-1 ## stage one" },
     ],
   };
   const payload = { destinations: [{ type: "assistant", assistantId: UUID }] };
@@ -94,7 +94,7 @@ test("an unresolved slug authored with a trailing YAML comment still drops the w
   // must clean both sides before checking equality, or the commented,
   // uncleaned resolved value never matches the cleaned original and the
   // destination is wrongly classified as resolved.
-  const commented = "clinical-stage-1 ## stage one";
+  const commented = "intake-stage-1 ## stage one";
   const original = {
     destinations: [{ type: "assistant", assistantId: commented }],
   };
@@ -164,16 +164,16 @@ test("non-assistant destinations never block the update", async () => {
 
 test("unresolvedDestinationSlugs: a slug entry is reported", () => {
   const result = unresolvedDestinationSlugs([
-    { type: "assistant", assistantId: "clinical-stage-1" },
+    { type: "assistant", assistantId: "intake-stage-1" },
   ]);
-  assert.deepEqual(result, ["clinical-stage-1"]);
+  assert.deepEqual(result, ["intake-stage-1"]);
 });
 
 test("unresolvedDestinationSlugs: a trailing YAML comment is stripped before reporting", () => {
   const result = unresolvedDestinationSlugs([
-    { type: "assistant", assistantId: "clinical-stage-1 ## stage one" },
+    { type: "assistant", assistantId: "intake-stage-1 ## stage one" },
   ]);
-  assert.deepEqual(result, ["clinical-stage-1"]);
+  assert.deepEqual(result, ["intake-stage-1"]);
 });
 
 test("unresolvedDestinationSlugs: an array of only UUID assistantIds reports nothing", () => {
@@ -255,7 +255,7 @@ function emptyState(): StateFile {
 test("updateToolAssistantRefs: skips the PATCH and warns when the referenced assistant is genuinely absent", async () => {
   const state = emptyState();
   state.tools["router"] = { uuid: UUID };
-  // Deliberately no entry under state.assistants for "clinical-stage-1" — the
+  // Deliberately no entry under state.assistants for "intake-stage-1" — the
   // assistant is genuinely absent, not merely not-yet-applied.
 
   const tool: ResourceFile = {
@@ -263,7 +263,7 @@ test("updateToolAssistantRefs: skips the PATCH and warns when the referenced ass
     filePath: "/fake/tools/router.yml",
     data: {
       type: "transferCall",
-      destinations: [{ type: "assistant", assistantId: "clinical-stage-1" }],
+      destinations: [{ type: "assistant", assistantId: "intake-stage-1" }],
     },
   };
 
@@ -298,7 +298,7 @@ test("updateToolAssistantRefs: skips the PATCH and warns when the referenced ass
           (arg) =>
             typeof arg === "string" &&
             arg.includes("router") &&
-            arg.includes("clinical-stage-1"),
+            arg.includes("intake-stage-1"),
         ),
       ),
       "a warning naming the tool and the unresolved slug should be logged",

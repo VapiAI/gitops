@@ -20,17 +20,17 @@ import { Worker } from "node:worker_threads";
 // ─────────────────────────────────────────────────────────────────────────────
 // Integration test for the state-aware adoption fix in pull.ts.
 //
-// Scenario: dashboard has 2 assistants both named "Riley" (UUID A and B).
-// State already maps the slug `riley` → A. On disk, `riley.md` holds A's
+// Scenario: dashboard has 2 assistants both named "Taylor" (UUID A and B).
+// State already maps the slug `taylor` → A. On disk, `taylor.md` holds A's
 // content. A bug-free pull must:
-//   1. Preserve `riley.md` unchanged (still A's content) — NOT clobber it.
-//   2. Create a fresh `riley-<B[:8]>.md` for the new resource B.
-//   3. Persist both mappings in state: `riley → A` AND `riley-<B[:8]> → B`.
+//   1. Preserve `taylor.md` unchanged (still A's content) — NOT clobber it.
+//   2. Create a fresh `taylor-<B[:8]>.md` for the new resource B.
+//   3. Persist both mappings in state: `taylor → A` AND `taylor-<B[:8]> → B`.
 //
-// Without the fix, B silently overwrites `riley.md` and the state mapping
-// for `riley` flips to B — orphaning A's UUID with no on-disk artifact.
+// Without the fix, B silently overwrites `taylor.md` and the state mapping
+// for `taylor` flips to B — orphaning A's UUID with no on-disk artifact.
 //
-// Reproduces the mudflap "5 Rileys" customer scenario that will keep getting
+// Reproduces the "five same-name assistants" customer scenario that will keep getting
 // triggered as Vapi auto-seeds same-named twins for new orgs.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -95,11 +95,11 @@ const UUID_B = "bbbbbbbb-2222-2222-2222-222222222222";
 
 // Minimal assistant body the API would return. Includes a distinctive
 // marker so we can assert which body landed in each file.
-function rileyDashboardBody(uuid: string, marker: string) {
+function taylorDashboardBody(uuid: string, marker: string) {
   return {
     id: uuid,
     orgId: "org-test",
-    name: "Riley",
+    name: "Taylor",
     model: {
       provider: "openai",
       model: "gpt-4o",
@@ -109,13 +109,13 @@ function rileyDashboardBody(uuid: string, marker: string) {
   };
 }
 
-// Pre-pull on-disk content for `riley.md`. Uses A's marker so we can tell
+// Pre-pull on-disk content for `taylor.md`. Uses A's marker so we can tell
 // whether B clobbered it.
-const PREEXISTING_RILEY_MD = `---
+const PREEXISTING_TAYLOR_MD = `---
 model:
   provider: openai
   model: gpt-4o
-name: Riley
+name: Taylor
 voice:
   provider: 11labs
   voiceId: burt
@@ -125,7 +125,7 @@ marker:A-original
 `;
 
 // Run the full clobber scenario with a configurable dashboard-response
-// ordering. Asserts the fix works regardless of which Riley the API
+// ordering. Asserts the fix works regardless of which Taylor the API
 // returns first — this is the H1 case from code review: without merging
 // the prior-pull state into the adoption guard, B-first ordering would
 // clobber A's file because `newStateSection` is empty when B is
@@ -146,12 +146,12 @@ async function runClobberScenario(
     "dir",
   );
 
-  // Seed the resource tree: existing `riley.md` holding A's content.
+  // Seed the resource tree: existing `taylor.md` holding A's content.
   const assistantsDir = join(dir, "resources", ENV, "assistants");
   mkdirSync(assistantsDir, { recursive: true });
-  writeFileSync(join(assistantsDir, "riley.md"), PREEXISTING_RILEY_MD);
+  writeFileSync(join(assistantsDir, "taylor.md"), PREEXISTING_TAYLOR_MD);
 
-  // Seed state: slug `riley` already maps to UUID A.
+  // Seed state: slug `taylor` already maps to UUID A.
   // The drift baseline lives in the hash store, not the state file. The
   // engine runs from the copied src/, so its store resolves under `dir`.
   const hashStore = join(dir, ".vapi-state-hash", ENV);
@@ -164,7 +164,7 @@ async function runClobberScenario(
       {
         credentials: {},
         assistants: {
-          riley: { uuid: UUID_A },
+          taylor: { uuid: UUID_A },
         },
         structuredOutputs: {},
         tools: {},
@@ -180,18 +180,18 @@ async function runClobberScenario(
     ),
   );
 
-  // HTTP stub returns BOTH Rileys (A and B) for the /assistant list call,
+  // HTTP stub returns BOTH Taylors (A and B) for the /assistant list call,
   // in the configured order. The fix must produce the correct outcome
   // regardless of which one the dashboard returns first.
   const orderedBodies =
     dashboardOrder === "A-first"
       ? [
-          rileyDashboardBody(UUID_A, "A-fresh-from-platform"),
-          rileyDashboardBody(UUID_B, "B-new-twin"),
+          taylorDashboardBody(UUID_A, "A-fresh-from-platform"),
+          taylorDashboardBody(UUID_B, "B-new-twin"),
         ]
       : [
-          rileyDashboardBody(UUID_B, "B-new-twin"),
-          rileyDashboardBody(UUID_A, "A-fresh-from-platform"),
+          taylorDashboardBody(UUID_B, "B-new-twin"),
+          taylorDashboardBody(UUID_A, "A-fresh-from-platform"),
         ];
   const { worker, port } = await startStub([
     {
@@ -213,8 +213,8 @@ async function runClobberScenario(
   try {
     // Run pull via the CLI entrypoint (same path real customers exercise).
     // --force so the mtime-based "locally modified" guard does not kick in
-    // and short-circuit the platform overwrite of riley.md (we want pull
-    // to actually try to write riley.md — the question is whether B's
+    // and short-circuit the platform overwrite of taylor.md (we want pull
+    // to actually try to write taylor.md — the question is whether B's
     // content lands there or A's content stays).
     const res = spawnSync(
       "node",
@@ -238,25 +238,25 @@ async function runClobberScenario(
     );
 
     // ── Filesystem assertions ────────────────────────────────────────────
-    // riley.md must still exist AND hold A's content (the platform's
+    // taylor.md must still exist AND hold A's content (the platform's
     // A-fresh-from-platform marker, since --force overwrites with platform
     // state — but NOT B's content).
-    const rileyPath = join(assistantsDir, "riley.md");
-    assert.ok(existsSync(rileyPath), `[${testName}] riley.md must still exist`);
-    const rileyContent = readFileSync(rileyPath, "utf-8");
+    const taylorPath = join(assistantsDir, "taylor.md");
+    assert.ok(existsSync(taylorPath), `[${testName}] taylor.md must still exist`);
+    const taylorContent = readFileSync(taylorPath, "utf-8");
     assert.match(
-      rileyContent,
+      taylorContent,
       /marker:A-fresh-from-platform/,
-      `[${testName}] riley.md must hold A's content (the file mapped to A in state); got:\n${rileyContent}`,
+      `[${testName}] taylor.md must hold A's content (the file mapped to A in state); got:\n${taylorContent}`,
     );
     assert.doesNotMatch(
-      rileyContent,
+      taylorContent,
       /marker:B-new-twin/,
-      `[${testName}] riley.md must NOT have been clobbered by B; got:\n${rileyContent}`,
+      `[${testName}] taylor.md must NOT have been clobbered by B; got:\n${taylorContent}`,
     );
 
-    // B must have landed in its own file `riley-<B[:8]>.md`.
-    const expectedBSlug = `riley-${UUID_B.slice(0, 8)}`;
+    // B must have landed in its own file `taylor-<B[:8]>.md`.
+    const expectedBSlug = `taylor-${UUID_B.slice(0, 8)}`;
     const bPath = join(assistantsDir, `${expectedBSlug}.md`);
     assert.ok(
       existsSync(bPath),
@@ -274,9 +274,9 @@ async function runClobberScenario(
       readFileSync(join(dir, `.vapi-state.${ENV}.json`), "utf-8"),
     );
     assert.equal(
-      finalState.assistants.riley?.uuid,
+      finalState.assistants.taylor?.uuid,
       UUID_A,
-      `[${testName}] state[riley] must still map to A (${UUID_A}); got ${JSON.stringify(finalState.assistants.riley)}`,
+      `[${testName}] state[taylor] must still map to A (${UUID_A}); got ${JSON.stringify(finalState.assistants.taylor)}`,
     );
     assert.equal(
       finalState.assistants[expectedBSlug]?.uuid,
@@ -306,6 +306,6 @@ test("pull: 2 same-name resources (B-first ordering) — fix prevents clobber re
   // Regression guard for the H1 finding from code review: without merging
   // `state[resourceType]` into the adoption guard, B-first ordering would
   // clobber A's file (B is processed while `newStateSection` is still empty,
-  // sees `riley.md` as "unclaimed in flight" — but prior state has it).
+  // sees `taylor.md` as "unclaimed in flight" — but prior state has it).
   await runClobberScenario("B-first", "B-first");
 });

@@ -757,7 +757,7 @@ server:
   credentialId: my-server-credential
 
 # State file (environment-specific)
-# "my-server-credential": "2f6db611-ad08-4099-8bd8-74db37b0a07e"
+# "my-server-credential": "11111111-1111-1111-1111-111111111111"
 ```
 
 ### State File

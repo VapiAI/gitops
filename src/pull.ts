@@ -409,7 +409,7 @@ export function listExistingResourceIds(resourceType: ResourceType): string[] {
 }
 
 // When pulling a new environment, a resource may already exist on disk under a
-// different UUID suffix (e.g., `end-call-tool-8102e715` from dev). Match by
+// different UUID suffix (e.g., `end-call-tool-9f8e7d6c` from dev). Match by
 // name-slug so we reuse the existing file instead of creating a duplicate.
 //
 // State-awareness guard: if a name-matching file is already claimed in state
@@ -851,8 +851,8 @@ export async function pullResourceType(
       //   - `state[resourceType]` carries prior-pull claims loaded from
       //     disk. Without this, if the dashboard returns the new same-name
       //     twin BEFORE the tracked one, the new twin sees `newStateSection`
-      //     empty and clobbers the tracked file. The customer's mudflap-prod
-      //     5-Rileys investigation surfaced this ordering dependency.
+      //     empty and clobbers the tracked file. A customer-org investigation
+      //     into five same-name assistants surfaced this ordering dependency.
       //   - `newStateSection` carries intra-pull claims from earlier
       //     iterations. Handles the converse (tracked-then-twin order).
       // Spread `newStateSection` last so it wins when both have the same

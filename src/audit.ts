@@ -156,8 +156,8 @@ function extractRemoteName(resource: VapiResource): string | undefined {
 // Build the candidate resourceId(s) that a dashboard-orphan UUID would map to,
 // so we can check them against `.vapi-ignore`. Two shapes are produced because
 // real customer .vapi-ignore patterns target either form:
-//   - the bare name-slug (e.g. `assistants/iform-triage-classifier`)
-//   - the `<name>-<uuid8>` form pull.ts emits (`assistants/iform-...-d98136d9`)
+//   - the bare name-slug (e.g. `assistants/support-triage-classifier`)
+//   - the `<name>-<uuid8>` form pull.ts emits (`assistants/support-...-1a2b3c4d`)
 function candidateResourceIdsForRemote(resource: VapiResource): string[] {
   const name = extractRemoteName(resource);
   const shortId = resource.id.slice(0, 8);

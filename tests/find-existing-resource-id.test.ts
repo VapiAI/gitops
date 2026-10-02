@@ -26,50 +26,50 @@ function stateEntry(uuid: string): ResourceState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test("adoption: state empty, one file matches name → adopt (cross-env pull)", () => {
-  // Classic cross-env pull: dev shipped a file `riley-8102e715.md`, prod is
+  // Classic cross-env pull: dev shipped a file `taylor-9f8e7d6c.md`, prod is
   // a fresh clone with no state entry for it. Pull should reuse the file
   // even though the UUID-suffix on disk differs from prod's UUID.
-  const onDisk = ["riley-8102e715"];
+  const onDisk = ["taylor-9f8e7d6c"];
   const newState: Record<string, ResourceState> = {};
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-prod-aaaa", "Riley"),
+    resource("uuid-prod-aaaa", "Taylor"),
     newState,
   );
-  assert.equal(result, "riley-8102e715");
+  assert.equal(result, "taylor-9f8e7d6c");
 });
 
 test("adoption: file claimed in state by the SAME UUID → adopt (re-pull is idempotent)", () => {
   // Second pull of an already-tracked resource. State maps the slug to
   // THIS resource's UUID, so reusing the slug is correct.
-  const onDisk = ["riley"];
+  const onDisk = ["taylor"];
   const newState: Record<string, ResourceState> = {
-    riley: stateEntry("uuid-aaaa"),
+    taylor: stateEntry("uuid-aaaa"),
   };
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-aaaa", "Riley"),
+    resource("uuid-aaaa", "Taylor"),
     newState,
   );
-  assert.equal(result, "riley");
+  assert.equal(result, "taylor");
 });
 
 test("adoption: two matches but only one is adoptable (the unclaimed one) → adopt it", () => {
   // The dashboard has 2 same-named resources. The first was already
-  // processed earlier in this same pull loop and adopted `riley.md`.
-  // Now a different file `riley-deadbeef.md` (e.g. from cross-env pull
+  // processed earlier in this same pull loop and adopted `taylor.md`.
+  // Now a different file `taylor-deadbeef.md` (e.g. from cross-env pull
   // history) is on disk, unclaimed in state, and the current resource
   // can adopt it without conflict.
-  const onDisk = ["riley", "riley-deadbeef"];
+  const onDisk = ["taylor", "taylor-deadbeef"];
   const newState: Record<string, ResourceState> = {
-    riley: stateEntry("uuid-aaaa"),
+    taylor: stateEntry("uuid-aaaa"),
   };
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-bbbb", "Riley"),
+    resource("uuid-bbbb", "Taylor"),
     newState,
   );
-  assert.equal(result, "riley-deadbeef");
+  assert.equal(result, "taylor-deadbeef");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,15 +78,15 @@ test("adoption: two matches but only one is adoptable (the unclaimed one) → ad
 
 test("no adoption: file claimed by DIFFERENT UUID → undefined (the fix's main case)", () => {
   // This is the clobber scenario the fix prevents: state already maps
-  // `riley` to UUID A; a new resource with the same name but a NEW UUID
-  // (B) must NOT adopt `riley.md` — doing so would overwrite A's content.
-  const onDisk = ["riley"];
+  // `taylor` to UUID A; a new resource with the same name but a NEW UUID
+  // (B) must NOT adopt `taylor.md` — doing so would overwrite A's content.
+  const onDisk = ["taylor"];
   const newState: Record<string, ResourceState> = {
-    riley: stateEntry("uuid-aaaa"),
+    taylor: stateEntry("uuid-aaaa"),
   };
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-bbbb", "Riley"),
+    resource("uuid-bbbb", "Taylor"),
     newState,
   );
   assert.equal(result, undefined);
@@ -98,14 +98,14 @@ test("no adoption: N+ matches with mixed claims → undefined", () => {
   // third match exists, claimed by yet another different UUID. With
   // multiple adoptable candidates the 1:1 ambiguity guard still kicks
   // in. Here we test a related shape: 2 adoptable matches → ambiguous.
-  const onDisk = ["riley", "riley-aaaa1111", "riley-bbbb2222"];
+  const onDisk = ["taylor", "taylor-aaaa1111", "taylor-bbbb2222"];
   const newState: Record<string, ResourceState> = {
-    riley: stateEntry("uuid-other"),
-    // riley-aaaa1111 and riley-bbbb2222 are both unclaimed → 2 adoptable
+    taylor: stateEntry("uuid-other"),
+    // taylor-aaaa1111 and taylor-bbbb2222 are both unclaimed → 2 adoptable
   };
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-cccc", "Riley"),
+    resource("uuid-cccc", "Taylor"),
     newState,
   );
   assert.equal(result, undefined);
@@ -115,14 +115,14 @@ test("no adoption: N+ matches but all claimed by other UUIDs → undefined", () 
   // Every name-matching file is claimed by some other UUID. No file is
   // adoptable for the current resource; fall through to
   // generateResourceId in the caller.
-  const onDisk = ["riley", "riley-aaaa1111"];
+  const onDisk = ["taylor", "taylor-aaaa1111"];
   const newState: Record<string, ResourceState> = {
-    riley: stateEntry("uuid-aaaa"),
-    "riley-aaaa1111": stateEntry("uuid-bbbb"),
+    taylor: stateEntry("uuid-aaaa"),
+    "taylor-aaaa1111": stateEntry("uuid-bbbb"),
   };
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-cccc", "Riley"),
+    resource("uuid-cccc", "Taylor"),
     newState,
   );
   assert.equal(result, undefined);
@@ -133,7 +133,7 @@ test("no adoption: no name-matching files on disk → undefined", () => {
   const newState: Record<string, ResourceState> = {};
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-aaaa", "Riley"),
+    resource("uuid-aaaa", "Taylor"),
     newState,
   );
   assert.equal(result, undefined);
@@ -147,7 +147,7 @@ test("regression: resource without a name → undefined (unchanged)", () => {
   // Tools store their name under function.name (see extractName). A
   // resource with neither a top-level name nor a function.name is
   // un-adoptable by design — no slug to compute.
-  const onDisk = ["riley"];
+  const onDisk = ["taylor"];
   const newState: Record<string, ResourceState> = {};
   const result = findExistingResourceId(
     onDisk,
@@ -161,11 +161,11 @@ test("regression: two same-name files, state empty → undefined (unchanged ambi
   // Pre-fix behavior: 2+ matches without a state discriminator → ambiguous,
   // refuse adoption. Fix should preserve this — both files are adoptable
   // (unclaimed), so `adoptable.length === 2` and the 1:1 guard fires.
-  const onDisk = ["riley", "riley-deadbeef"];
+  const onDisk = ["taylor", "taylor-deadbeef"];
   const newState: Record<string, ResourceState> = {};
   const result = findExistingResourceId(
     onDisk,
-    resource("uuid-aaaa", "Riley"),
+    resource("uuid-aaaa", "Taylor"),
     newState,
   );
   assert.equal(result, undefined);

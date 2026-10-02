@@ -11,31 +11,31 @@ const { preserveExplicitOursPaths } = await import("../src/pull.ts");
 
 test("parseResourceFilePath: long-form assistant path", () => {
   const parsed = parseResourceFilePath(
-    "resources/test-fixture-org/assistants/call-transfer-test-c95f4c6b.md",
+    "resources/test-fixture-org/assistants/call-transfer-test-d3adb33f.md",
   );
   assert.deepEqual(parsed, {
     type: "assistants",
-    resourceId: "call-transfer-test-c95f4c6b",
+    resourceId: "call-transfer-test-d3adb33f",
   });
 });
 
 test("parseResourceFilePath: short-form assistant path", () => {
   const parsed = parseResourceFilePath(
-    "assistants/call-transfer-test-c95f4c6b.md",
+    "assistants/call-transfer-test-d3adb33f.md",
   );
   assert.deepEqual(parsed, {
     type: "assistants",
-    resourceId: "call-transfer-test-c95f4c6b",
+    resourceId: "call-transfer-test-d3adb33f",
   });
 });
 
 test("resolvePullScopeFromFilePaths: maps file paths to dashboard UUIDs by state", () => {
   const scope = resolvePullScopeFromFilePaths(
-    ["resources/test-fixture-org/assistants/call-transfer-test-c95f4c6b.md"],
+    ["resources/test-fixture-org/assistants/call-transfer-test-d3adb33f.md"],
     {
       credentials: {},
       assistants: {
-        "call-transfer-test-c95f4c6b": {
+        "call-transfer-test-d3adb33f": {
           uuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         },
       },

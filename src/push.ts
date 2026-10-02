@@ -1674,8 +1674,8 @@ async function main(): Promise<void> {
     // Orphan-YAML pre-flight gate. Runs ONCE for ALL resource types after
     // bootstrap (so state-recovery has a chance to rekey first) and BEFORE
     // any apply phase. Halts push when local files exist with no state entry
-    // — the duplicate-creation pattern we surfaced during the gitops-mudflap
-    // working session 2026-05-13 (see src/new-file-gate.ts for context).
+    // — the duplicate-creation pattern we surfaced in a customer working
+    // session on 2026-05-13 (see src/new-file-gate.ts for context).
     //
     // Skipped during explicit `--bootstrap` runs: a bootstrap is supposed to
     // populate state from scratch, so every local file legitimately lacks a

@@ -72,7 +72,7 @@ test("UUID_SUFFIX_RE: case-insensitive on hex", () => {
 
 test("extractBaseSlug: strips engine-shape suffix", () => {
   assert.equal(extractBaseSlug("end-call-67aea057"), "end-call");
-  assert.equal(extractBaseSlug("foo-vmd-004c5108"), "foo-vmd");
+  assert.equal(extractBaseSlug("foo-vmd-0a1b2c3d"), "foo-vmd");
 });
 
 test("extractBaseSlug: returns input unchanged when no suffix present", () => {
@@ -160,11 +160,11 @@ test("isEngineSuffixedSlug: strips UUID dashes defensively (malformed UUID with 
 
 test("isEngineSuffixedSlug: handles multi-segment base", () => {
   const result = isEngineSuffixedSlug(
-    "iform-voicemail-triage-squad-llm-only-vmd-004c5108",
-    "004c5108-aaaa-bbbb-cccc-dddddddddddd",
+    "voicemail-triage-squad-llm-only-vmd-0a1b2c3d",
+    "0a1b2c3d-aaaa-bbbb-cccc-dddddddddddd",
   );
   assert.deepEqual(result, {
-    base: "iform-voicemail-triage-squad-llm-only-vmd",
-    suffix: "004c5108",
+    base: "voicemail-triage-squad-llm-only-vmd",
+    suffix: "0a1b2c3d",
   });
 });

@@ -32,8 +32,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..");
 
 const ENV = "test-stale-baseline";
-const UUID = "c95f4c6b-bfde-4e90-af7e-ea8870b9f2d6";
-const SLUG = "stale-baseline-bot-c95f4c6b";
+const UUID = "d3adb33f-0000-4000-8000-000000000000";
+const SLUG = "stale-baseline-bot-d3adb33f";
 
 // Dashboard payload. cleanResource strips id/orgId; the remaining shape must
 // canonicalize to exactly what the local .md parses to (see LOCAL_MD).
