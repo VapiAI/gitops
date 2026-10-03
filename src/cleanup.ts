@@ -11,6 +11,7 @@ import { FOLDER_MAP } from "./resource-parse.ts";
 import { slugify } from "./slug-utils.ts";
 import { loadState } from "./state.ts";
 import type { ResourceType } from "./types.ts";
+import { userAgentGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dangerous Sync - Delete everything NOT in state file
@@ -29,7 +30,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
   await sleep(REQUEST_DELAY_MS);
   const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
-    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
+    headers: {
+      Authorization: `Bearer ${VAPI_TOKEN}`,
+      "User-Agent": userAgentGet(),
+    },
   });
   if (!response.ok) {
     throw new Error(`GET ${endpoint} failed: ${response.status}`);
@@ -67,7 +71,10 @@ async function vapiDelete(endpoint: string): Promise<void> {
   await sleep(REQUEST_DELAY_MS);
   const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${VAPI_TOKEN}` },
+    headers: {
+      Authorization: `Bearer ${VAPI_TOKEN}`,
+      "User-Agent": userAgentGet(),
+    },
   });
   if (!response.ok && response.status !== 404) {
     throw new Error(`DELETE ${endpoint} failed: ${response.status}`);

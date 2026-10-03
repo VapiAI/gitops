@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
+import { userAgentGet } from "./user-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -186,6 +187,7 @@ async function main(): Promise<void> {
       headers: {
         Authorization: `Bearer ${cfg.token}`,
         "Content-Type": "application/json",
+        "User-Agent": userAgentGet(),
       },
       body: JSON.stringify(entry.payload.platform),
     });
