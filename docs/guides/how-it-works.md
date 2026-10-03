@@ -44,6 +44,41 @@ files
 
 **`apply`** — runs `pull` then `push` in sequence.
 
+## Conflicts and the drift gate
+
+Conflict handling is **per resource, never umbrella**: apply defaults to `--resolve=defer`, so the pull stage preserves local files and the drift baselines for genuinely conflicted resources, and the push stage then asks one interactive question per conflicted resource (push mine / keep dashboard / save a `.bkp` copy for manual merge). Clean and one-sided changes flow silently in their obvious direction. The full scenario matrix lives in `docs/learnings/sync-behavior.md`. Explicit `--resolve=ours|theirs|fail` keep non-interactive (CI) semantics.
+
+Before updating a resource, push GETs its current dashboard payload, hashes it, and compares against the stored baseline (`.vapi-state-hash/<org>/<uuid>`):
+
+- **Hashes match** → your local edit is the natural next step in the change chain → pushed silently, and the baseline is refreshed from the PATCH **response** (what the platform actually stored).
+- **Hashes differ** → someone else published changes since your last sync. In a terminal, push asks **for that resource only**: ① push my local version (take ownership) ② keep the dashboard version (skip, local untouched) ③ save the dashboard version as `<name>.<TIMESTAMP>.bkp.<ext>` beside your file and skip, for a manual merge. In CI / piped runs the resource is blocked instead (use `--overwrite` to push unconditionally).
+
+Backup copies (`*.bkp.*`, gitignored) are merge reference material only — invisible to the loader, the orphan gate, audit, the interactive picker, and explicit CLI paths.
+
+## Reading pull and push output
+
+Distinct semantics in a single pulled-resource line:
+
+| Icon | Meaning |
+|------|---------|
+| `📝` | Engine wrote/updated a file on disk (clean / no-baseline path) |
+| `✨` | Engine created a NEW file on disk (first-time pull of this resource) |
+| `✏️`  | Locally modified file detected by git, preserved as-is (no-baseline path) |
+| `⬆️`  | `local-ahead` — local has unpushed edits, needs to flow UP to dashboard (preserved) |
+| `⬇️`  | Dashboard version flowed DOWN over local: `dashboard-ahead` sync-down (local was unchanged) or `--resolve=theirs` (local edits lost) |
+| `⏳` | `--resolve=defer` — 3-way conflict left intact for push's per-resource prompt |
+| `🔒` | Platform-default resource (read-only, immutable) |
+| `🚫` | Matched `.vapi-ignore` (not tracked locally), or a `.bkp` backup copy refused as a resource |
+| `🗑️`  | Locally deleted (deletion intent recorded in state) |
+
+Push adds two more: `⏭️` (conflict prompt → kept dashboard, push skipped) and `📄` (conflict prompt → dashboard copy saved as `<name>.<TIMESTAMP>.bkp.<ext>` for manual merge).
+
+Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull), `📝` is the engine doing routine file I/O.
+
+## Listing completeness
+
+Vapi list endpoints cap a response at 100 items and expose no page cursor — only `createdAt` comparison filters. The engine pages backwards through `createdAt` until it gets a short page, so pull, push's invalid-mapping detection, `delete`'s orphan sweep, `audit`, and the credential reverse-map all see the whole type instead of the first hundred. When completeness cannot be proven — an endpoint that ignores the cursor params, a payload with no `createdAt`, or the page-count backstop — the engine says so on stderr. Treat that warning as "do not infer deletion from absence for this type".
+
 ## Processing Order
 
 **Push** (dependency order): Tools → Structured Outputs → Assistants → Squads → Personalities → Scenarios → Simulations → Simulation Suites → Evals

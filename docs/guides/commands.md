@@ -13,7 +13,7 @@ The other commands are direct only.
 | `npm run validate` | `npm run validate -- <org>` | Check resource files offline. Run it before every `apply`. |
 | `npm run apply` | `npm run apply -- <org> [types or paths]` | **The default deploy:** pull, merge, then push. See [workflows](workflows.md). |
 | `npm run pull` | `npm run pull -- <org> [--force] [--bootstrap]` | Sync platform changes down; never overwrites local edits unless `--force`. |
-| `npm run push` | `npm run push -- <org> [--dry-run]` | Push without pulling first. Prefer `apply`. |
+| `npm run push` | `npm run push -- <org> [--dry-run] [--strict]` | Push without pulling first. Prefer `apply`. `--strict` aborts before any API call if validation finds an error. |
 | `npm run rollback` | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore a pre-deploy snapshot from `.vapi-state.<org>.snapshots/`. |
 | `npm run cleanup` | `npm run cleanup -- <org> [--force --confirm <org>]` | List platform resources with no file; delete them only with both flags. |
 | `npm run audit` | `npm run audit -- <org> [--type <type>]` | Report drift between files, state and the platform. Exits 1 on any finding, so it can run in CI. |
@@ -87,6 +87,25 @@ npm run call -- my-org -a my-assistant
 # Call a squad
 npm run call -- my-org -s my-squad
 ```
+
+## Test calls (`npm run call`)
+
+The test-call CLI cleans its terminal output for the developer loop:
+
+- **Coalesced transcripts.** Chunked TTS providers (Cartesia Sonic, etc.) stream each utterance as 2–4 separate `final` transcript events. The CLI buffers consecutive finals from the same role and flushes them as one merged `🤖 Assistant:` / `🎤 You:` line after a 600 ms quiet window, on role change, on `speech-update` from the opposite role, on `call-ended`, and on Ctrl+C. To see every raw fragment (for a transcriber or TTS investigation), lower `COALESCE_TIMEOUT_MS` in `src/call.ts`.
+- **Suppressed `mpg123` warnings.** macOS speaker output emits `Didn't have any audio data in callback (buffer underflow)` lines from native code on every chunk-boundary gap. The `npm run call` script wraps invocation in `bash -c` + a stderr filter that drops these lines so they no longer dominate the log. Requires `bash` on `PATH` (universal on macOS, Linux, WSL).
+- **Tool / handoff / status visibility.** The CLI surfaces previously-dropped WebSocket control messages:
+  - `🔧 Tool call: <name>(<args>)` — regular tool invocations
+  - `🔀 Handoff → <Target Name>` — squad handoffs (detected from `handoff_to_<Target_Name>` function names)
+  - `✅ Tool result: <name> → <preview>` / `❌ Tool failed: <name> → <preview>` — tool responses, truncated to 200 chars
+  - `📞 Status: <state>[+reason]` — `in-progress`, `forwarding`, `ended`
+  - `⚠️ Hang warning` — impending termination
+  - `🔀 Transfer → <destination>` — number / SIP / cross-assistant transfers
+- **Discovery mode.** Set `VAPI_CALL_DEBUG=1` in the environment to log unknown control message types (high-frequency events like `conversation-update`, `model-output`, `function-call`, `user-interrupted` are silently dropped by default to keep the log readable):
+
+  ```bash
+  VAPI_CALL_DEBUG=1 npm run call -- <org> -s <squad>
+  ```
 
 ## Upgrading from an older version
 
