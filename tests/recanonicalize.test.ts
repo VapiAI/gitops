@@ -349,14 +349,14 @@ test("recanonicalize: handles UUID prefix match case-insensitively", () => {
 
 test("recanonicalize: collapses multi-dash base slug ('foo-vmd-<uuid8>') — the exact shape the orphan-gate pairing missed", () => {
   // From the live incident: state key was
-  // `iform-voicemail-triage-squad-llm-only-vmd-004c5108`. The orphan-gate's
+  // `voicemail-triage-squad-llm-only-vmd-004c5108`. The orphan-gate's
   // extractBaseSlug pairing failed because base = "...-vmd" not "...".
   // This pass operates on raw UUID-suffix shape, so it recanonicalizes
   // regardless of how many dash-segments precede the UUID8 — as long as
   // the canonical local file exists.
   const state = makeStateFile({
     squads: {
-      "iform-voicemail-triage-squad-llm-only-vmd-004c5108": makeStateEntry(
+      "voicemail-triage-squad-llm-only-vmd-004c5108": makeStateEntry(
         "004c5108-aaaa-bbbb-cccc-dddddddddddd",
       ),
     },
@@ -364,13 +364,13 @@ test("recanonicalize: collapses multi-dash base slug ('foo-vmd-<uuid8>') — the
   const report = recanonicalizeStateKeys({
     state,
     fileExists: makeFileExists(
-      new Set(["squads/iform-voicemail-triage-squad-llm-only-vmd.yml"]),
+      new Set(["squads/voicemail-triage-squad-llm-only-vmd.yml"]),
     ),
   });
   assert.equal(report.rekeys.length, 1);
   assert.equal(
     report.rekeys[0]!.toKey,
-    "iform-voicemail-triage-squad-llm-only-vmd",
+    "voicemail-triage-squad-llm-only-vmd",
   );
   assert.equal(report.conflicts.length, 0);
 });

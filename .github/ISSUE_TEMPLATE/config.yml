@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/VapiAI/gitops/security/advisories/new
+    about: Please report security issues privately, not as public issues.
+  - name: Vapi platform docs and support
+    url: https://docs.vapi.ai
+    about: Questions about the Vapi platform itself rather than this repository.

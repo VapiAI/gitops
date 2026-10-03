@@ -294,9 +294,9 @@ test("content-identical: 2 entries share hash, 1 entry has distinct hash → 1 f
 test("sibling-base-slug: bare + 2 suffixed entries cluster under same base → 1 finding, 3 slugs", async () => {
   const state = makeStateFile({
     assistants: {
-      "iform-barge": makeStateEntry("uuid-1"),
-      "iform-barge-d98136d9": makeStateEntry("uuid-2"),
-      "iform-barge-f6b53e27": makeStateEntry("uuid-3"),
+      "intake-agent": makeStateEntry("uuid-1"),
+      "intake-agent-d98136d9": makeStateEntry("uuid-2"),
+      "intake-agent-f6b53e27": makeStateEntry("uuid-3"),
     },
   });
   const findings = await runAudit(baseOpts(state));
@@ -304,9 +304,9 @@ test("sibling-base-slug: bare + 2 suffixed entries cluster under same base → 1
   assert.equal(siblings.length, 1);
   assert.equal(siblings[0]!.resourceIds.length, 3);
   assert.deepEqual(siblings[0]!.resourceIds, [
-    "iform-barge",
-    "iform-barge-d98136d9",
-    "iform-barge-f6b53e27",
+    "intake-agent",
+    "intake-agent-d98136d9",
+    "intake-agent-f6b53e27",
   ]);
   // No content-identical overlap here → message does NOT contain cross-ref.
   assert.equal(
@@ -318,8 +318,8 @@ test("sibling-base-slug: bare + 2 suffixed entries cluster under same base → 1
 test("sibling-base-slug: siblings that share a hash get cross-reference to content-identical", async () => {
   const state = makeStateFile({
     assistants: {
-      "iform-barge": makeStateEntry("uuid-1", "hash-shared"),
-      "iform-barge-d98136d9": makeStateEntry("uuid-2", "hash-shared"),
+      "intake-agent": makeStateEntry("uuid-1", "hash-shared"),
+      "intake-agent-d98136d9": makeStateEntry("uuid-2", "hash-shared"),
     },
   });
   const findings = await runAudit(baseOpts(state));
@@ -336,7 +336,7 @@ test("sibling-base-slug: siblings that share a hash get cross-reference to conte
 test("sibling-base-slug: only one entry (no siblings) → 0 findings", async () => {
   const state = makeStateFile({
     assistants: {
-      "iform-barge": makeStateEntry("uuid-1"),
+      "intake-agent": makeStateEntry("uuid-1"),
     },
   });
   const findings = await runAudit(baseOpts(state));
@@ -504,12 +504,12 @@ test("integration: orphan-yaml + collision + content-identical(4) + sibling-base
       "riley-2": makeStateEntry("uuid-r2", "H1"),
       "riley-3": makeStateEntry("uuid-r3", "H1"),
       "riley-4": makeStateEntry("uuid-r4", "H1"),
-      // 3 slugs sharing base "iform-barge"; 2 of them share hash H2 so
+      // 3 slugs sharing base "intake-agent"; 2 of them share hash H2 so
       // sibling-base-slug message picks up the cross-ref AND we get one
       // extra content-identical finding for those 2.
-      "iform-barge": makeStateEntry("uuid-s1", "H2"),
-      "iform-barge-d98136d9": makeStateEntry("uuid-s2", "H2"),
-      "iform-barge-f6b53e27": makeStateEntry("uuid-s3"),
+      "intake-agent": makeStateEntry("uuid-s1", "H2"),
+      "intake-agent-d98136d9": makeStateEntry("uuid-s2", "H2"),
+      "intake-agent-f6b53e27": makeStateEntry("uuid-s3"),
     },
   });
 
@@ -544,7 +544,7 @@ test("integration: orphan-yaml + collision + content-identical(4) + sibling-base
   ]);
 
   // The sibling finding must carry the cross-ref token because 2 of the 3
-  // siblings (iform-barge, iform-barge-d98136d9) also appear in a
+  // siblings (intake-agent, intake-agent-d98136d9) also appear in a
   // content-identical cluster.
   const sibling = findings.find((f) => f.rule === "sibling-base-slug")!;
   assert.ok(sibling.message.includes("overlaps with content-identical"));

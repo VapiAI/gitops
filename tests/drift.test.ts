@@ -786,7 +786,7 @@ test("canonicalizeForHash: strips server-managed fields (id, orgId, createdAt, u
 // short-circuit baseline preservation.
 //
 // Regression coverage for a bug introduced by the drift-direction-classifier
-// PR (#38) and caught by the E2E both-diverged smoke test on mudflap-iform-test:
+// PR (#38) and caught by the E2E both-diverged smoke test on a test org:
 // pull rebuilds each state section from EMPTY, and the classifier short-circuit
 // branches wrote back a bare `{ uuid }` — dropping the baseline, so the next
 // pull classified the resource as `no-baseline` and could never detect drift

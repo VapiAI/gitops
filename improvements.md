@@ -94,7 +94,7 @@ you which stack PR closes the row.**
 
 ## 1. `push` has no drift detection — silently overwrites concurrent dashboard edits
 
-**Discovered:** customer-fork log (Amazon3p `improvements.md` #1, 2026-04-17)
+**Discovered:** a customer fork's `improvements.md` log (2026-04-17)
 
 ### Problem
 
@@ -150,7 +150,7 @@ know nobody else touches the dashboard.
 
 ## 2. `apply` (pull → push) silently drops dashboard edits to files modified locally
 
-**Discovered:** customer-fork log (Amazon3p #2, 2026-04-17)
+**Discovered:** a customer fork's log (2026-04-17)
 
 ### Problem
 
@@ -196,7 +196,7 @@ sibling `.platform.yml` for manual 3-way merge.
 
 ## 3. No rollback command — `git revert + push` inherits all of #1's problems
 
-**Discovered:** customer-fork log (Amazon3p #3, 2026-04-17)
+**Discovered:** a customer fork's log (2026-04-17)
 
 ### Problem
 
@@ -240,7 +240,7 @@ the *current platform payload* to
 
 ## 4. State file is identity-only — no content snapshots
 
-**Discovered:** customer-fork log (Amazon3p #4, 2026-04-17)
+**Discovered:** a customer fork's log (2026-04-17)
 
 ### Problem
 
@@ -288,7 +288,7 @@ G, H, I, J.
 
 ## 5. No `push --dry-run` / pre-push diff
 
-**Discovered:** customer-fork log (Mudflap #6 + Amazon3p #5, 2026-04-17/28)
+**Discovered:** two customer forks' logs (2026-04-17/28)
 
 ### Problem
 
@@ -326,7 +326,7 @@ mitigates #1, #3, #6.
 
 ## 6. No optimistic concurrency at the API protocol level
 
-**Discovered:** customer-fork log (Amazon3p #6, 2026-04-17)
+**Discovered:** a customer fork's log (2026-04-17)
 
 ### Problem
 
@@ -381,7 +381,7 @@ platform team to confirm support, then ship Stack I behind a flag.
 
 ## 7. Voice edits drop pronunciation-dictionary attachments (Cartesia + 11labs)
 
-**Discovered:** customer-fork log (Amazon3p #7, 2026-04-19)
+**Discovered:** a customer fork's log (2026-04-19)
 
 ### Problem
 
@@ -451,7 +451,7 @@ warning covering both shapes.
 
 ## 8. Dashboard prompt edits can in-place duplicate the existing prompt
 
-**Discovered:** customer-fork log (Amazon3p #8, 2026-04-19)
+**Discovered:** a customer fork's log (2026-04-19)
 
 ### Problem
 
@@ -500,7 +500,7 @@ is partial — duplicated prompts can also be authored deliberately).
 
 ## 9. Provider-specific voice fields nest differently — schema mismatch only surfaces at push time
 
-**Discovered:** customer-fork log (Amazon3p #9, 2026-04-19)
+**Discovered:** a customer fork's log (2026-04-19)
 
 ### Problem
 
@@ -557,7 +557,7 @@ exact-key short-circuit and the create path. Adoption re-keys state to the
 canonical UUID, drops stale duplicate state keys (orphan-deletion guard),
 and routes through `applyTool` for the standard PATCH + drift-check flow.
 
-**Discovered:** customer-fork log (Amazon3p #10, 2026-04-29)
+**Discovered:** a customer fork's log (2026-04-29)
 
 ### Problem
 
@@ -616,7 +616,7 @@ dedup is the second layer for the bootstrap-renamed case.
 
 ## 11. Bidirectional SO ↔ assistant attachment has no validation
 
-**Discovered:** customer-fork log (Mudflap #3, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -659,7 +659,7 @@ Manual: grep both files when editing one side. Easy to miss.
 
 ## 12. State file accumulates UUIDs without source files (silent drift)
 
-**Discovered:** customer-fork log (Mudflap #2, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -709,7 +709,7 @@ state-orphans-without-source remain.
 
 **[RESOLVED 2026-04-30] (Stack A)**
 
-**Discovered:** customer-fork log (Mudflap #4, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -728,7 +728,7 @@ decisions.
 
 `.gitignore` extended with `.agent/`, `.agent/handoffs/`,
 `.claude/handoffs/` (the existing `.claude/` line covered the latter
-already, but Mudflap's log explicitly called out `.agent/` which was
+already, but one fork's log explicitly called out `.agent/` which was
 uncovered). Removed the legacy `requested improvements.md` line — that
 was a per-engineer convention superseded by adopting upstream
 `improvements.md`.
@@ -739,7 +739,7 @@ was a per-engineer convention superseded by adopting upstream
 
 **[RESOLVED 2026-04-30] (Stack A)**
 
-**Discovered:** customer-fork log (Mudflap #5, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -759,7 +759,7 @@ document multi-file push. Verified intentional in `src/config.ts:104-184`
 
 ## 15. Scoped push still rewrites the entire state file
 
-**Discovered:** customer-fork log (Mudflap #7, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -794,7 +794,7 @@ distinguish "stale" from "just-not-touched."
 
 ## 16. No CLI runner for simulation suites (despite engine tracking them)
 
-**Discovered:** customer-fork log (Mudflap #8, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -840,7 +840,7 @@ incompatible follow-up.
 
 ## 17. State file key-order churn produces noisy diffs
 
-**Discovered:** customer-fork log (Mudflap #1, 2026-04-28)
+**Discovered:** a customer fork's log (2026-04-28)
 
 ### Problem
 
@@ -879,7 +879,7 @@ out in the PR description.
 
 ## 18. Structured-output evaluation `name` capped at 40 chars with no client-side validation
 
-**Discovered:** customer-fork log (Mudflap #9, 2026-04-29)
+**Discovered:** a customer fork's log (2026-04-29)
 
 ### Problem
 
@@ -916,7 +916,7 @@ assistant `name` capped at 40 too).
 
 ## 19. No engine warning when `maxTokens` is too low for a tool-using assistant
 
-**Discovered:** customer-fork log (Mudflap #10, 2026-04-29)
+**Discovered:** a customer fork's log (2026-04-29)
 
 ### Problem
 
@@ -949,7 +949,7 @@ If `model.maxTokens < floor`, warn (non-blocking).
 
 ## 20. Prompt vocabulary leaks into TTS
 
-**Discovered:** customer-fork log (Mudflap #11, 2026-04-29)
+**Discovered:** a customer fork's log (2026-04-29)
 
 ### Problem
 
@@ -1050,7 +1050,7 @@ RESOLVED 2026-05-11 (#TBD — PR number updates when opened).
 
 **[RESOLVED 2026-06-03] (#TBD)**
 
-**Discovered:** during a `vitali-org` pull after renaming an assistant in the
+**Discovered:** during a test-org pull after renaming an assistant in the
 dashboard ("call-transfer-test" → "call-transfer-test-1"). Pull created a
 second file `call-transfer-test-1-c95f4c6b.md` next to the existing
 `call-transfer-test-c95f4c6b.md` — two files for one UUID.
@@ -1174,7 +1174,7 @@ RESOLVED 2026-06-03 (#TBD — PR number updates when opened).
 
 ## 24. Bare `push` is too easy to use as the deploy path
 
-**Problem.** PR #41 review (dhruva-reddy): operators shouldn't have to memorize
+**Problem.** PR #41 review: operators shouldn't have to memorize
 "`validate` && `apply` && avoid `push`". Raw `push` skips apply's
 validate-then-pull safety yet reads like the natural deploy verb, so it keeps
 getting used as one.
@@ -1207,7 +1207,7 @@ apply's built-in validate).
 
 ## 25. Interactive flows lack automated coverage
 
-**Problem.** PR #41 review (dhruva-reddy): the interactive picker
+**Problem.** PR #41 review: the interactive picker
 (`src/interactive.ts` — Back/Cancel/empty-selection states) and the
 local-wins-apply-stays-clean invariant have no automated tests, and these are
 exactly the paths that regress while unit tests for path parsing still pass.
@@ -1728,7 +1728,7 @@ fields.
 
 **[RESOLVED 2026-10-01]**
 
-**Discovered:** 2026-10-01, while designing simulation PR checks (TEST-141).
+**Discovered:** 2026-10-01, while designing simulation PR checks.
 
 ### Problem
 
@@ -1779,7 +1779,7 @@ None needed once the fix below lands.
 
 **[RESOLVED 2026-10-01]**
 
-**Discovered:** 2026-10-01, TEST-141 (and PAL-608, where customers hand-maintain shell workflows for this).
+**Discovered:** 2026-10-01, from customers hand-maintaining shell workflows for this.
 
 ### Problem
 
@@ -1827,7 +1827,7 @@ None needed once the fix below lands.
 
 **[RESOLVED 2026-10-01]**
 
-**Discovered:** 2026-10-01, while planning the promotion check gate (TEST-141).
+**Discovered:** 2026-10-01, while planning the promotion check gate.
 
 ### Problem
 

@@ -236,7 +236,7 @@ branch's files. Setup is in the README's "PR Checks" section; these are the
 behaviours worth knowing when a check surprises you.
 
 - **Inline matches stored, with two known differences.** A 2026-10-01 parity
-  run (TEST-141) scored inline and stored versions of the same squad 15/15
+  run scored inline and stored versions of the same squad 15/15
   each, with the same handoff and business-tool sequences. The differences:
   - **Generated handoff names:** `handoff_to_<assistantName>` inline vs
     `handoff_to_<uuid>` stored. A prompt or judge that names the generated

@@ -1,0 +1,7 @@
+type: handoff
+function:
+  name: handoff_to_scheduler
+destinations:
+  - type: assistant
+    assistantId: scheduler
+    description: Books, changes and checks appointments.

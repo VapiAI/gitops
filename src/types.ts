@@ -60,7 +60,7 @@ export type ResourceType =
   | "simulationSuites"
   | "evals";
 
-// Any slug-like string: "dev", "prod", "roofr-production", etc.
+// Any slug-like string: "dev", "prod", "acme-production", etc.
 export type Environment = string;
 
 // Well-known names kept for backward-compatible npm scripts

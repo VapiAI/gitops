@@ -4,7 +4,7 @@ import type { StateFile } from "./types.ts";
 // Credential Resolution — resolve org-specific credential UUIDs across environments
 //
 // Credentials are pulled from the API and stored in state (name-slug → UUID).
-// Resource files store credential NAMES (e.g., "roofr-server-credential").
+// Resource files store credential NAMES (e.g., "acme-server-credential").
 // Push resolves names → UUIDs. Pull resolves UUIDs → names.
 //
 // Replacement is scoped to `credentialId` / `credentialIds` fields only.
