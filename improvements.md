@@ -82,7 +82,7 @@ you which stack PR closes the row.**
 | 28  | Handoff tools 400 on first push into an empty org          | Push aborts before the assistant-linking pass runs  | None       | RESOLVED 2026-08-01                             |
 | 29  | SO linking sent filtered `assistantIds` arrays              | Silent unlink of live-but-untracked assistants      | None       | RESOLVED 2026-08-03 (#51)                       |
 | 30  | Tool-linking pass could PATCH a raw assistant slug          | Mid-push 400 naming the wrong resource              | None       | RESOLVED 2026-08-03 (#51)                       |
-| 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Open                                            |
+| 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | RESOLVED 2026-10-03 (validation)                |
 | 32  | Test suite never ran in CI; 20 tests rotted after the hash store | Regression guards for #22/#23 silently stopped running | None | RESOLVED 2026-09-30 (#56)                      |
 | 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
 | 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
@@ -1568,6 +1568,8 @@ the repo and a subsequent push runs.
 
 ## 31. Unresolved references are handled three different ways depending on the field, and `validate.ts` has no dangling-reference check
 
+**[RESOLVED 2026-10-03]** by validation; the three runtime behaviours remain.
+
 **Discovered:** while fixing #29 and #30 — those two entries close the
 loudest and quietest failure modes for their specific fields, but the
 underlying question ("what happens when a reference resolves to nothing")
@@ -1646,9 +1648,24 @@ conditions; it doesn't require picking one runtime behavior (filter vs.
 defer vs. 400) for every field, since it stops the push before any of those
 three behaviors gets a chance to run.
 
+### Possible fix (landed)
+
+`src/validate-refs.ts` reuses the `extractReferencedIds` walk, plus scenario
+judges' `evaluations[].structuredOutputId`, and reports an error for any
+name that matches no local file and no state entry (`dangling-reference`).
+Names matched by `.vapi-ignore` are left to `reference-to-ignored`, which
+`npm run validate` now runs too. Alongside it: `override-tool-by-name`
+(an error: push never resolves `toolIds` inside overrides),
+`unresolved-credential` and `reference-by-uuid` (warnings). `validate`
+reads the committed state file, so the check runs offline and in CI, and
+`apply` stops on it before its pull. `push` runs the same checks with its
+other validators: warnings by default, blocking under `--strict`.
+
 ### Status
 
-**Open.**
+**RESOLVED 2026-10-03** by validation. The runtime still filters, defers or
+sends an unresolved reference depending on the field, but `validate` and
+`apply` stop before any of that runs.
 
 ---
 
