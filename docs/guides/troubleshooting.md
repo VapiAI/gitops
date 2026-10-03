@@ -11,18 +11,22 @@ The referenced resource doesn't exist. Check:
 
 ## "Cannot delete resource - still referenced"
 
-1. Find which resources reference it (shown in error)
-2. Remove the references
-3. Push again
-4. Then delete the resource file
+1. Find which resources reference it (shown in the error)
+2. Remove those references and deploy with `npm run apply -- <org>`
+3. Then delete the resource file and deploy again
 
 ## Resource not updating
 
-Check the state file has correct UUID:
+The file may be mapped to the wrong platform resource, or to one that no
+longer exists.
 
-1. Open `.vapi-state.<org>.json`
-2. Find the resource entry
-3. If incorrect, delete entry and re-run push
+Run `npm run audit -- <org>`. It reports state entries that point at a
+missing resource, or several files that point at the same one, with a
+suggested fix for each.
+
+Don't delete a state entry by hand: the next deploy would treat the file as
+new, and stop at the new-file check (or create a duplicate if the check is
+bypassed).
 
 ## "Credential with ID not found" errors
 
@@ -34,7 +38,13 @@ The credential UUID doesn't exist in the target org. Fix:
 
 ## "property X should not exist" API errors
 
-Some properties can't be updated after creation. Add them to `UPDATE_EXCLUDED_KEYS` in `src/config.ts`.
+Some properties can't be changed after a resource is created, so the API
+rejects them on update. Please [open an issue](https://github.com/VapiAI/gitops/issues/new/choose)
+with the resource type and property, so the engine stops sending it.
+
+As a stopgap you can add the property to `UPDATE_EXCLUDED_KEYS` in
+`src/config.ts`. That's an engine change, so expect to resolve it when you
+next pull in updates.
 
 ## "Refusing to run destructive cleanup" errors
 
@@ -62,11 +72,11 @@ The interactive `npm run cleanup` flow handles both gates for you (it shows
 the dry-run preview, asks you to confirm, and forwards `--force --confirm
 <org>` automatically when you say yes).
 
-## "Unrecognized argument" / push appears to do nothing
+## "Unrecognized argument" errors
 
-If you typed `npm run push -- my-org foo` (a bare resource id with no folder
-or extension), the CLI now refuses with `Unrecognized argument: foo` rather
-than silently running a full apply. Pass either:
+A bare resource ID (`npm run push -- my-org foo`, with no folder or
+extension) is rejected with `Unrecognized argument: foo`, rather than
+falling through to a full deploy. Pass either:
 
 - a resource type — `npm run push -- my-org assistants`, or
 - a path — `npm run push -- my-org assistants/foo.yml` (short form)

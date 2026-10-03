@@ -113,15 +113,41 @@ orgs:
 
 - Plans print `check  would run staging-core in example-staging (<n> simulations × <t> targets)`
   and run nothing.
-- On `--apply`, the check runs against `resources/example-staging/` at the
-  promoted commit, in example-staging, with that org's key from
+- On `--apply`, the check runs against `resources/example-staging/` as this
+  run leaves it (the promoted commit, plus anything promoted into it earlier in
+  the same run), in example-staging, with that org's key from
   `VAPI_PROMOTION_TOKENS`, before any file is written to the destination. A
   failure, an incomplete run (timeout, billing) or a build error blocks the
-  transition with the run link; transitions that already applied are still
-  committed.
+  transition, with the run link (or the reason, if nothing ran); transitions
+  that already applied are still committed.
+- A block stops the whole run, including pipelines that don't involve the
+  blocked org. Fix the check, or until it passes, promote the other
+  pipelines a step at a time with `--pipeline <name> --from <org> --to <org>`.
 - A pass is reused for later transitions out of the same org in the same run,
   until something is promoted into it.
 - Transitions with no changes skip the check.
+- Each gated promotion runs its simulations again, on top of the PR check, and
+  uses simulation minutes.
+
+The check is validated when promotion starts, and these stop the run before
+anything applies:
+
+- the check doesn't read and run in the gated org (`org` and `runOrg`);
+- `toolMocks: off` or `stripWebhooks: false`: a gate runs in the real org,
+  never a CI org, so it must not reach real tools or the org's servers;
+- a `baseUrl` on the check that differs from the org's `baseUrl` in
+  `promotion.yml` (the org's key only goes to the host promotion uses);
+- a gate on an org that is last in every pipeline, so nothing is ever promoted
+  out of it (gate the org before production, not production itself);
+- gated checks whose combined budget exceeds 300 minutes per run. Each check
+  can take `timeoutMinutes` for every batch of 3 targets.
+- an unknown key under an org, such as a misspelled `check:`.
+
+Promotion can't yet carry a simulation that references a stock personality
+by UUID (`a0000000-…`): its dependency check reports "Referenced managed
+dependency is missing from source". Use personality files under
+`simulations/personalities/` in any org you promote out of, gated or not
+(`improvements.md` #38).
 
 ## Rolling Back a Promotion
 
