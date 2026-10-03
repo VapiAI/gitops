@@ -87,7 +87,7 @@ you which stack PR closes the row.**
 | 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
 | 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
 | 35  | A failed promotion pushed nothing, not even state       | git lost track of resources already on the platform | None       | RESOLVED 2026-10-01                             |
-| 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | Open                                            |
+| 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | RESOLVED 2026-10-03                             |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1888,6 +1888,8 @@ None needed once the fix below lands.
 
 ## 36. `cleanup` deletes resources excluded by `.vapi-ignore`
 
+**[RESOLVED 2026-10-03]**
+
 **Discovered:** 2026-10-03, while reviewing the agent instructions for the public release.
 
 ### Problem
@@ -1914,19 +1916,20 @@ another team deletes that team's assistants, tools or squads.
 
 ### Current mitigation
 
-The default run is a dry run, and the destructive run needs `--confirm <org>`.
-The docs and `AGENTS.md` now tell people and agents to check the dry-run list
-against `.vapi-ignore` first.
+None needed once the fix below lands.
 
-### Possible fix
+### Possible fix (landed)
 
-Load the org's ignore patterns in `cleanup.ts` and exclude matches from the
-deletion list (printing them as retained, as push does), with a test that a
-destructive cleanup keeps an ignored resource.
+`src/cleanup.ts` loads the org's ignore patterns and keeps every orphan that
+matches one, checking the IDs pull would give the resource (its name slug,
+with and without the UUID suffix). Kept resources are listed as retained.
+`tests/cleanup-ignore.test.ts` runs a destructive cleanup against a stub API:
+before the fix it deleted an ignored assistant and tool along with the true
+orphan; after it, only the orphan.
 
 ### Status
 
-Open.
+**RESOLVED 2026-10-03.**
 
 ---
 
