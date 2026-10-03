@@ -64,3 +64,57 @@ jobs:
 
       - name: Lint workflows
         run: ./actionlint -color
+
+  validate:
+    name: Validate resources
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The same checks `apply` runs before every deploy, here before merge:
+      # a config that `apply` would refuse never reaches main, where it would
+      # block deploys and promotion until someone noticed. Every org is
+      # validated, including resources no PR check targets.
+      #
+      # `validate` makes no network call, but loading the engine's config
+      # needs a key to be set. The placeholder below is never sent anywhere,
+      # and no secret is available to this job, so it runs the same on forks.
+      - name: Validate every org
+        shell: bash
+        env:
+          VAPI_PRIVATE_API_KEY: validate-only-never-sent
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          orgs=()
+          for dir in resources/*/; do
+            orgs+=("$(basename "$dir")")
+          done
+          if (( ${#orgs[@]} == 0 )); then
+            echo "No org folders under resources/; nothing to validate."
+            exit 0
+          fi
+          failed=()
+          for org in "${orgs[@]}"; do
+            echo "::group::Validate ${org}"
+            if ! node --import tsx src/validate-cmd.ts "$org"; then
+              failed+=("$org")
+            fi
+            echo "::endgroup::"
+          done
+          if (( ${#failed[@]} > 0 )); then
+            echo "::error::Validation failed for: ${failed[*]}. Run \`npm run validate -- <org>\` locally to see each finding."
+            exit 1
+          fi
+          echo "Validated ${#orgs[@]} org(s): ${orgs[*]}"

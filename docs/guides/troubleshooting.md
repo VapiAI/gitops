@@ -81,3 +81,22 @@ falling through to a full deploy. Pass either:
 - a resource type — `npm run push -- my-org assistants`, or
 - a path — `npm run push -- my-org assistants/foo.yml` (short form)
   or `npm run push -- my-org resources/my-org/assistants/foo.yml` (long form).
+
+## "Validate resources" fails in CI
+
+The check runs `npm run validate` for every org under `resources/`. The
+job log names each failing org; run the same command locally to see its
+findings:
+
+```bash
+npm run validate -- <org>
+```
+
+Each error names the file, field and rule. Plain `push` only warns about
+these errors, so a repository that has been deploying with `push` can carry
+some from before the check existed; they show up on the next pull request,
+whatever it changes. Fix them in that PR or a separate one first. `apply`
+refuses to deploy until they're fixed anyway.
+
+A folder under `resources/` that isn't a valid org name (lowercase letters,
+digits and hyphens) fails too. Rename it, or move it out of `resources/`.
