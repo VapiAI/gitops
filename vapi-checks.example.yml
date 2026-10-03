@@ -1,0 +1,43 @@
+version: 1
+
+# Copy to vapi-checks.yml to turn on simulation checks. Each check builds its
+# targets and tests from resources/<org>/ on the PR branch and sends them
+# inline in one simulation run per target: nothing is deployed, and nothing
+# needs cleaning up afterwards.
+
+# Applies to every check; any check can override these.
+defaults:
+  transport: chat        # chat (default, cheaper) or voice
+  iterations: 1          # runs of each simulation, 1-10
+  timeoutMinutes: 20     # per run; a run past this is canceled and reported incomplete
+  toolMocks: strict      # strict: every tool call returns a mock, or the build fails naming the tool.
+                         # off: tools are sent as written. Only use with a dedicated CI org (runOrg).
+  stripWebhooks: true    # point assistant servers at a dead address; false keeps them
+                         # (tool servers are always replaced while toolMocks is strict)
+
+checks:
+  core:
+    org: example-dev           # reads resources/example-dev/
+    targets:                   # one run per target
+      - squads/main-squad
+    suites:                    # resources/example-dev/simulations/suites/<id>
+      - core
+    simulations: []            # optional: extra resources/example-dev/simulations/tests/<id>
+
+  # A check that runs in a separate CI org. Credentials are bound by name,
+  # the same way promotion.yml binds them, using .vapi-state.<runOrg>.json.
+  # staging-core:
+  #   org: example-staging
+  #   runOrg: example-ci
+  #   baseUrl: https://api.vapi.ai   # set https://api.eu.vapi.ai for EU orgs
+  #   targets: [assistants/support-intake]
+  #   suites: [core]
+  #   toolMocks: off
+  #   bindings:
+  #     credentials:
+  #       default: bind
+  #       analytics-api: omit
+  #     phoneNumbers:
+  #       default: omit
+  #   paths:                    # extra files that make this check run when changed
+  #     - prompts/shared/**
