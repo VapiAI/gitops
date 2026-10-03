@@ -2,7 +2,7 @@
 //
 // Per check and target: `Vapi Evals / <check> / <target>`, pending with the
 // run link as soon as the run exists, then the verdict. The aggregate
-// `Vapi Evals` (the name PAL-608 specifies) is what branch protection
+// `Vapi Evals` (a stable, documented name) is what branch protection
 // requires: per-target statuses only exist on PRs that touch a check.
 
 export const AGGREGATE_CONTEXT = "Vapi Evals";

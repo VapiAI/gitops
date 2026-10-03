@@ -1,0 +1,4 @@
+name: Front Desk
+members:
+  - assistantId: receptionist
+  - assistantId: scheduler

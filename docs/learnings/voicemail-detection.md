@@ -51,7 +51,7 @@ Outbound Call
 
 ### ⚠️ Platform `voicemailDetection` MUST be disabled on the gatekeeper (Two-Agent Relay)
 
-This is the single most non-obvious failure mode in two-agent voicemail relay setups. If the gatekeeper assistant has Vapi's platform `voicemailDetection: { provider: vapi }` configured, the call will **silently break on every voicemail** — the bot never speaks, the message never lands, the call ends with `endedReason: voicemail` after ~10–22s of dead air. We hit this on mudflap-test's iform voicemail triage squad on 2026-05-14 and only diagnosed it after pulling full Axiom event timelines.
+This is the single most non-obvious failure mode in two-agent voicemail relay setups. If the gatekeeper assistant has Vapi's platform `voicemailDetection: { provider: vapi }` configured, the call will **silently break on every voicemail** — the bot never speaks, the message never lands, the call ends with `endedReason: voicemail` after ~10–22s of dead air. We hit this on a production voicemail triage squad on 2026-05-14 and only diagnosed it after pulling the full call event timelines.
 
 **The mechanism (verified via call 019e2827 on 2026-05-14):**
 
@@ -69,7 +69,7 @@ This is the single most non-obvious failure mode in two-agent voicemail relay se
 
 **Fix:** Disable platform `voicemailDetection` on the gatekeeper assistant. Either:
 
-- **Recommended**: don't set the field at all on the gatekeeper. Multilingual triage classifiers that never had `voicemailDetection` configured (e.g. `iform-triage-classifier-multilingual-d98136d9`, `iform-triage-multilingual-classic-f6b53e27` on mudflap-test) work where same-shape squads with VMD-on classifiers failed.
+- **Recommended**: don't set the field at all on the gatekeeper. Multilingual triage classifiers that never had `voicemailDetection` configured (two multilingual classifiers in the same test org) work where same-shape squads with VMD-on classifiers failed.
 - **If you can't modify the underlying assistant** (e.g. a customer is gatekeeping the base classifier UUID for another reason): fork the classifier and use the fork in the squad. `assistantOverrides.voicemailDetection: null` does **NOT** work — Vapi's API silently drops the field. Verified via direct PATCH test on 2026-05-14.
 - **Never** set `voicemailDetection` on the gatekeeper AND rely on the handoff path. They are mutually exclusive architectures.
 

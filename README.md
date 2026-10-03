@@ -750,133 +750,187 @@ Squad push
 
 ## File Formats
 
-### Assistants with System Prompts (`.md`)
+Every snippet below is a file from [`examples/starter/`](examples/starter/), a
+small dental-clinic front desk with two assistants, tools, a handoff and a
+simulation suite. CI checks that each snippet matches its file and that the
+example passes `validate`, so you can copy from here safely.
 
-Markdown with YAML frontmatter — the system prompt is readable Markdown below the config:
+A resource's ID is its path under the type folder, without the extension
+(`tools/lookup-patient.yml` is `lookup-patient`). Reference other resources
+by that ID, never by UUID: the engine resolves IDs to UUIDs per org.
+
+### Assistants (`.md` or `.yml`)
+
+Markdown with YAML frontmatter: the frontmatter is the assistant config and the
+body is its system prompt.
 
 ```markdown
+<!-- examples/starter/resources/starter/assistants/receptionist.md -->
 ---
-name: My Assistant
+name: Receptionist
+firstMessage: Thanks for calling Bright Smile Dental. How can I help?
+model:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0.3
+  toolIds:
+    - lookup-patient
+    - handoff-to-scheduler
+  tools:
+    - type: endCall
 voice:
   provider: 11labs
-  voiceId: abc123
-model:
-  model: gpt-4.1
-  provider: openai
-  toolIds:
-    - my-tool
-firstMessage: Hello! How can I help you?
+  voiceId: sarah
+artifactPlan:
+  structuredOutputIds:
+    - call-summary
 ---
 
-# Identity & Purpose
+# Identity
 
-You are a helpful assistant for the business you represent.
+You are the receptionist for Bright Smile Dental, 123 Main St. The clinic is
+open Monday to Friday, 8am to 5pm.
 
-# Conversation Flow
+# Flow
 
-1. Greet the user
-2. Ask how you can help
-3. Resolve their issue
-
-# Rules
-
-- Always be polite
-- Never make up information
+1. Ask for the caller's phone number and call `lookup_patient` with it.
+2. If they want to book, change or check an appointment, hand off to the
+   Scheduler with `handoff_to_scheduler`. Don't book anything yourself.
+3. Answer general questions (hours, address) briefly yourself.
 ```
 
 ### Tools (`.yml`)
 
 ```yaml
+# examples/starter/resources/starter/tools/lookup-patient.yml
 type: function
 function:
-  name: get_weather
-  description: Get the current weather for a location
+  name: lookup_patient
+  description: Look up the caller's patient record by phone number.
   parameters:
     type: object
     properties:
-      location:
+      phone:
         type: string
-        description: The city name
+        description: The caller's phone number
     required:
-      - location
+      - phone
 server:
-  url: https://my-api.com/weather
+  url: https://example.com/vapi/lookup-patient
+```
+
+Handoffs between assistants are tools too. Give each one an explicit
+`function.name` if your prompts mention it by name:
+
+```yaml
+# examples/starter/resources/starter/tools/handoff-to-scheduler.yml
+type: handoff
+function:
+  name: handoff_to_scheduler
+destinations:
+  - type: assistant
+    assistantId: scheduler
+    description: Books, changes and checks appointments.
 ```
 
 ### Structured Outputs (`.yml`)
 
 ```yaml
-name: Call Summary
+# examples/starter/resources/starter/structuredOutputs/call-summary.yml
+name: call-summary
 type: ai
-description: Summarizes the key points of a call
+description: Summarizes the call for the front-desk log.
 schema:
   type: object
   properties:
     summary:
       type: string
-    sentiment:
-      type: string
-      enum: [positive, neutral, negative]
-assistant_ids:
-  - my-assistant
+    booked:
+      type: boolean
 ```
 
 ### Squads (`.yml`)
 
 ```yaml
-name: Support Squad
+# examples/starter/resources/starter/squads/front-desk.yml
+name: Front Desk
 members:
-  - assistantId: intake-agent
-    assistantDestinations:
-      - type: assistant
-        assistantId: specialist-agent
-        message: Transferring you to a specialist.
-  - assistantId: specialist-agent
+  - assistantId: receptionist
+  - assistantId: scheduler
 ```
+
+Members hand off to each other through handoff tools on the assistants, as
+above. Prefer them over the legacy `assistantDestinations` field.
 
 ### Evals (`.yml`)
 
-```yaml
-name: Booking Happy Path
-type: eval
-# (eval config as per Vapi API)
-```
+An eval file is the body of the [Evals API](https://docs.vapi.ai/api-reference/evals)
+create request, written as YAML.
 
 ### Simulations
 
-**Personality** (`simulations/personalities/`):
+**Personality** (`simulations/personalities/`): the simulated caller, as an
+assistant config.
 
 ```yaml
-name: Skeptical Sam
-description: A doubtful caller who questions everything
-prompt: You are skeptical and need convincing before trusting information.
+# examples/starter/resources/starter/simulations/personalities/calm-caller.yml
+name: Calm caller
+assistant:
+  model:
+    provider: openai
+    model: gpt-4.1-mini
+    messages:
+      - role: system
+        content: >
+          You are a patient calling a dental clinic. Follow your scenario,
+          answer questions briefly, and don't invent details.
 ```
 
-**Scenario** (`simulations/scenarios/`):
+**Scenario** (`simulations/scenarios/`): what the caller does, how the call is
+judged (at least one evaluation), and mock results for the tools it calls.
 
 ```yaml
-name: Happy Path - New Customer
-description: New customer calling to schedule an appointment
-prompt: |
-  You are a new customer calling to schedule your first appointment.
+# examples/starter/resources/starter/simulations/scenarios/books-cleaning.yml
+name: Books a cleaning
+instructions: >
+  You are Jordan Lee, phone 206-555-0142, an existing patient. Book a teeth
+  cleaning for next Tuesday morning and accept the first slot offered. Once
+  the booking is confirmed, say thanks and goodbye.
+evaluations:
+  - structuredOutputId: booking-confirmed
+    comparator: "="
+    value: true
+    required: true
+toolMocks:
+  - toolName: lookup_patient
+    result: '{"found": true, "patientId": "P-1001"}'
+  - toolName: book_appointment
+    result: '{"success": true, "date": "next Tuesday", "time": "09:00"}'
 ```
 
-**Simulation** (`simulations/tests/`):
+**Simulation** (`simulations/tests/`): a personality paired with a scenario.
 
 ```yaml
-name: Booking Test Case 1
-personalityId: skeptical-sam
-scenarioId: happy-path-new-customer
+# examples/starter/resources/starter/simulations/tests/books-cleaning-calm.yml
+name: Books a cleaning (calm caller)
+personalityId: calm-caller
+scenarioId: books-cleaning
 ```
 
 **Simulation Suite** (`simulations/suites/`):
 
 ```yaml
-name: Booking Flow Tests
+# examples/starter/resources/starter/simulations/suites/core.yml
+name: Core
 simulationIds:
-  - booking-test-case-1
-  - booking-test-case-2
+  - books-cleaning-calm
 ```
+
+### TypeScript resources (`.ts`)
+
+Any resource can also be a `.ts` file whose default export is the resource
+object, useful for generating config. It is executed when loaded, so treat
+`.ts` resources like code in review.
 
 ---
 
@@ -947,7 +1001,7 @@ server:
   credentialId: my-server-credential
 
 # State file (environment-specific)
-# "my-server-credential": "2f6db611-ad08-4099-8bd8-74db37b0a07e"
+# "credentials": { "my-server-credential": { "uuid": "2f6db611-ad08-4099-8bd8-74db37b0a07e" } }
 ```
 
 ### State File
@@ -956,13 +1010,14 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 
 ```json
 {
-  "credentials": { "my-cred": "uuid-0000" },
-  "tools": { "my-tool": "uuid-1234" },
-  "assistants": { "my-assistant": "uuid-5678" },
-  "squads": { "my-squad": "uuid-abcd" },
-  "evals": { "booking-happy-path": "uuid-efgh" }
+  "assistants": { "my-assistant": { "uuid": "9c0f3f42-…" } },
+  "credentials": { "my-cred": { "uuid": "2f6db611-…" } },
+  "squads": { "my-squad": { "uuid": "51a9e1c7-…" } },
+  "tools": { "my-tool": { "uuid": "d4b8a2e0-…" } }
 }
 ```
+
+Every resource type has a section. Keys are sorted, so diffs stay readable.
 
 ---
 

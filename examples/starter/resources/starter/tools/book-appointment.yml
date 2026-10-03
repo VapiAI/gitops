@@ -1,0 +1,16 @@
+type: function
+function:
+  name: book_appointment
+  description: Book an appointment slot the caller has accepted.
+  parameters:
+    type: object
+    properties:
+      date:
+        type: string
+      time:
+        type: string
+    required:
+      - date
+      - time
+server:
+  url: https://example.com/vapi/book-appointment

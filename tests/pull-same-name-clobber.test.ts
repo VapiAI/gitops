@@ -30,7 +30,7 @@ import { Worker } from "node:worker_threads";
 // Without the fix, B silently overwrites `riley.md` and the state mapping
 // for `riley` flips to B — orphaning A's UUID with no on-disk artifact.
 //
-// Reproduces the mudflap "5 Rileys" customer scenario that will keep getting
+// Reproduces the "5 Rileys" customer scenario that will keep getting
 // triggered as Vapi auto-seeds same-named twins for new orgs.
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -160,11 +160,11 @@ test("isEngineSuffixedSlug: strips UUID dashes defensively (malformed UUID with 
 
 test("isEngineSuffixedSlug: handles multi-segment base", () => {
   const result = isEngineSuffixedSlug(
-    "iform-voicemail-triage-squad-llm-only-vmd-004c5108",
+    "voicemail-triage-squad-llm-only-vmd-004c5108",
     "004c5108-aaaa-bbbb-cccc-dddddddddddd",
   );
   assert.deepEqual(result, {
-    base: "iform-voicemail-triage-squad-llm-only-vmd",
+    base: "voicemail-triage-squad-llm-only-vmd",
     suffix: "004c5108",
   });
 });

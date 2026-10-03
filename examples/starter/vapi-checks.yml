@@ -1,0 +1,6 @@
+version: 1
+checks:
+  core:
+    org: starter
+    targets: [squads/front-desk]
+    suites: [core]
