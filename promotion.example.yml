@@ -8,6 +8,10 @@ orgs:
     baseUrl: https://api.vapi.ai
   example-staging:
     baseUrl: https://api.vapi.ai
+    # Optional gate: nothing is promoted out of example-staging unless this
+    # vapi-checks.yml check (whose org and runOrg are example-staging) passes
+    # there first. Plans print what it would run; --apply runs it.
+    # check: staging-core
     bindings:
       credentials:
         default: bind

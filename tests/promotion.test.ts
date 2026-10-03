@@ -449,3 +449,19 @@ test("promote CLI dry run uses the reviewed config without writing target files"
     await fx.cleanup();
   }
 });
+
+test("promotionConfigParse reads an org's optional check gate and rejects a non-slug", () => {
+  const config = (check: string) =>
+    `version: 1\norgs:\n  dev:\n    check: ${check}\n  prod: {}\npipelines:\n  release:\n    orgs: [dev, prod]\n    resources: ['**/*']\n`;
+  let error = "";
+  try {
+    promotionConfigParse(config("Not A Slug"));
+  } catch (caught) {
+    error = (caught as Error).message;
+  }
+  const parsed = promotionConfigParse(config("dev-core"));
+  assert.deepEqual(
+    [parsed.orgs.dev?.check, parsed.orgs.prod?.check, error],
+    ["dev-core", undefined, "org dev.check must be a check name from vapi-checks.yml"],
+  );
+});

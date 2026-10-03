@@ -56,6 +56,10 @@ jobs:
 
       - name: Reconcile configured promotions
         id: promotion
+        # On the step, not the job: a job timeout would cancel the
+        # always() commit step below, and a gate check (orgs.<slug>.check)
+        # can run up to its timeoutMinutes per gated org.
+        timeout-minutes: 90
         shell: bash
         run: |
           set -euo pipefail

@@ -29,6 +29,9 @@ export interface PromotionBindings {
 export interface PromotionOrg {
   baseUrl?: string;
   bindings: PromotionBindings;
+  // A vapi-checks.yml check that must pass in this org before anything is
+  // promoted out of it.
+  check?: string;
 }
 
 export interface PromotionPipeline {
@@ -152,9 +155,17 @@ export function promotionConfigParse(content: string): PromotionConfig {
     const org = object(value ?? {}, `org ${slug}`);
     if (org.baseUrl !== undefined && typeof org.baseUrl !== "string")
       throw new Error(`org ${slug}.baseUrl must be a string`);
+    if (
+      org.check !== undefined &&
+      (typeof org.check !== "string" || !SLUG_RE.test(org.check))
+    )
+      throw new Error(
+        `org ${slug}.check must be a check name from vapi-checks.yml`,
+      );
     orgs[slug] = {
       baseUrl: typeof org.baseUrl === "string" ? org.baseUrl : undefined,
       bindings: promotionBindingsParse(org.bindings),
+      ...(typeof org.check === "string" ? { check: org.check } : {}),
     };
   }
   const pipelinesRaw = object(raw.pipelines, "promotion.yml pipelines");
