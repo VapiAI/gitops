@@ -1,8 +1,8 @@
 # How the engine works
 
-## Organization-Based Structure
+## One folder per org
 
-Resources are scoped by organization (not fixed `dev`/`stg`/`prod` names). Each org gets:
+Resources are scoped by organization, with names you choose (not fixed `dev`/`stg`/`prod`). Each org gets:
 
 - `.env.<org>` — private API key and base URL
 - `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
@@ -40,7 +40,7 @@ files
 
 **`pull`** — downloads platform state. Detects locally modified files and skips them (your work is preserved). Use `--force` to overwrite everything.
 
-**`push`** — reads local files and syncs them to the platform. Handles creates, updates, and deletions.
+**`push`** — reads local files and syncs them to the platform: creates and updates. It deletes platform resources whose files you removed only when you pass `--force`.
 
 **`apply`** — runs `pull` then `push` in sequence.
 
@@ -110,62 +110,20 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 
 Every resource type has a section. Keys are sorted, so diffs stay readable.
 
-## Project Structure
+## Where things live
 
-```
-vapi-gitops/
-├── docs/
-│   ├── Vapi Prompt Optimization Guide.md
-│   ├── changelog.md
-│   └── learnings/                      # Gotchas, recipes, troubleshooting per area
-│       ├── assistants.md
-│       ├── tools.md
-│       ├── squads.md
-│       ├── simulations.md
-│       └── ...
-├── src/
-│   ├── setup.ts               # Setup wizard (interactive) + non-interactive setup
-│   ├── setup-args.ts          # `npm run setup` argument parsing
-│   ├── interactive.ts          # Interactive pull/push/apply/call/cleanup flows
-│   ├── searchableCheckbox.ts   # Custom multi-select prompt component
-│   ├── pull.ts                 # Pull platform state
-│   ├── push.ts                 # Push local state to platform
-│   ├── apply.ts                # Orchestrator: pull → merge → push
-│   ├── call.ts                 # WebSocket call script
-│   ├── cleanup.ts              # Orphan cleanup
-│   ├── pull-cmd.ts             # Entry point: interactive or direct pull
-│   ├── push-cmd.ts             # Entry point: interactive or direct push
-│   ├── apply-cmd.ts            # Entry point: interactive or direct apply
-│   ├── call-cmd.ts             # Entry point: interactive or direct call
-│   ├── cleanup-cmd.ts          # Entry point: interactive or direct cleanup
-│   ├── types.ts                # TypeScript interfaces
-│   ├── config.ts               # Environment & configuration
-│   ├── api.ts                  # Vapi HTTP client
-│   ├── state.ts                # State file management
-│   ├── resources.ts            # Resource loading (YAML, MD, TS)
-│   ├── resolver.ts             # Reference resolution
-│   ├── credentials.ts          # Credential resolution (name ↔ UUID)
-│   ├── delete.ts               # Deletion & orphan checks
-│   └── check-cmd.ts            # Entry point: PR simulation checks (check-*.ts)
-├── resources/
-│   └── <org>/                  # One directory per configured org
-│       ├── assistants/
-│       ├── tools/
-│       ├── squads/
-│       ├── structuredOutputs/
-│       ├── evals/
-│       └── simulations/
-│           ├── personalities/
-│           ├── scenarios/
-│           ├── tests/
-│           └── suites/
-├── tests/
-│   ├── credentials.test.ts     # Credential walker scoping (P0-1 regression suite)
-│   ├── clean-resource.test.ts  # null-preservation in pull (P0-3 regression suite)
-│   ├── path-matching.test.ts   # Short-form path matching (P0-7 regression suite)
-│   ├── cleanup-safety.test.ts  # --confirm + empty-state gates (P0-4 regression suite)
-│   └── cli-arg-parsing.test.ts # Bare-id refusal, --confirm pass-through (P0-7)
-├── vapi-checks.example.yml     # Copy to vapi-checks.yml for PR simulation checks
-├── .env.<org>                  # Private API key per org (gitignored)
-└── .vapi-state.<org>.json      # State file per org
-```
+| Path | What it is |
+| --- | --- |
+| `resources/<org>/` | Your resources, one folder per org |
+| `.vapi-state.<org>.json` | Name → UUID mappings per org (committed) |
+| `.env.<org>` | API key and generated binding IDs (gitignored) |
+| `promotion.yml`, `vapi-checks.yml` | Promotion pipelines and PR checks (copy from the `*.example.yml` files) |
+| `resources/<org>/.vapi-ignore` | Platform resources this repo shouldn't manage (see `resources/.vapi-ignore.example`) |
+| `src/` | The engine; `package.json` scripts name each command's entry point |
+| `tests/` | The test suite (`npm test`) |
+| `docs/guides/` | These guides |
+| `docs/learnings/` | The Vapi field guide |
+| `docs/changelog.md` | A template for your own deployment's change log |
+| `examples/` | Copyable examples; never loaded by the engine |
+| `.github/workflows/` | CI, PR checks and promotion workflows |
+| `AGENTS.md`, `CLAUDE.md` | Instructions for coding agents |
