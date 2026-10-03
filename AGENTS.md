@@ -229,13 +229,9 @@ The engine resolves IDs and credential names to each org's UUIDs on push.
 
 `resources/<org>/.vapi-ignore` lists platform resources this repo must not
 manage, as gitignore-style patterns (see `resources/.vapi-ignore.example`).
-Matched resources are skipped on pull and push, and push never deletes them.
-A resource that references an ignored one is a validation error.
-
-**`npm run cleanup` does not read `.vapi-ignore`.** Ignored resources are
-never in the state file, so cleanup lists them as orphans and a destructive
-run would delete them. Check its dry-run list against `.vapi-ignore` with the
-human before any `--force` run.
+Matched resources are skipped on pull and push, and neither push nor
+`npm run cleanup` deletes them. A resource that references an ignored one is a
+validation error.
 
 ---
 
