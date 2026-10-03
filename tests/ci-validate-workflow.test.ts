@@ -40,7 +40,10 @@ const JOB = (
 const STEP = JOB.steps.find((s) => s.name === "Validate every org")!;
 
 // Run the step in a scratch repository holding the given org folders.
-function validateStepRun(orgs: Record<string, (dir: string) => void>): {
+function validateStepRun(
+  orgs: Record<string, (dir: string) => void>,
+  extraEnv: Record<string, string> = {},
+): {
   code: number | null;
   output: string;
 } {
@@ -62,7 +65,12 @@ function validateStepRun(orgs: Record<string, (dir: string) => void>): {
       cwd: root,
       encoding: "utf8",
       timeout: 60_000,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, ...STEP.env },
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        ...extraEnv,
+        ...STEP.env,
+      },
     });
     return { code: result.status, output: `${result.stdout}${result.stderr}` };
   } finally {
@@ -122,6 +130,35 @@ test("validate step fails naming only the invalid org, after checking all of the
       error: run.output.includes("::error::Validation failed for: clinic."),
     },
     { code: 1, bothValidated: true, reason: true, error: true },
+    run.output,
+  );
+});
+
+test("on GitHub, a broken reference fails the step and is annotated on its file", () => {
+  const run = validateStepRun(
+    {
+      clinic: (dir) => {
+        starterCopy(dir);
+        const squad = join(dir, "squads", "front-desk.yml");
+        writeFileSync(
+          squad,
+          readFileSync(squad, "utf8").replace(
+            "assistantId: scheduler",
+            "assistantId: schedular",
+          ),
+        );
+      },
+    },
+    { GITHUB_ACTIONS: "true" },
+  );
+  assert.deepEqual(
+    [
+      run.code,
+      run.output.includes(
+        "::error file=resources/clinic/squads/front-desk.yml,title=dangling-reference%3A squads/front-desk::",
+      ),
+    ],
+    [1, true],
     run.output,
   );
 });

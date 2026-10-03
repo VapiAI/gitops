@@ -370,3 +370,34 @@ test("voice-provider-schema: cartesia membersOverrides.voice in squad checked", 
   assert.equal(findings.length, 1);
   assert.equal(findings[0]!.fieldPath, "membersOverrides.voice.speed");
 });
+
+const { findingAnnotation } = await import("../src/validate.ts");
+
+test("findingAnnotation: errors and warnings become GitHub workflow commands on the file", () => {
+  assert.deepEqual(
+    [
+      findingAnnotation(
+        {
+          severity: "error",
+          type: "assistants",
+          resourceId: "front-desk",
+          rule: "name-length",
+          message: "100% too long:\nsee docs, then fix",
+          fieldPath: "name",
+        },
+        "resources/clinic/assistants/front-desk.md",
+      ),
+      findingAnnotation({
+        severity: "warn",
+        type: "tools",
+        resourceId: "a,b",
+        rule: "reference-by-uuid",
+        message: "uses a UUID",
+      }),
+    ],
+    [
+      "::error file=resources/clinic/assistants/front-desk.md,title=name-length%3A assistants/front-desk::assistants/front-desk (name): 100%25 too long:%0Asee docs, then fix",
+      "::warning title=reference-by-uuid%3A tools/a%2Cb::tools/a,b: uses a UUID",
+    ],
+  );
+});

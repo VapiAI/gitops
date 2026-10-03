@@ -534,3 +534,22 @@ export function summarizeFindings(findings: ValidationFinding[]): string {
   for (const f of findings) lines.push(formatFinding(f));
   return lines.join("\n");
 }
+
+// Format a finding as a GitHub Actions workflow command, so it shows on the
+// file in the pull request rather than only in the job log. `file` is
+// relative to the repository root.
+export function findingAnnotation(f: ValidationFinding, file?: string): string {
+  const escapeData = (s: string) =>
+    s.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  const escapeProperty = (s: string) =>
+    escapeData(s).replace(/:/g, "%3A").replace(/,/g, "%2C");
+  const command = f.severity === "error" ? "error" : "warning";
+  const properties = [
+    ...(file ? [`file=${escapeProperty(file)}`] : []),
+    `title=${escapeProperty(`${f.rule}: ${f.type}/${f.resourceId}`)}`,
+  ];
+  const where = f.fieldPath ? ` (${f.fieldPath})` : "";
+  return `::${command} ${properties.join(",")}::${escapeData(
+    `${f.type}/${f.resourceId}${where}: ${f.message}`,
+  )}`;
+}

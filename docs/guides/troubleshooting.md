@@ -2,7 +2,8 @@
 
 ## "Reference not found" warnings
 
-The referenced resource doesn't exist. Check:
+The referenced resource doesn't exist. `npm run validate` reports these as
+`dangling-reference` errors before you deploy. Check:
 
 1. File exists in correct folder
 2. Filename matches exactly (case-sensitive)
@@ -30,7 +31,9 @@ bypassed).
 
 ## "Credential with ID not found" errors
 
-The credential UUID doesn't exist in the target org. Fix:
+The credential UUID doesn't exist in the target org. `npm run validate`
+warns about a credential name that isn't in the state file
+(`unresolved-credential`). Fix:
 
 1. Run `npm run pull -- <org>` to fetch credentials into the state file
 2. If the credential doesn't exist, create it in the Vapi dashboard with the same name
@@ -92,11 +95,23 @@ findings:
 npm run validate -- <org>
 ```
 
-Each error names the file, field and rule. Plain `push` only warns about
-these errors, so a repository that has been deploying with `push` can carry
-some from before the check existed; they show up on the next pull request,
-whatever it changes. Fix them in that PR or a separate one first. `apply`
-refuses to deploy until they're fixed anyway.
+Each finding names the file and the rule, and on GitHub it's also shown on
+the file in the pull request. Plain `push` only warns about these errors (unless `--strict`), so
+a repository that has been deploying with `push` can carry some from before
+the check existed; they show up on the next pull request, whatever it
+changes. Fix them in that PR or a separate one first. `apply` refuses to
+deploy until they're fixed anyway.
+
+| Rule | Severity | What to do |
+| --- | --- | --- |
+| `dangling-reference` | error | A reference names no local file and no state entry. Fix the name (it's the file name without extension, including any folder), or run `npm run pull -- <org>` if the resource was created in the dashboard. Don't add a state entry by hand. |
+| `override-tool-by-name` | error | References inside `assistantOverrides`, `membersOverrides` and `targetOverrides` aren't resolved. Put the tool inline in the override's `model.tools`. |
+| `reference-to-ignored` | error | The referenced resource matches `.vapi-ignore`, so it's never deployed. Stop ignoring it, or remove the reference. |
+| `name-length` | error | Shorten the name to 40 characters or fewer. |
+| `voice-provider-schema` | error | Move the setting to where that voice provider expects it; the message says where. |
+| `unresolved-credential` | warning | The credential name isn't in the state file. Run `npm run pull -- <org> --bootstrap` and commit the state file, or create the credential in the dashboard first. |
+| `reference-by-uuid` | warning | A UUID only exists in one org and breaks promotion. Reference the file by name. Vapi's stock personalities are exempt. |
+| `so-assistant-lockstep`, `prompt-duplicate-*`, `max-tokens-floor` | warning | Follow the message; see [structured outputs](../learnings/structured-outputs.md) and [writing prompts](writing-prompts.md). |
 
 A folder under `resources/` that isn't a valid org name (lowercase letters,
 digits and hyphens) fails too. Rename it, or move it out of `resources/`.
