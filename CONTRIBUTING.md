@@ -37,7 +37,7 @@ Commit messages and PR titles follow [Conventional Commits](https://www.conventi
 | --- | --- |
 | A Vapi platform gotcha, recipe or troubleshooting guide | `docs/learnings/<topic>.md`, plus a row in [`docs/learnings/README.md`](docs/learnings/README.md) and the table in `AGENTS.md` for a new file |
 | A sync-engine pain point and its fix (pull, push, state, cleanup) | `improvements.md`, in its Problem → Current behavior → Risk → Current mitigation → Possible fix → Status format |
-| Setup or orientation for new users | `README.md` (keep it short; link to a guide for depth) |
+| Setup or orientation for new users | `README.md` (keep it short; put depth in `docs/guides/`) |
 | An example users can copy | `examples/`. Snippets in the docs that start with `# examples/<path>` must match the file exactly; `npm test` checks this. |
 
 Don't edit `docs/changelog.md` here. It's a template for your own
