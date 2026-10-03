@@ -84,6 +84,7 @@ you which stack PR closes the row.**
 | 30  | Tool-linking pass could PATCH a raw assistant slug          | Mid-push 400 naming the wrong resource              | None       | RESOLVED 2026-08-03 (#51)                       |
 | 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Open                                            |
 | 32  | Test suite never ran in CI; 20 tests rotted after the hash store | Regression guards for #22/#23 silently stopped running | None | RESOLVED 2026-09-30 (#56)                      |
+| 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1718,6 +1719,57 @@ required `formatError`, so any test reaching that error path would have
 thrown a `TypeError` instead of exercising it. Fixtures now use the `{ uuid }`
 shape and mark "which copy won" with distinct UUIDs instead of removed hash
 fields.
+
+---
+
+## 33. `npm run sim` reported every run as passed
+
+**[RESOLVED 2026-10-01]**
+
+**Discovered:** 2026-10-01, while designing simulation PR checks (TEST-141).
+
+### Problem
+
+`npm run sim` scored a run by reading `results[]` on the run and counting
+`status === "pass"`. The simulation-run API has no `results` field and
+item statuses are `passed` / `failed`, so every watched run summarised
+as 0 pass / 0 fail and the command exited 0 — including runs whose
+simulations failed.
+
+### Current behavior (Verified, before the fix)
+
+- `src/sim.ts` `runSimulation` computed pass/fail from `last.results`,
+  which `GET /eval/simulation/run/:id` never returns; pass/fail is in
+  `itemCounts` and on the run items (`GET /eval/simulation/run/:id/item`).
+- `src/sim-cmd.ts` exited 1 only when `fail > 0`, which could never happen.
+- Polling also stopped on statuses that don't exist (`failed`,
+  `completed`), never canceled a timed-out run, and didn't print the run
+  link (only the create response carries `url`).
+
+### Risk
+
+Anyone gating on `npm run sim` (locally or in CI) got a green result for a
+failing suite.
+
+### Current mitigation
+
+None needed once the fix below lands.
+
+### Possible fix (landed)
+
+- `src/sim-result.ts` `simRunVerdict`: passed only when the run ended,
+  every expected item exists, passed, and had a required evaluation that was
+  actually scored; otherwise failed or incomplete with a reason.
+- `src/sim.ts` reads items (paginated or bare-array, deduped by id),
+  waits for late item results, prints the run link and failing judges, and
+  cancels the run on `--timeout` (default 20 min) or Ctrl-C.
+- `src/vapi-client.ts`: a config-free client that never retries run
+  creation on a 5xx (the run may already be queued).
+- Exit codes: 0 passed, 1 failed, 2 usage, 3 incomplete.
+
+### Status
+
+**RESOLVED 2026-10-01.**
 
 ---
 

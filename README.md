@@ -103,7 +103,7 @@ Every command works in two modes:
 | `npm run cleanup` | ✅ | `npm run cleanup -- <org> [--force --confirm <org>]` | Inspect (default) or delete orphaned remote resources. Destructive run requires `--confirm <org>`. |
 | `npm run rollback` | — | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore from a snapshot in `.vapi-state.<org>.snapshots/` (one is written before every push/apply). |
 | `npm run call` | ✅ | `npm run call -- <org> -a <name>` or `-s <squad>` | Start an interactive WebSocket call against an assistant or squad. |
-| `npm run sim` | — | `npm run sim -- <org> --suite <name> --target <name>` | Run a simulation suite (or specific simulations) against a deployed assistant/squad. |
+| `npm run sim` | — | `npm run sim -- <org> --suite <name> --target <name> [--timeout <min>]` | Run a simulation suite (or specific simulations) against a deployed assistant/squad. Prints the run link; exits 0 passed, 1 failed, 3 incomplete (timeout, Ctrl-C, missing results). |
 | `npm run migrate` | — | `npm run migrate` | One-time, all orgs at once: slim legacy state files to pure `name → uuid` and seed the per-developer `.vapi-state-hash/` baseline store from the old hashes. Required once after upgrading to the hash-store engine — `pull`/`push`/`apply` refuse legacy-shaped state until it runs. Idempotent. |
 | `npm run build` | — | — | Type-check the codebase (`tsc --noEmit`). |
 | `npm test` | — | — | Run regression tests (`node:test`). |

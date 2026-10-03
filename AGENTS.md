@@ -902,7 +902,7 @@ npm run promote -- --pipeline <name> --from <source> --to <target> --apply # For
 npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
 npm run audit -- <org>                             # Read-only drift detector: orphan YAML, state ghosts, content-identical clusters, sibling base-slugs, dashboard orphans, inline model.tools. Exit 1 on findings.
 npm run audit -- <org> --type assistants           # Scope audit to a single resource type
-npm run sim -- <org> --suite <name> --target <name>  # Run a simulation suite against an assistant/squad
+npm run sim -- <org> --suite <name> --target <name>  # Run a simulation suite against an assistant/squad (exit 0 pass, 1 fail, 3 incomplete; --timeout <min>)
 npm run rollback -- <org> --to <ISO-timestamp>     # Re-apply a snapshot taken before a push
 npm run rollback -- <org> --list                   # List available snapshots
 

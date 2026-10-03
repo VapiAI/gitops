@@ -471,6 +471,23 @@ This is the unified executor. A "run" is a batch — it expands into many `runIt
 }
 ```
 
+The **create** response (`CreateSimulationRunResponse`) also carries two fields nothing else returns:
+
+- `url` — the dashboard link to this run. `GET /eval/simulation/run/:id` does **not** return it, so read it from the create response.
+- `simulationRunItemIds` — one id per item queued (simulations × iterations), i.e. how many items the run should end with.
+
+A run has **no `results` field**. Pass/fail lives in `itemCounts` and on the items themselves (`GET …/item`, below). Creating a run queues paid work before the response returns, so a 5xx on create may still have started it — don't blindly retry the POST.
+
+### How `npm run sim` decides pass/fail
+
+`src/sim-result.ts` (`simRunVerdict`) reports **passed** only when all of these hold; otherwise **failed** (any failed item) or **incomplete**:
+
+- the run `ended` and has `itemCounts`, with `total` equal to the number of items created (`simulationRunItemIds`) and greater than 0;
+- nothing is `queued`, `running` or `canceled`, and `passed === total`;
+- every item was fetched, is `passed`, and has at least one **required** evaluation that wasn't skipped (the all-skipped trap from the chat-mode gotcha above).
+
+Exit codes: 0 passed, 1 failed, 2 usage error, 3 incomplete (timeout, Ctrl-C, canceled items, results that never arrived). On timeout or Ctrl-C the run is canceled.
+
 ### List runs — `GET /eval/simulation/run`
 
 Query params:
@@ -486,7 +503,7 @@ Query params:
 ### Get / Cancel run
 
 - `GET /eval/simulation/run/:id` → `SimulationRun`
-- `PATCH /eval/simulation/run/:id` → cancels the run **and** all its queued items. No body required.
+- `PATCH /eval/simulation/run/:id` → cancels the run **and** all its queued items. No body required. Returns 400 `Run has already ended` for an ended run and 409 when a concurrent cancel wins; both mean "nothing left to cancel".
 
 ---
 
@@ -497,6 +514,8 @@ Run items are system-managed — there's no create/update API for users; they're
 ### List run items — `GET /eval/simulation/run/:id/item`
 
 Query params: `limit`, `page`, `simulationId`, `runId`, `status` (`queued` | `running` | `evaluating` | `passed` | `failed` | `canceled`).
+
+Response shape depends on the query: **with** `limit` or `page` it's paginated (`{ results, metadata: { totalItems, itemsPerPage, currentPage } }`, `limit` up to 1000); **without** them it's a bare array. Pages are ordered only by creation time and a run's items share it, so OFFSET pages can overlap — dedupe by `id`. Items can also lag the run: a run can be `ended` while an item is `passed` but its `results` aren't written yet.
 
 ### Get a run item — `GET /eval/simulation/run/:id/item/:itemId`
 
