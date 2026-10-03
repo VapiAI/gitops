@@ -1,21 +1,278 @@
 # Vapi GitOps — Agent Guide
 
-This project manages **Vapi voice agent configurations** as code. All resources (assistants, tools, squads, etc.) are declarative files that sync to the Vapi platform via a gitops engine.
+This repository manages **Vapi voice agents as code**. Assistants, tools,
+squads, structured outputs, simulations and evals are files under
+`resources/<org>/`, and the CLI (`npm run …`) syncs them to Vapi orgs.
 
-**You do NOT need to know how Vapi works internally.** This guide tells you everything you need to author and modify resources.
+This file is the guide for coding agents (Claude Code reads it through
+`CLAUDE.md`; Codex and Cursor read it directly). Keep it short: detail lives
+in [`docs/guides/`](docs/guides/) and [`docs/learnings/`](docs/learnings/README.md),
+and you should open those files when a task needs them.
 
-**Prompt quality:** Whenever you create a new assistant or change an existing assistant’s system prompt, read **`docs/Vapi Prompt Optimization Guide.md`** first. It goes deeper on structure, voice constraints, tool usage, and evaluation than the summary in this file.
+---
 
-**Org-scoped resources:** Resources live in `resources/<org>/` (e.g. `resources/my-org/`, `resources/my-org-prod/`). Each org directory is isolated — `npm run push -- my-org` only touches `resources/my-org/`. Run `npm run setup` to create a new org (interactive), or `npm run setup -- <org>` when you have no TTY — see **First-time setup (agents)** below.
+## Which repository are you in?
 
-**Template-safe first run:** In a fresh clone, prefer `npm run pull -- <org> --bootstrap` to refresh `.vapi-state.<org>.json` and credential mappings without materializing the target org's resources into `resources/<org>/`. `npm run push -- <org>` will auto-run the same bootstrap sync when it detects empty or stale state for the resources being applied.
+Some rules depend on whether this is the upstream template or a customer's
+own deployment. Check `docs/changelog.md`:
 
-**Excluding resources from sync (`.vapi-ignore`):** To prevent specific resources from being touched in either direction (e.g. assistants owned by another team or legacy resources you don't want to manage), create `resources/<org>/.vapi-ignore` with gitignore-style patterns. See `resources/.vapi-ignore.example` for syntax and examples. The list is **bidirectional**: matched ids are skipped on pull (never written), on push and `apply` (never sent), and orphan-protected (a `--force` push will not DELETE a dashboard resource whose id matches the ignore). `--force` on push bypasses the load-filter so a deliberate override can flow through, but orphan-protect still applies. A resource that references an ignored resource (e.g. a squad pointing at `assistants/foo` while `assistants/foo` is ignored) is a validation ERROR — `--strict` push aborts before any API call.
+- **Upstream template** — `docs/changelog.md` still contains the placeholder
+  heading `## YYYY-MM-DD`. Changes here are usually to the engine or docs.
+  Don't edit `docs/changelog.md`. Record engine friction in `improvements.md`
+  (see [Changing the engine](#changing-the-engine)).
+- **Customer deployment** — the placeholder has been replaced with dated
+  entries. For every significant configuration change, add an entry to
+  `docs/changelog.md` in the same change: a `YYYY-MM-DD` section, the resource
+  type and file paths, and what changed, why, and the expected impact.
+  Significant means assistant prompts or settings, tools, squad members or
+  routing, and structured outputs or simulations that change behaviour.
 
-**Learnings & recipes:** Before configuring resources or debugging issues, read the relevant file in **`docs/learnings/`**. Load only what you need:
+---
+
+## Safety rules (read before doing anything)
+
+**1. Ask before you change a live org or delete anything.** Resources here run
+real phone calls. Get an explicit yes from the human, for this specific
+change, before running:
+
+| Command | Why it needs a yes |
+| --- | --- |
+| `npm run apply`, `npm run push` | Changes live assistants |
+| `npm run promote -- … --apply` | Changes the next org (often production) |
+| `npm run rollback -- <org> --to …` | Reverts live resources |
+| `npm run cleanup -- <org> --force --confirm <org>` | Deletes platform resources |
+| `npm run pull -- <org> --force` | Overwrites local edits |
+| `--allow-new-files`, `--overwrite`, `--resolve=ours\|theirs` | Bypass a safety check (see rule 6) |
+| `npm run call`, `npm run sim`, live `npm run check` | Place calls or run simulations that cost minutes |
+
+Safe to run without asking: `npm run validate`, `npm run audit`,
+`npm run check -- … --dry-run`, `npm run promote` without `--apply` (a plan),
+plain `npm run pull` (it never overwrites local edits), `npm run push -- <org>
+--dry-run`, `npm run build`, `npm test`.
+
+**2. Never handle API keys.** Don't ask the human to paste a key into chat,
+don't print or read out `.env.*` files, never pass a key as a command-line
+argument, and never commit `.env.*`. Keys live in `.env.<org>` (gitignored)
+or the environment.
+
+**3. Reference resources by ID, never by UUID.** A resource's ID is its path
+under the type folder without the extension (`tools/lookup-patient.yml` is
+`lookup-patient`). Credentials are referenced by **name**. The engine resolves
+names to each org's UUIDs; a pasted UUID only works in one org and breaks
+promotion.
+
+**4. A direct API `PATCH` replaces nested objects.** The Vapi API does not
+deep-merge: PATCHing `model`, `voice`, `transcriber`, `messagePlan`,
+`analysisPlan`, `artifactPlan`, `voicemailDetection`, `startSpeakingPlan` or
+`stopSpeakingPlan` with a partial object wipes every field you left out. A
+partial `model` PATCH that omitted `model.messages` once erased the system
+prompts of live production assistants. Prefer `npm run apply`, which sends
+complete payloads from the files. If you must call the API directly:
+
+```bash
+# 1. GET the full resource
+ASSISTANT=$(curl -s -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" https://api.vapi.ai/assistant/$id)
+# 2. Modify the nested object in place, keeping every other field
+MODEL=$(echo "$ASSISTANT" | jq '.model | .model = "gpt-4.1"')
+# 3. PATCH the COMPLETE nested object back
+curl -X PATCH -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" -H "Content-Type: application/json" \
+  -d "{\"model\": $MODEL}" https://api.vapi.ai/assistant/$id
+# 4. GET again and check the fields you did NOT change survived (model.messages, model.toolIds, …)
+```
+
+**5. `.ts` resource files execute code** when loaded — in `validate`,
+promotion plans and PR checks too. Treat them like code in review.
+
+**6. Don't bypass a safety check to make a command pass.** The new-file check,
+per-resource conflict prompts and cleanup confirmation exist to stop
+duplicates and data loss. When one stops a command, show its message to the
+human and let them decide.
+
+---
+
+## First-time setup (no terminal)
+
+You usually run without a TTY, so **don't run bare `npm run setup`** — the
+wizard needs a terminal. Instead:
+
+1. `nvm use` (or check `node --version` satisfies `engines` in `package.json`), then `npm ci`.
+2. **Get the API key without handling it.** Ask the human to create
+   `.env.<org>` from `.env.example` and put a Vapi **private API key** in
+   `VAPI_PRIVATE_API_KEY`, or confirm it's already exported. Point them to
+   https://dashboard.vapi.ai/org/api-keys → **Private API Keys** (a public key
+   won't work).
+3. Ask whether to download the org's existing resources:
+   - Managing an existing org → `npm run setup -- <org>` (`--resources all`, the default).
+   - Authoring from scratch → `npm run setup -- <org> --resources none` (state only, no files).
+   Add `--region eu` for EU orgs if auto-detection picks the wrong one.
+4. Verify: `npm run validate -- <org>` passes, and `resources/<org>/` plus
+   `.vapi-state.<org>.json` exist.
+5. Commit `resources/<org>/` and `.vapi-state.<org>.json`. Never commit `.env.<org>`.
+
+If setup says the org is "already set up locally", don't delete anything to
+work around it — run `npm run pull -- <org>`, or ask the human.
+
+**Working in an existing repository for the first time?** Run a plain
+`npm run pull -- <org>` before your first deploy. It seeds your local drift
+baselines (`.vapi-state-hash/`, which is per-developer and gitignored);
+until then, the engine can't tell your edits from dashboard edits as
+precisely.
+
+---
+
+## Making a change
+
+1. **Read the relevant learnings file** before configuring or debugging a
+   resource (see [Learnings](#learnings-and-where-knowledge-goes)). Before
+   writing or changing a system prompt, read
+   [Writing system prompts](docs/guides/writing-prompts.md) and the
+   [Vapi Prompt Optimization Guide](docs/Vapi%20Prompt%20Optimization%20Guide.md).
+2. **Edit the files** under `resources/<org>/`. Settings and examples:
+   [resource reference](docs/guides/resource-reference.md); tested files to
+   copy from: [`examples/starter/`](examples/starter/README.md).
+3. **Validate:** `npm run validate -- <org>` (offline).
+4. **Build PR checks offline** if `vapi-checks.yml` exists:
+   `npm run check -- --all --dry-run`. Fix anything it reports.
+5. **Deploy only with a yes** (safety rule 1): `npm run apply -- <org>`, or
+   scoped to files: `npm run apply -- <org> resources/<org>/assistants/my-agent.md`.
+6. **Verify** with the human's agreement: `npm run call -- <org> -a <name>` or
+   `npm run sim -- <org> --suite <name> --target <name>`.
+7. **Commit** the resource files and `.vapi-state.<org>.json`.
+
+**Why `apply`, not `push`:** `apply` pulls the platform's current state, merges
+your local edits, then pushes, so it never silently overwrites changes made in
+the dashboard. Raw `push` skips the pull; use it only right after a pull, and
+dry-run it first (`--dry-run`). When a resource changed both locally and in
+the dashboard, `apply` asks about that resource alone in a terminal; in CI or
+piped runs it's blocked unless `--resolve=ours|theirs|fail` is passed — ask
+the human which.
+
+**When a deploy stops at the new-file check** ("no state-file UUID mapping"),
+the engine can't tell whether each listed file is new, a rename, or stale.
+Show the list to the human and ask them to classify each file. Pass
+`--allow-new-files` only once they confirm every file is genuinely new. For a
+rename, see [Renaming](#naming-and-renaming); delete stale files.
+
+If something goes wrong: `npm run rollback -- <org> --list`, then (with a yes)
+`--to <timestamp>`. Details for every workflow:
+[Everyday workflows](docs/guides/workflows.md);
+how sync, conflicts and output icons work:
+[How the engine works](docs/guides/how-it-works.md).
+
+---
+
+## Quick reference
+
+| I want to… | Do this |
+| --- | --- |
+| Edit an assistant's system prompt | Edit the Markdown body of `resources/<org>/assistants/<name>.md` |
+| Change assistant settings | Edit the YAML frontmatter of the same file |
+| Add a tool / assistant / squad | Create `resources/<org>/tools/<name>.yml`, `assistants/<name>.md`, `squads/<name>.yml` |
+| Add post-call analysis | Create `resources/<org>/structuredOutputs/<name>.yml` and list it in the assistant's `artifactPlan.structuredOutputIds` |
+| Write simulation tests | Create files under `resources/<org>/simulations/` (see [Simulations](#simulations-and-pr-checks)) |
+| Check files offline | `npm run validate -- <org>` |
+| Deploy (with a yes) | `npm run apply -- <org> [paths]` |
+| Sync platform changes down | `npm run pull -- <org>` (never `--force` without a yes) |
+| Pull one known resource | `npm run pull -- <org> --type assistants --id <uuid>` |
+| Find drift between files, state and the platform | `npm run audit -- <org>` |
+| Preview a push | `npm run push -- <org> --dry-run` |
+| Build PR check payloads offline | `npm run check -- <check> --dry-run` (or `--all`) |
+| Plan a promotion | `npm run promote -- --pipeline <p> --from <org> --to <org>` |
+| List snapshots to roll back to | `npm run rollback -- <org> --list` |
+| Find platform resources with no file | `npm run cleanup -- <org>` (dry run; deleting needs `--force --confirm <org>` and a yes) |
+
+All commands and flags: [Commands](docs/guides/commands.md). Only `setup`,
+`apply`, `pull`, `push`, `cleanup` and `call` have interactive modes, and you
+should always pass an org and flags instead.
+
+---
+
+## Resources and references
+
+Each org is a folder: `resources/<org>/{assistants,tools,squads,structuredOutputs,evals,simulations/{personalities,scenarios,tests,suites}}`.
+Assistants are `.md` (YAML frontmatter plus the system prompt as the body) or
+`.yml`; everything else is `.yml`. Any resource can also be a `.ts` file that
+default-exports the object (safety rule 5).
+
+| From | Field | References | Example |
+| --- | --- | --- | --- |
+| Assistant | `model.toolIds[]` | Tool files | `- lookup-patient` |
+| Assistant | `artifactPlan.structuredOutputIds[]` | Structured output files | `- call-summary` |
+| Structured output | `assistant_ids[]` | Assistant files | `- receptionist` |
+| Handoff tool | `destinations[].assistantId` | Assistant files | `assistantId: scheduler` |
+| Squad member | `assistantId` | Assistant files | `assistantId: receptionist` |
+| Squad `tools:append` handoff | `destinations[].assistantName` | The target assistant's `name` | `assistantName: Scheduler` |
+| Scenario evaluation | `structuredOutputId` | Structured output files | `structuredOutputId: booking-confirmed` |
+| Simulation | `personalityId`, `scenarioId` | Personality and scenario files | `scenarioId: books-cleaning` |
+| Suite | `simulationIds[]` | Simulation files | `- books-cleaning-calm` |
+| Any server block | `credentialId` | A credential **name** in the org | `credentialId: my-api-credential` |
+
+The engine resolves IDs and credential names to each org's UUIDs on push.
+
+### Naming and renaming
+
+- **Files you create keep their names.** Resources pulled from the platform
+  that have no file yet are written as `<name>-<first 8 characters of the UUID>`
+  (for example `intake-agent-a1b2c3d4.md`).
+- **The filename is a stable handle**, independent of the dashboard `name`.
+  The state file maps filename → UUID, and pulls update a file's content, never
+  its name.
+- Tool function names use `snake_case` (`book_appointment`); assistant names
+  use natural language (`Intake Assistant`).
+
+| To rename… | Do this |
+| --- | --- |
+| The display name | Change `name` in the file (or in the dashboard, then pull). The filename stays. |
+| The file itself | A renamed file has no state entry, so the next deploy stops at the new-file check. Either keep the old filename, or (with the human's agreement) deploy it as new with `--allow-new-files` and delete the old platform resource with `npm run cleanup -- <org> --force --confirm <org>`. |
+
+### Excluding resources (`.vapi-ignore`)
+
+`resources/<org>/.vapi-ignore` lists platform resources this repo must not
+manage, as gitignore-style patterns (see `resources/.vapi-ignore.example`).
+Matched resources are skipped on pull and push, and push never deletes them.
+A resource that references an ignored one is a validation error.
+
+**`npm run cleanup` does not read `.vapi-ignore`.** Ignored resources are
+never in the state file, so cleanup lists them as orphans and a destructive
+run would delete them. Check its dry-run list against `.vapi-ignore` with the
+human before any `--force` run.
+
+---
+
+## Simulations and PR checks
+
+- A **scenario** needs `name`, `instructions`, and at least one evaluation
+  (a judge). Over chat, at least one judge must be `required: true` and text
+  based. Add `toolMocks` (`toolName` + `result`) for every tool the scenario
+  will call. A **personality** needs an `assistant` config; a **simulation**
+  pairs a `personalityId` with a `scenarioId`; a **suite** lists
+  `simulationIds`. Tested examples: `examples/starter/resources/starter/simulations/`.
+- **PR checks** (`vapi-checks.yml`) run suites against the branch's own files,
+  with tools mocked and nothing deployed. Always run
+  `npm run check -- <check> --dry-run` after changing a target or its tests;
+  it fails, naming the field, on anything it can't run safely (for example an
+  SMS tool, or a handoff outside the squad). A live check needs a yes.
+- Learnings: [simulations](docs/learnings/simulations.md). Setup and the
+  refusal table: [PR checks](docs/guides/pr-checks.md).
+
+## Promotion
+
+`promotion.yml` defines one-way pipelines between orgs (for example dev →
+staging → production). Planning is read-only:
+`npm run promote -- --pipeline <p> --from <a> --to <b>`. Applying (`--apply`)
+changes the next org and needs a yes. An org can require a PR check to pass
+before anything is promoted out of it (`orgs.<org>.check: <name>`).
+Full guide: [Promotion](docs/guides/promotion.md).
+
+---
+
+## Learnings and where knowledge goes
+
+Before configuring or debugging a resource, read the matching file. Load only
+what you need:
 
 | Working on | Read |
-|------------|------|
+| --- | --- |
 | Assistants (model, voice, transcriber, hooks) | `docs/learnings/assistants.md` |
 | Tools (apiRequest, function, transferCall, handoff, code) | `docs/learnings/tools.md` |
 | Squads / multi-agent handoffs | `docs/learnings/squads.md` |
@@ -39,997 +296,45 @@ This project manages **Vapi voice agent configurations** as code. All resources 
 **Where new knowledge goes:**
 
 | Kind of knowledge | Home | Convention |
-|---|---|---|
-| Per-resource gotchas, recipes, troubleshooting | `docs/learnings/<topic>.md` | One file per resource type or topic. Add a row to this table AND to `docs/learnings/README.md` when you add a new file. `CLAUDE.md` mirrors this list — keep both in sync. |
-| Engine-friction log (push/pull/state/cleanup pain points + fixes) | `improvements.md` | Format: Problem → Current behavior → Risk → Current mitigation → Possible fix → Status. Mark `[RESOLVED YYYY-MM-DD] (#<PR>)` when fixed; never delete. |
-| Code-level rationale (why a function works the way it does) | Code comments | Only when the WHY is non-obvious — not what the code does. Don't reference PR/issue numbers; they rot. |
-| Setup, install, repo orientation | `README.md` | One-time onboarding only. Don't put runtime gotchas here. |
+| --- | --- | --- |
+| Platform gotchas, recipes, troubleshooting | `docs/learnings/<topic>.md` | One file per topic. A new file needs a row in the table above and in `docs/learnings/README.md` (`npm test` checks the table above). |
+| Sync-engine pain points and fixes | `improvements.md` | Problem → Current behavior → Risk → Current mitigation → Possible fix → Status. Mark `[RESOLVED YYYY-MM-DD] (#<PR>)` when fixed; never delete entries. |
+| Why code works the way it does | Code comments | Only when the why isn't obvious. Never cite PR/issue numbers or line numbers; they rot. |
+| Setup and orientation for people | `README.md` and `docs/guides/` | Keep the README short; depth goes in a guide. |
+| A customer deployment's config history | `docs/changelog.md` | Customer deployments only (see [Which repository](#which-repository-are-you-in)). |
 
-If you're unsure where something goes, default to `docs/learnings/`. The README and engine-friction log are deliberately narrow.
-
----
-
-## First-time setup (agents)
-
-You usually run without a TTY, so **do not run bare `npm run setup`** — the wizard will exit and tell you to use direct mode. Follow these steps instead:
-
-1. `nvm use` (or confirm `node --version` satisfies `engines` in `package.json`), then `npm install`.
-2. **Get the API key without handling it yourself.** Ask the human to create `.env.<org>` from `.env.example` and paste a Vapi **private API key** into `VAPI_PRIVATE_API_KEY`, or confirm `VAPI_PRIVATE_API_KEY` is already exported. Point them to https://dashboard.vapi.ai/org/api-keys → **Private API Keys** (a *public* key will not work). Do not ask them to paste the key into chat, and never pass it as a CLI argument (setup refuses `--token`).
-3. Ask the human whether to download the org's existing resources:
-   - Managing an existing org → `npm run setup -- <org>` (`--resources all`, the default).
-   - Authoring from scratch → `npm run setup -- <org> --resources none` (state only, no files).
-   Add `--region eu` for EU orgs if auto-detection picks the wrong one.
-4. Verify: `npm run validate -- <org>` should pass, and `resources/<org>/` plus `.vapi-state.<org>.json` should exist.
-5. Commit `resources/<org>/` and `.vapi-state.<org>.json`. Never commit `.env.<org>` (it is gitignored).
-
-If setup reports the org is "already set up locally", do not delete anything to work around it — run `npm run pull -- <org>` instead, or ask the human.
+When unsure, default to `docs/learnings/`.
 
 ---
 
-## Quick Reference
+## Changing the engine
 
-| I want to...                        | What to do                                                                    |
-| ----------------------------------- | ----------------------------------------------------------------------------- |
-| Edit an assistant's system prompt   | Edit the markdown body in `resources/<org>/assistants/<name>.md`                  |
-| Change assistant settings           | Edit the YAML frontmatter in the same `.md` file                                  |
-| Add a new tool                      | Create `resources/<org>/tools/<name>.yml`                                         |
-| Add a new assistant                 | Create `resources/<org>/assistants/<name>.md`                                     |
-| Create a multi-agent squad          | Create `resources/<org>/squads/<name>.yml`                                        |
-| Add post-call analysis              | Create `resources/<org>/structuredOutputs/<name>.yml`                             |
-| Write test simulations              | Create files under `resources/<org>/simulations/`                                 |
-| First-time setup without a TTY      | `npm run setup -- <org> [--resources none] [--region eu]` — private API key from `VAPI_PRIVATE_API_KEY` or `.env.<org>` |
-| Promote resources across orgs       | `npm run promote -- --pipeline <name> --from <org-a> --to <org-b> --apply`        |
-| Deploy local changes (default)      | `npm run apply -- <org>` — pull → merge → push, safe against dashboard drift       |
-| Pre-flight schema check (no network) | `npm run validate -- <org>` — run before every `apply`                            |
-| Audit state/dashboard drift (read-only) | `npm run audit -- <org>` — orphans, ghosts, content-identical clusters, inline-tools. Exit 1 on findings. |
-| Pull latest from Vapi               | `npm run pull -- <org>`, `--force`, or `--bootstrap`                              |
-| Pull one known remote resource      | `npm run pull -- <org> --type assistants --id <uuid>`                             |
-| Deploy a single file                | `npm run apply -- <org> resources/<org>/assistants/my-agent.md`                   |
-| Recover from a bad deploy           | `npm run rollback -- <org> --list` then `--to <ISO-timestamp>`                    |
-| Raw push (no pre-pull)              | `npm run push -- <org>` — see safety hierarchy below; rarely the right call        |
-| Push with new resources             | `npm run push -- <org> --allow-new-files` — bypass orphan-YAML gate. **AI agents**: do NOT auto-pass this flag; confirm with the human first (see push section below) |
-| Test a call                         | `npm run call -- <org> -a <assistant-name>` or `-s <squad-name>`                  |
-| Run a simulation suite              | `npm run sim -- <org> --suite <name> --target <assistant-name>`                   |
-| Run PR simulation checks            | `npm run check -- <check>` (or `--all`); `--dry-run` builds the payloads offline, `--print-payload` writes them |
-| Migrate a legacy state file         | `npm run migrate` — one-shot, all orgs; required once after upgrading to the hash-store engine |
+For changes under `src/`, `tests/` or `.github/`:
+
+- Run `npm run build` (type-checks `src/` and `tests/`) and `npm test` before
+  you finish. Tests use `node:test` and must never call the real Vapi API —
+  use a local HTTP stub, as the existing tests do.
+- Changing a command's flags or behaviour? Update
+  [`docs/guides/commands.md`](docs/guides/commands.md) and the README command
+  table in the same change.
+- Changing an example under `examples/`? Doc snippets that start with
+  `# examples/<path>` must match the file exactly (`npm test` checks).
+- Commit messages follow Conventional Commits (`fix(pull): …`, `docs: …`).
+- When you hit engine friction ("this should be better"), add or update an
+  entry in `improvements.md` in the same change. Upstream's log collects
+  entries from customer forks' logs when they apply to everyone.
 
 ---
 
-## Choosing a sync command (safety hierarchy)
-
-Three commands deploy changes to the Vapi platform. Pick the safest one that fits the task. **`apply` is the default.**
-
-### `npm run apply -- <org>` — DEFAULT deploy verb
-
-Pulls the platform's current state, merges with your local files, then pushes the merged result. This protects you from racing dashboard edits made between your last pull and your push. Use this for ~99% of deployments.
-
-Conflict handling is **per resource, never umbrella**: apply defaults to `--resolve=defer`, so the pull stage preserves local files and the drift baselines for genuinely conflicted resources, and the push stage then asks one interactive question per conflicted resource (push mine / keep dashboard / save a `.bkp` copy for manual merge). Clean and one-sided changes flow silently in their obvious direction. The full scenario matrix lives in `docs/learnings/sync-behavior.md`. Explicit `--resolve=ours|theirs|fail` keep non-interactive (CI) semantics.
-
-```bash
-npm run validate -- <org>             # schema check first, no network call
-npm run apply -- <org>                # full-org apply
-npm run apply -- <org> <path-to-file> # single-file apply (same safety, scoped diff)
-```
-
-### `npm run validate -- <org>` — pre-flight schema check
-
-Runs the engine's local validators against every YAML/MD file in the org without any network call. Catches shape errors (missing required fields, wrong types, stale tool references) before they burn a deploy. **Run before every `apply`.**
-
-### `npm run pull -- <org>` — refresh from dashboard (default: plain pull)
-
-**Default to plain pull, NOT --force.** Plain `npm run pull -- <org>`:
-- Syncs one-sided changes in their obvious direction: `dashboard-ahead` (local unchanged, dashboard edited) is written down ⬇️; `local-ahead` (you edited, dashboard unchanged) is preserved ⬆️ for the next push
-- Prints an end-of-pull summary with counts per drift direction
-- Hard-gates true 3-way conflicts behind `--resolve=ours|theirs|fail|defer` before they silently lose data (`defer` leaves the conflict for push's per-resource prompt — apply's default)
-
-Drift direction is computed against the per-developer baseline store `.vapi-state-hash/<org>/<uuid>` (gitignored) — the hash of the last platform content *you* pulled or pushed. The committed state file holds only `name → uuid`. See `docs/learnings/sync-behavior.md` for every scenario.
-
-`--force` skips all of this and just overwrites local with dashboard. Use it ONLY when you literally need to nuke local and re-materialize dashboard truth (rare). Plain pull is the DEFAULT for both humans and agents; `--force` is the escape hatch.
-
-**Listing completeness (applies to every command).** Vapi list endpoints cap a response at 100 items and expose no page cursor — only `createdAt` comparison filters. The engine pages backwards through `createdAt` until it gets a short page, so pull, push's invalid-mapping detection, `delete`'s orphan sweep, `audit`, and the credential reverse-map all see the whole type instead of the first hundred. When completeness cannot be proven — an endpoint that ignores the cursor params, a payload with no `createdAt`, or the page-count backstop — the engine says so on stderr. Treat that warning as "do not infer deletion from absence for this type".
-
-**Pull-output icon legend.** Distinct semantics in a single pulled-resource line:
-
-| Icon | Meaning |
-|------|---------|
-| `📝` | Engine wrote/updated a file on disk (clean / no-baseline path) |
-| `✨` | Engine created a NEW file on disk (first-time pull of this resource) |
-| `✏️`  | Locally modified file detected by git, preserved as-is (no-baseline path) |
-| `⬆️`  | `local-ahead` — local has unpushed edits, needs to flow UP to dashboard (preserved) |
-| `⬇️`  | Dashboard version flowed DOWN over local: `dashboard-ahead` sync-down (local was unchanged) or `--resolve=theirs` (local edits lost) |
-| `⏳` | `--resolve=defer` — 3-way conflict left intact for push's per-resource prompt |
-| `🔒` | Platform-default resource (read-only, immutable) |
-| `🚫` | Matched `.vapi-ignore` (not tracked locally), or a `.bkp` backup copy refused as a resource |
-| `🗑️`  | Locally deleted (deletion intent recorded in state) |
-
-Push adds two more: `⏭️` (conflict prompt → kept dashboard, push skipped) and `📄` (conflict prompt → dashboard copy saved as `<name>.<TIMESTAMP>.bkp.<ext>` for manual merge).
-
-Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull), `📝` is the engine doing routine file I/O.
-
-**One-time migration on engine upgrade.** Repos that predate the hash-store engine carry `lastPulledHash`/`lastPushedHash`/timestamps inside `.vapi-state.<org>.json`. `pull`, `push`, and `apply` refuse to run on that legacy shape — run `npm run migrate` once (no org argument, no token needed): it slims every state file to pure `name → uuid` and seeds each org's `.vapi-state-hash/` baselines from the legacy hashes, so drift detection keeps working without a re-pull. Idempotent. Fresh clones / new developers have no baselines yet (the store is per-dev and gitignored) — run a plain `pull` first to seed them; until then drift checks log a no-baseline warning and proceed.
-
-### `npm run push -- <org>` — raw push, no pre-pull
-
-Skips the merge pass. Only use when (a) you literally just ran `pull` and (b) you're certain no one has touched the dashboard since. In a multi-developer environment or when dashboard editors are in play, default to `apply` instead. Stale local state can clobber recent dashboard edits or PATCH against UUIDs that no longer exist.
-
-If you do use `push`, dry-run first: `npm run push -- <org> --dry-run`.
-
-#### Per-resource drift gate (before every PATCH)
-
-Before updating a resource, push GETs its current dashboard payload, hashes it, and compares against the stored baseline (`.vapi-state-hash/<org>/<uuid>`):
-
-- **Hashes match** → your local edit is the natural next step in the change chain → pushed silently, and the baseline is refreshed from the PATCH **response** (what the platform actually stored).
-- **Hashes differ** → someone else published changes since your last sync. In a terminal, push asks **for that resource only**: ① push my local version (take ownership) ② keep the dashboard version (skip, local untouched) ③ save the dashboard version as `<name>.<TIMESTAMP>.bkp.<ext>` beside your file and skip, for a manual merge. In CI / piped runs the resource is blocked instead (use `--overwrite` to push unconditionally).
-
-Backup copies (`*.bkp.*`, gitignored) are merge reference material only — invisible to the loader, the orphan gate, audit, the interactive picker, and explicit CLI paths.
-
-#### Orphan-YAML gate (default-on, refuses ambiguous pushes)
-
-`push` refuses by default when any local YAML file lacks a corresponding entry in `.vapi-state.<org>.json`. The engine can't disambiguate "intentionally new resource" vs "rename of an existing resource" vs "stale cruft" from the file alone. Silently treating every orphan as a create has been the spawn-source for duplicate-resource cascades on customer dashboards.
-
-When the gate fires, push exits 1 with a verbose message listing every orphan and pairing them with possible "rename source" candidates (state entries with no matching local file that share a base slug). Read the message — it tells you exactly what to do for each case.
-
-**Override**: `--allow-new-files`. Pass this flag ONLY after confirming with the human operator that each orphan is intentionally a new resource (case a above). For renames (case b), rename the file back and run `npm run pull -- <org>` to re-key state. For stale files (case c), delete them locally.
-
-**FOR AI AGENTS**: when you encounter this gate, do NOT auto-pass `--allow-new-files`. Surface the error message to the human and ask them to classify each orphan. Silent bypass defeats the entire purpose of the gate.
-
-Suppressed automatically when:
-- `--bootstrap` is passed (every file is legitimately "new" in a from-scratch population).
-- The file is matched by `.vapi-ignore` (the engine wasn't going to upload it anyway).
-- A selective push (`-- <path>`) is requested and the orphan is outside the selection.
-
-The same gate fires inside `apply` (which runs pull → merge → push). If pull's rename-detection orphans a local YAML, apply's push stage hits the gate and halts the whole apply with one explicit message. The `--allow-new-files` flag propagates through `apply -- <org> --allow-new-files` to the push stage.
-
-### After-the-fact safety
-
-- **`npm run rollback -- <org> --list`** — every push/apply writes a state snapshot to `.vapi-state.<org>.snapshots/` before mutating. `--to <ISO-timestamp>` re-applies a specific snapshot, effectively undoing the deploy.
-- **`npm run cleanup -- <org>`** (no `--force`) — enumerate orphaned dashboard resources without deleting. Destructive run is double-gated: requires `--force --confirm <org>`.
-- **Surgical alternative to `--force` cleanup:** when the orphan set includes Vapi-default fixtures (see `docs/learnings/simulations.md` — the seven immortal stock personalities), delete individual resources via `curl -X DELETE` against the API, then `npm run pull -- <org> --bootstrap` to refresh state. `--force` halts on the first immortal-default 404 and exits non-zero.
-
-### Pre-flight checklist (memorize this loop)
-
-1. `git status` — uncommitted changes are intentional?
-2. `npm run validate -- <org>` — schema clean?
-3. `npm run apply -- <org>` (or `apply -- <org> <path>` for single-file)
-4. Verify with `npm run call -- <org> -a <name>` and/or `npm run sim -- <org> --suite <name> --target <name>`
-5. If something looks wrong: `npm run rollback -- <org> --list` → `--to <timestamp>`
-
-**Why this matters:** the gitops engine tracks resource UUIDs in `.vapi-state.<org>.json` (pure `name → uuid`) and the last-seen platform content hash per resource in the per-developer `.vapi-state-hash/<org>/<uuid>` store. The pre-PATCH drift gate compares that baseline against the live dashboard, so out-of-band edits — someone edited an assistant in the UI, a teammate ran a different push, a structured output got linked via another path — are detected per resource and surfaced as a per-resource question instead of being silently clobbered. `apply` additionally refreshes local files before mutating, eliminating the stale-state race entirely.
-
----
-
-## Project Structure
-
-```
-docs/
-├── Vapi Prompt Optimization Guide.md          # In-depth prompt authoring
-├── changelog.md                               # Template for tracking per-customer config changes
-└── learnings/                                 # Gotchas, recipes, and troubleshooting
-    ├── README.md                              # Task-routed index — start here
-    ├── tools.md                               # Tool configuration gotchas (incl. dedup behavior)
-    ├── assistants.md                          # Assistant configuration gotchas
-    ├── squads.md                              # Squad and multi-agent gotchas
-    ├── structured-outputs.md                  # Structured output gotchas + KPI patterns
-    ├── simulations.md                         # Simulation and testing gotchas
-    ├── webhooks.md                            # Server and webhook gotchas
-    ├── transfers.md                           # Transfer troubleshooting runbook
-    ├── latency.md                             # Latency optimization guide
-    ├── fallbacks.md                           # Fallback and error handling recipes
-    ├── azure-openai-fallback.md               # Azure OpenAI BYOK multi-region setup
-    ├── multilingual.md                        # Multilingual agent architecture guide
-    ├── websocket.md                           # WebSocket transport rules
-    ├── outbound-agents.md                     # Outbound agent design & IVR navigation
-    ├── outbound-campaigns.md                  # Bulk-dial CSV campaigns + dynamic variables
-    ├── voicemail-detection.md                 # Voicemail vs human classification
-    ├── call-duration.md                       # Call time limits and graceful end-of-call
-    ├── voice-providers.md                     # Per-provider voice block field cheat-sheet
-    └── yaml-conventions.md                    # YAML authoring conventions, .vapi-ignore lifecycle
-
-resources/
-├── <org>/                   # Org-scoped resources (npm run push -- <org> reads here)
-│   ├── assistants/
-│   ├── tools/
-│   ├── squads/
-│   ├── structuredOutputs/
-│   ├── evals/
-│   └── simulations/
-└── <another-org>/           # Another org (each is isolated)
-    └── (same structure)
-```
-
----
-
-## Resource Formats
-
-### Assistants (`.md`) — The Most Important Resource
-
-Assistants are voice agents that handle phone calls. They are defined as **Markdown files with YAML frontmatter**.
-
-**File:** `resources/<org>/assistants/<name>.md`
-
-```markdown
----
-name: My Assistant
-firstMessage: Hi, thanks for calling! How can I help you today?
-voice:
-  provider: 11labs
-  voiceId: your-voice-id-here
-  model: eleven_turbo_v2
-  stability: 0.7
-  similarityBoost: 0.75
-  speed: 1.1
-  enableSsmlParsing: true
-model:
-  provider: openai
-  model: gpt-4.1
-  temperature: 0
-  toolIds:
-    - end-call-tool
-    - transfer-call
-transcriber:
-  provider: deepgram
-  model: nova-3
-  language: en
-  numerals: true
-  confidenceThreshold: 0.5
-endCallFunctionEnabled: true
-endCallMessage: Thank you for calling. Have a great day!
-silenceTimeoutSeconds: 30
-maxDurationSeconds: 600
-backgroundDenoisingEnabled: true
-backgroundSound: off
----
-
-# Identity & Purpose
-
-You are a virtual assistant for the business you represent...
-
-# Workflow
-
-## STEP 1: Greeting
-
-...
-```
-
-**How it works:**
-
-- Everything between `---` markers = **YAML configuration** (voice, model, tools, etc.)
-- Everything below the second `---` = **system prompt** (markdown, sent as the LLM system message)
-- The system prompt IS the core behavior definition — write it like detailed instructions for an AI
-
-#### Key Assistant Settings
-
-| Setting                      | Purpose                                            | Common Values                                                                                                                     |
-| ---------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                       | Display name in Vapi dashboard                     | Any string                                                                                                                        |
-| `firstMessage`               | What the assistant says first when a call connects | Greeting text (supports SSML like `<break time='0.3s'/>`)                                                                         |
-| `firstMessageMode`           | How the first message is generated                 | `assistant-speaks-first` (default, uses `firstMessage`), `assistant-speaks-first-with-model-generated-message` (LLM generates it) |
-| `voice`                      | Text-to-speech configuration                       | See Voice section below                                                                                                           |
-| `model`                      | LLM configuration                                  | See Model section below                                                                                                           |
-| `transcriber`                | Speech-to-text configuration                       | See Transcriber section below                                                                                                     |
-| `endCallFunctionEnabled`     | Allow the assistant to hang up                     | `true` / `false`                                                                                                                  |
-| `endCallMessage`             | What to say when ending the call                   | Text string                                                                                                                       |
-| `silenceTimeoutSeconds`      | Hang up after N seconds of silence                 | `30` typical                                                                                                                      |
-| `maxDurationSeconds`         | Maximum call duration                              | `600` (10 min) typical                                                                                                            |
-| `backgroundDenoisingEnabled` | Reduce background noise                            | `true` / `false`                                                                                                                  |
-| `backgroundSound`            | Ambient sound during pauses                        | `off`, `office`                                                                                                                   |
-| `voicemailMessage`           | Message to leave if voicemail detected             | Text string                                                                                                                       |
-| `hooks`                      | Event-driven actions (see Hooks section)           | Array of hook objects                                                                                                             |
-| `messagePlan`                | Idle message behavior                              | See below                                                                                                                         |
-| `startSpeakingPlan`          | Endpointing configuration                          | See below                                                                                                                         |
-| `stopSpeakingPlan`           | Interruption sensitivity                           | See below                                                                                                                         |
-| `server`                     | Webhook server for tool calls                      | `{ url, timeoutSeconds, credentialId }`                                                                                           |
-| `serverMessages`             | Which events to send to webhook                    | `["end-of-call-report", "status-update"]`                                                                                         |
-| `analysisPlan`               | Post-call analysis configuration                   | See below                                                                                                                         |
-| `artifactPlan`               | What to save after calls                           | See below                                                                                                                         |
-| `observabilityPlan`          | Logging/monitoring                                 | `{ provider: "langfuse", tags: [...] }`                                                                                           |
-| `compliancePlan`             | HIPAA/PCI compliance                               | `{ hipaaEnabled: false, pciEnabled: false }`                                                                                      |
-
-#### Voice Configuration
-
-```yaml
-voice:
-  provider: 11labs # 11labs, playht, cartesia, azure, deepgram, openai, rime, lmnt
-  voiceId: your-voice-id-here # Provider-specific voice ID
-  model: eleven_turbo_v2 # Provider-specific model
-  stability: 0.7 # 0.0-1.0, higher = more consistent
-  similarityBoost: 0.75 # 0.0-1.0, higher = closer to original voice
-  speed: 1.1 # Speech rate multiplier
-  enableSsmlParsing: true # Allow SSML tags in responses
-  inputPunctuationBoundaries: # When to start TTS (chunk boundaries)
-    - "."
-    - "!"
-    - "?"
-    - ";"
-    - ","
-```
-
-#### Model (LLM) Configuration
-
-```yaml
-model:
-  provider: openai # openai, anthropic, google, azure-openai, groq, cerebras
-  model: gpt-4.1 # Provider-specific model name
-  temperature: 0 # 0.0-2.0, lower = more deterministic
-  toolIds: # Tools this assistant can use (reference by filename)
-    - my-tool-name
-    - another-tool
-```
-
-#### Transcriber (STT) Configuration
-
-```yaml
-transcriber:
-  provider: deepgram # deepgram, assemblyai, azure, google, openai, gladia
-  model: nova-3 # Provider-specific model
-  language: en # Language code
-  numerals: true # Convert spoken numbers to digits
-  confidenceThreshold: 0.5 # Minimum confidence to accept transcription
-```
-
-#### Hooks (Event-Driven Actions)
-
-Hooks trigger actions based on call events:
-
-```yaml
-hooks:
-  # Say something when transcription confidence is low
-  - on: assistant.transcriber.endpointedSpeechLowConfidence
-    options:
-      confidenceMin: 0.2
-      confidenceMax: 0.49
-    do:
-      - type: say
-        exact: "I'm sorry, I didn't quite catch that. Could you please repeat?"
-
-  # End call on long customer silence
-  - on: customer.speech.timeout
-    options:
-      timeoutSeconds: 90
-    do:
-      - type: say
-        exact: "I'll be ending the call now. Please feel free to call back anytime."
-      - type: tool
-        tool:
-          type: endCall
-```
-
-#### Message Plan (Idle Behavior)
-
-```yaml
-messagePlan:
-  idleTimeoutSeconds: 15 # Seconds before idle message
-  idleMessages: # Messages to say when idle
-    - "I'm still here if you need assistance."
-    - "Are you still there?"
-  idleMessageMaxSpokenCount: 3 # Max idle messages before giving up
-  idleMessageResetCountOnUserSpeechEnabled: true # Reset counter when user speaks
-```
-
-#### Start Speaking Plan (Endpointing)
-
-Controls when the assistant starts responding after the user stops speaking:
-
-```yaml
-startSpeakingPlan:
-  smartEndpointingPlan:
-    provider: livekit
-    waitFunction: "20 + 500 * sqrt(x) + 2500 * x^3" # Custom wait curve
-```
-
-#### Stop Speaking Plan (Interruption)
-
-```yaml
-stopSpeakingPlan:
-  numWords: 1 # How many user words before assistant stops speaking (lower = more interruptible)
-```
-
-#### Analysis Plan (Post-Call Summaries)
-
-```yaml
-analysisPlan:
-  summaryPlan:
-    enabled: true
-    messages:
-      - role: system
-        content: "Summarize this call concisely. Include: ..."
-      - role: user
-        content: |
-          Here is the transcript:
-          {{transcript}}
-          Here is the ended reason:
-          {{endedReason}}
-```
-
-#### Artifact Plan (Post-Call Data)
-
-```yaml
-artifactPlan:
-  fullMessageHistoryEnabled: true # Save full message history
-  structuredOutputIds: # Run these structured outputs after call
-    - customer-data
-    - call-summary
-```
-
----
-
-### Tools (`.yml`)
-
-Tools are functions the assistant can call during a conversation.
-
-**File:** `resources/<org>/tools/<name>.yml`
-
-#### Function Tool (calls a webhook)
-
-```yaml
-type: function
-async: false
-function:
-  name: get_weather
-  description: Get the current weather for a location
-  strict: true
-  parameters:
-    type: object
-    properties:
-      location:
-        type: string
-        description: The city name
-      unit:
-        type: string
-        enum: [celsius, fahrenheit]
-        description: Temperature unit
-    required:
-      - location
-messages:
-  - type: request-start
-    blocking: true
-    content: "Let me check the weather for you."
-  - type: request-response-delayed
-    timingMilliseconds: 5000
-    content: "Still looking that up."
-server:
-  url: https://my-api.com/weather
-  timeoutSeconds: 20
-  credentialId: optional-credential-uuid # Optional: server auth credential
-  headers: # Optional: custom request headers
-    Content-Type: application/json
-```
-
-#### Transfer Call Tool
-
-```yaml
-type: transferCall
-async: false
-function:
-  name: transfer_call
-  description: Transfer the caller to a human agent
-destinations:
-  - type: number
-    number: "+15551234567"
-    numberE164CheckEnabled: true
-    message: "Please hold while I transfer you."
-    transferPlan:
-      mode: blind-transfer
-      sipVerb: refer
-messages:
-  - type: request-start
-    blocking: false
-```
-
-#### End Call Tool
-
-```yaml
-type: endCall
-async: false
-function:
-  name: end_call
-  description: Allows the agent to terminate the call
-  parameters:
-    type: object
-    properties: {}
-    required: []
-messages:
-  - type: request-start
-    blocking: false
-```
-
-#### Handoff Tool (minimal — usually defined inline in squads)
-
-```yaml
-type: handoff
-function:
-  name: handoff_tool
-```
-
-#### Tool Message Types
-
-| Type                       | Purpose                     | Key Properties                                          |
-| -------------------------- | --------------------------- | ------------------------------------------------------- |
-| `request-start`            | Said when tool is called    | `content`, `blocking` (pause speech until tool returns) |
-| `request-response-delayed` | Said if tool takes too long | `content`, `timingMilliseconds`                         |
-| `request-complete`         | Said when tool returns      | `content`                                               |
-| `request-failed`           | Said when tool errors       | `content`                                               |
-
----
-
-### Structured Outputs (`.yml`)
-
-Structured outputs extract data from call transcripts after the call ends. They run LLM analysis on the conversation.
-
-**File:** `resources/<org>/structuredOutputs/<name>.yml`
-
-#### Boolean Output (yes/no evaluation)
-
-```yaml
-name: success_evaluation
-type: ai
-target: messages
-description: "Determines if the call met its objectives"
-assistant_ids:
-  - a1b2c3d4-e5f6-7890-abcd-ef1234567890
-model:
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0
-schema:
-  type: boolean
-  description: "Return true if the call successfully met its objectives."
-```
-
-#### Object Output (structured data extraction)
-
-```yaml
-name: customer_data
-type: ai
-target: messages
-description: "Extracts customer contact info and call details"
-assistant_ids:
-  - a1b2c3d4-e5f6-7890-abcd-ef1234567890
-model:
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0
-schema:
-  type: object
-  properties:
-    customerName:
-      type: string
-      description: "The customer's full name"
-    customerPhone:
-      type: string
-      description: "The customer's phone number"
-    callReason:
-      type: string
-      description: "Why the customer called"
-      enum: [new_inquiry, existing_project, complaint, spam]
-    appointmentBooked:
-      type: boolean
-      description: "True if an appointment was booked"
-```
-
-#### String Output (free-text summary)
-
-```yaml
-name: call_summary
-type: ai
-target: messages
-description: "Generates a concise summary of the conversation"
-model:
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0
-schema:
-  type: string
-  description: "Summarize the call in 2-3 sentences."
-  minLength: 10
-  maxLength: 500
-```
-
-**Notes:**
-
-- `assistant_ids` uses **Vapi UUIDs** (not local filenames) — these are the IDs of assistants this output applies to
-- `target: messages` means the LLM analyzes the full message history
-- `type: ai` means an LLM generates the output (vs. `type: code` for programmatic)
-- **`schema.type` must be a simple string** (e.g. `type: string`, `type: boolean`, `type: object`). Do NOT use a YAML array like `type: [string, "null"]` — the Vapi dashboard calls `.toLowerCase()` on this field and will crash with `TypeError: .toLowerCase is not a function` if it receives an array. For nullable values, express nullability in the `description` instead (e.g. "Return null if no follow-up is needed")
-
----
-
-### Squads (`.yml`)
-
-Squads define multi-agent systems where assistants can hand off to each other.
-
-**File:** `resources/<org>/squads/<name>.yml`
-
-```yaml
-name: My Squad
-members:
-  - assistantId: intake-agent-a1b2c3d4 # References resources/<org>/assistants/<id>.md
-    assistantOverrides: # Override assistant settings within this squad
-      metadata:
-        position: # Visual position in dashboard editor
-          x: 250
-          y: 100
-      tools:append: # Add tools to this member (in addition to their own)
-        - type: handoff
-          async: false
-          messages: []
-          function:
-            name: handoff_to_Booking_Agent
-            description: "Hand off to booking agent when customer wants to schedule"
-            parameters:
-              type: object
-              properties:
-                reason:
-                  type: string
-                  description: "Why the handoff is happening"
-              required:
-                - reason
-          destinations:
-            - type: assistant
-              assistantName: Booking Assistant # Must match the `name` field in target assistant
-              description: "Handles appointment booking"
-
-  - assistantId: booking-agent-e5f67890
-    assistantOverrides:
-      metadata:
-        position:
-          x: 650
-          y: 100
-      tools:append:
-        - type: handoff
-          async: false
-          messages: []
-          function:
-            name: handoff_back_to_Intake
-            description: "Hand back to intake agent for wrap-up"
-          destinations:
-            - type: assistant
-              assistantName: Intake Assistant
-              description: "Intake agent for call wrap-up"
-
-membersOverrides: # Settings applied to ALL members
-  transcriber:
-    provider: deepgram
-    model: nova-3
-    language: en
-  hooks:
-    - on: customer.speech.timeout
-      options:
-        timeoutSeconds: 90
-      do:
-        - type: say
-          exact: "Ending the call now. Feel free to call back."
-        - type: tool
-          tool:
-            type: endCall
-  observabilityPlan:
-    provider: langfuse
-    tags:
-      - my-tag
-```
-
-**Key Concepts:**
-
-- `assistantId` references an assistant file by filename (without extension)
-- `tools:append` adds handoff tools without replacing the assistant's existing tools
-- Handoff `destinations` link to other squad members by `assistantName` (the `name` field in their YAML frontmatter)
-- `membersOverrides` applies settings to all members (useful for shared transcriber, hooks, etc.)
-- Handoff functions can have parameters that pass context between agents
-
----
-
-### Simulations (Test Infrastructure)
-
-Simulations let you test assistants with automated "caller" personas.
-
-#### Personalities (`simulations/personalities/<name>.yml`)
-
-Define simulated caller behaviors:
-
-```yaml
-name: Skeptical Sam
-assistant:
-  model:
-    provider: openai
-    model: gpt-4.1
-    messages:
-      - role: system
-        content: >
-          You are skeptical and need convincing before trusting information.
-          You question everything and ask for specifics.
-    tools:
-      - type: endCall
-```
-
-#### Scenarios (`simulations/scenarios/<name>.yml`)
-
-Define test case scripts with evaluation criteria:
-
-```yaml
-name: "Happy Path: New customer books appointment"
-instructions: >
-  You are a new customer calling to schedule an appointment.
-  Provide your name as "John Smith", phone as "206-555-1234".
-  Be cooperative and confirm all information.
-  End the call when the assistant confirms the booking.
-evaluations:
-  - structuredOutputId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-    comparator: "="
-    value: true
-    required: true
-```
-
-#### Simulations / Tests (`simulations/tests/<name>.yml`)
-
-Combine a personality with a scenario:
-
-```yaml
-name: Happy Path Test 1
-personalityId: skeptical-sam-a0000001 # References personalities/<id>.yml
-scenarioId: happy-path-booking-a0000002 # References scenarios/<id>.yml
-```
-
-#### Simulation Suites (`simulations/suites/<name>.yml`)
-
-Group simulations into test batches:
-
-```yaml
-name: Booking Flow Tests
-simulationIds:
-  - booking-test-1-a0000001
-  - booking-test-2-a0000002
-  - booking-test-3-a0000003
-```
-
----
-
-## Cross-Resource References
-
-Resources reference each other by **filename without extension**:
-
-| From          | Field                                | References              | Example                                   |
-| ------------- | ------------------------------------ | ----------------------- | ----------------------------------------- |
-| Assistant     | `model.toolIds[]`                    | Tool files              | `- end-call-tool`                          |
-| Assistant     | `artifactPlan.structuredOutputIds[]` | Structured Output files | `- customer-data`                          |
-| Squad         | `members[].assistantId`              | Assistant files         | `assistantId: intake-agent-a1b2c3d4`       |
-| Squad handoff | `destinations[].assistantName`       | Assistant `name` field  | `assistantName: Booking Assistant`         |
-| Simulation    | `personalityId`                      | Personality files       | `personalityId: skeptical-sam-a0000001`   |
-| Simulation    | `scenarioId`                         | Scenario files          | `scenarioId: happy-path-booking-a0000002` |
-| Suite         | `simulationIds[]`                    | Simulation test files   | `- booking-test-1-a0000001`               |
-
-The gitops engine resolves these local filenames to Vapi UUIDs automatically during push.
-
----
-
-## Writing System Prompts (Best Practices)
-
-The markdown body of an assistant `.md` file is the system prompt — the core instructions that define how the AI behaves on a call. This is the most important part to get right.
-
-**Before drafting or changing prompts:** work through **`docs/Vapi Prompt Optimization Guide.md`** so structure, guardrails, and voice-specific habits stay consistent across agents.
-
-### Recommended Structure
-
-```markdown
-# Identity & Purpose
-
-Who the assistant is and what it does.
-
-# Guardrails
-
-Hard rules that override everything else:
-
-- Scope limits (what topics to handle)
-- Data protection (what NOT to collect)
-- Abuse handling
-- Off-topic deflection
-- Fabrication prohibition
-
-# Primary Objectives
-
-Numbered list of what the assistant should accomplish.
-
-# Personality
-
-Tone, style, language constraints.
-
-# Response Guidelines
-
-How to speak, confirm information, format numbers/prices, etc.
-
-# Context
-
-## Business Knowledge Base
-
-Static facts: hours, services, contact info, service areas.
-
-## Customer Context
-
-Dynamic variables: {{ customer.number }}, current date/time.
-
-# Workflow
-
-## STEP 1: ...
-
-## STEP 2: ...
-
-## STEP 3: ...
-
-Detailed step-by-step conversation flow.
-
-# Error Handling
-
-What to do when things go wrong (tool failures, repeated misunderstandings, etc.).
-
-# Example Flows
-
-Concrete example conversations showing expected behavior.
-```
-
-### Tips
-
-- **One question at a time** — Voice agents should never ask multiple questions
-- **Confirm critical fields** — Always repeat back names, phone numbers, addresses
-- **Use SSML** — `<break time='0.5s'/>`, `<flush/>`, `<spell>text</spell>` for voice control
-- **E.164 phone format** — Always store as `+1XXXXXXXXXX`
-- **Guard against jailbreaks** — Include identity lock and prompt protection sections
-- **Template variables** — Use `{{ customer.number }}` for caller phone, `{{"now" | date: "%A, %B %d, %Y"}}` for date/time
-- **Tool call announcements** — Tell the user before calling tools: "Let me check that for you"
-- **Transfer pattern** — Always speak first, then call transfer tool (two-step: say message, then tool call)
-
----
-
-## Available Commands
-
-```bash
-# Setup
-npm run setup                                      # Interactive wizard: private API key, org slug, resource selection
-
-# Sync
-npm run pull -- <org>                              # Pull from Vapi (preserve local changes)
-npm run pull -- <org> --force                      # Pull from Vapi (overwrite everything)
-npm run pull -- <org> --bootstrap                  # Refresh state without writing remote resources locally
-npm run pull -- <org> --type squads --id <uuid>    # Pull one known remote resource by UUID
-npm run push -- <org>                              # Push all local changes to Vapi
-npm run push -- <org> assistants                   # Push only assistants
-npm run push -- <org> resources/<org>/assistants/my-agent.md  # Push single file
-npm run push -- <org> <path1> <path2>              # Push multiple specific files (one state write)
-npm run push -- <org> --dry-run                    # Preview without applying any platform changes
-npm run push -- <org> --strict                     # Abort push if any validator returns an error
-npm run push -- <org> --allow-new-files            # Bypass orphan-YAML gate (use only after confirming each orphan is intentionally new — see "Orphan-YAML gate" section above)
-npm run apply -- <org>                             # Pull then push (full sync)
-npm run apply -- <org> --allow-new-files           # Same, propagating the bypass through to the push stage
-npm run promote -- --pipeline <name> --from <source> --to <target>        # Read-only promotion plan
-npm run promote -- --pipeline <name> --from <source> --to <target> --apply # Forward-only scoped mirror + deploy
-npm run validate -- <org>                          # Lint resources locally (fails fast on schema drift)
-npm run audit -- <org>                             # Read-only drift detector: orphan YAML, state ghosts, content-identical clusters, sibling base-slugs, dashboard orphans, inline model.tools. Exit 1 on findings.
-npm run audit -- <org> --type assistants           # Scope audit to a single resource type
-npm run sim -- <org> --suite <name> --target <name>  # Run a simulation suite against an assistant/squad (exit 0 pass, 1 fail, 3 incomplete; --timeout <min>)
-npm run check -- <check>                          # Run a vapi-checks.yml check inline against the local files (exit 0 pass, 1 fail, 2 config/build error, 3 incomplete; --changed-since <ref>, --budget-minutes <n>, --json <path>)
-npm run check -- <check> --dry-run                # Build the check's inline run payloads offline, no key needed (--print-payload [dir])
-npm run rollback -- <org> --to <ISO-timestamp>     # Re-apply a snapshot taken before a push
-npm run rollback -- <org> --list                   # List available snapshots
-
-# Testing
-npm run call -- <org> -a <assistant-name>          # Call an assistant via WebSocket
-npm run call -- <org> -s <squad-name>              # Call a squad via WebSocket
-
-# Maintenance
-npm run cleanup -- <org>                           # Dry-run: show orphaned remote resources
-npm run cleanup -- <org> --force                   # Delete orphaned remote resources
-
-# Build
-npm run build                                      # Type-check
-```
-
-All commands accept an org slug (e.g. `my-org`). Running without arguments launches interactive mode.
-
-### `npm run call` CLI behavior
-
-The test-call CLI cleans its terminal output for the developer loop:
-
-- **Coalesced transcripts.** Chunked TTS providers (Cartesia Sonic, etc.) stream each utterance as 2–4 separate `final` transcript events. The CLI buffers consecutive finals from the same role and flushes them as one merged `🤖 Assistant:` / `🎤 You:` line after a 600 ms quiet window, on role change, on `speech-update` from the opposite role, on `call-ended`, and on Ctrl+C.
-- **Suppressed `mpg123` warnings.** macOS speaker output emits `Didn't have any audio data in callback (buffer underflow)` lines from native code on every chunk-boundary gap. The `npm run call` script wraps invocation in `bash -c` + a stderr filter that drops these lines so they no longer dominate the log. Requires `bash` on `PATH` (universal on macOS, Linux, WSL).
-- **Tool / handoff / status visibility.** The CLI surfaces previously-dropped WebSocket control messages:
-  - `🔧 Tool call: <name>(<args>)` — regular tool invocations
-  - `🔀 Handoff → <Target Name>` — squad handoffs (detected from `handoff_to_<Target_Name>` function names)
-  - `✅ Tool result: <name> → <preview>` / `❌ Tool failed: <name> → <preview>` — tool responses, truncated to 200 chars
-  - `📞 Status: <state>[+reason]` — `in-progress`, `forwarding`, `ended`
-  - `⚠️ Hang warning` — impending termination
-  - `🔀 Transfer → <destination>` — number / SIP / cross-assistant transfers
-- **Discovery mode.** Set `VAPI_CALL_DEBUG=1` in the environment to log unknown control message types (high-frequency events like `conversation-update`, `model-output`, `function-call`, `user-interrupted` are silently dropped by default to keep the log readable):
-
-  ```bash
-  VAPI_CALL_DEBUG=1 npm run call -- <org> -s <squad>
-  ```
-
-These are CLI-only changes — no runtime behavior change for the agent, no per-customer config required. Every downstream customer clone of this template inherits them automatically.
-
----
-
-## Discovering Available Settings
-
-For the **complete schema** of all available properties on each resource type, consult the Vapi API documentation:
-
-| Resource           | API Docs                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------- |
-| Assistants         | https://docs.vapi.ai/api-reference/assistants/create                                      |
-| Tools              | https://docs.vapi.ai/api-reference/tools/create                                           |
-| Squads             | https://docs.vapi.ai/api-reference/squads/create                                          |
-| Structured Outputs | https://docs.vapi.ai/api-reference/structured-outputs/structured-output-controller-create |
-| Simulations        | https://docs.vapi.ai/api-reference/simulations                                            |
-
-**For voice/model/transcriber provider options:**
-
-- Voice providers: https://docs.vapi.ai/providers/voice
-- Model providers: https://docs.vapi.ai/providers/model
-- Transcriber providers: https://docs.vapi.ai/providers/transcriber
-
-**For feature-specific documentation:**
-
-- Hooks: https://docs.vapi.ai/assistants/hooks
-- Tools: https://docs.vapi.ai/tools
-- Squads: https://docs.vapi.ai/squads
-- Workflows: https://docs.vapi.ai/workflows
-
-> **Tip:** The Vapi MCP server and API reference pages provide full JSON schemas with all available fields, enums, and defaults. Use them to discover settings not covered in this guide.
-
----
-
-## Naming Conventions
-
-- **Filenames** include a UUID suffix for uniqueness: `my-agent-a1b2c3d4.md`
-- The UUID suffix comes from the Vapi platform ID (first 8 chars of the UUID)
-- New resources created locally don't need the UUID suffix — it gets added after first push
-- **Tool function names** use `snake_case`: `book_appointment`, `check_availability`
-- **Assistant names** use natural language: `Intake Assistant`, `Booking Assistant`
-- **Structured output names** use `snake_case`: `customer_data`, `call_summary`
-
-### Renaming an existing resource
-
-**The local filename is a stable handle, decoupled from the dashboard `name`.** State maps `<filename-slug> → UUID`. As long as a file exists for a state entry, the engine keeps that filename — you can name a file `blub-blub-blub.md` and it stays put regardless of what the resource is called on the dashboard.
-
-What this means in practice for renames:
-
-| Approach | What happens |
-|---|---|
-| Rename the resource in the dashboard, then `npm run pull -- <org>` | UUID preserved. The local filename is **unchanged** — pull only updates the file's content (the new `name:` lands in the frontmatter). No second file, no orphan. This holds even under `--force` / "overwrite" — overwrite replaces content, never the filename. |
-| Rename the file locally + `npm run push -- <org>` | The renamed file has no state entry, so the orphan-YAML gate fires (it can't tell a rename from a new resource). Re-key state instead: rename in the dashboard first and pull, or accept a new UUID by pushing with `--allow-new-files` and cleaning up the old orphan via `npm run cleanup -- <org> --force`. |
-
-Because dashboard renames no longer change the local filename, the old "rename in the dashboard to preserve the UUID" dance is unnecessary — the UUID is always preserved on pull for any already-tracked resource.
-
----
-
-## Common Patterns
-
-### Transfer to Human
-
-Two-step pattern (speak first, then call tool):
-
-In the system prompt:
-
-```
-When transferring to human:
-1. First: Speak transfer message ending with <break time='0.5s'/><flush/>
-2. Second: Call transfer_call with no spoken text
-```
-
-### Multi-Agent Handoff (Squad)
-
-1. Create each agent as a separate assistant `.md` file
-2. Create a squad `.yml` that lists them as members
-3. Define handoff tools in `tools:append` on each member
-4. Handoff functions can pass parameters (context) between agents
-
-### Post-Call Data Extraction
-
-1. Create structured outputs for the data you want
-2. Reference them in the assistant's `artifactPlan.structuredOutputIds`
-3. After each call, Vapi runs the LLM analysis and stores results
-
-### Testing with Simulations
-
-1. Create personalities (how the simulated caller behaves)
-2. Create scenarios (what the simulated caller says + evaluation criteria)
-3. Create simulations (pair personality + scenario)
-4. Create suites (batch simulations together)
-5. Run against the deployed resources with `npm run sim`, or against the local files (nothing deployed) with `npm run check` — see [docs/guides/pr-checks.md](docs/guides/pr-checks.md). The PR workflow runs `npm run check` on every affected PR when `VAPI_CHECKS_ENABLED=true`
+## Reference
+
+| Topic | Read |
+| --- | --- |
+| Every resource setting, with examples | [Resource reference](docs/guides/resource-reference.md) |
+| Minimal tested files | [File formats](docs/guides/file-formats.md), [`examples/starter/`](examples/starter/README.md) |
+| System prompts | [Writing system prompts](docs/guides/writing-prompts.md), [Vapi Prompt Optimization Guide](docs/Vapi%20Prompt%20Optimization%20Guide.md) |
+| Commands, flags, test-call output | [Commands](docs/guides/commands.md) |
+| Sync, conflicts, drift, output icons | [How the engine works](docs/guides/how-it-works.md), [sync behavior](docs/learnings/sync-behavior.md) |
+| Environment variables and config files | [Configuration](docs/guides/configuration.md) |
+| Errors | [Troubleshooting](docs/guides/troubleshooting.md) |
+| Complete API schemas | [Vapi API reference](https://docs.vapi.ai/api-reference) |

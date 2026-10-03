@@ -46,6 +46,19 @@ Squad push
   └─ all references resolved → create the squad ✓
 ```
 
+## Join an existing repository
+
+After cloning a repository someone else set up, connect each org (see the
+README's quick start), then run a plain pull before your first deploy:
+
+```bash
+npm run pull -- <org>
+```
+
+This seeds your local drift baselines (`.vapi-state-hash/`, per developer and
+gitignored), so later pulls and deploys can tell your edits from changes made
+in the dashboard.
+
 ## Start in a fresh org
 
 ```bash
@@ -172,6 +185,12 @@ npm run cleanup -- <org>
 # Destructive run — requires explicit confirmation:
 npm run cleanup -- <org> --force --confirm <org>
 ```
+
+**Check the dry-run list before a destructive run.** Cleanup treats every
+platform resource that isn't in `.vapi-state.<org>.json` as an orphan, and it
+does not read `.vapi-ignore`: resources you've excluded with `.vapi-ignore`
+are never in the state file, so they appear in the list and `--force` would
+delete them.
 
 **When the list includes Vapi's built-in fixtures** (for example the stock
 simulation personalities, which can't be deleted — see
