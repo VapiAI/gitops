@@ -8,8 +8,12 @@ import type { StateFile } from "../src/types.ts";
 // against `POST /eval/simulation/run` is integration territory and is
 // covered manually against a sandbox org.
 
-function makeState(overrides: Partial<StateFile> = {}): StateFile {
-  return {
+// Overrides take `name → uuid` for brevity and become the `{ uuid }` state
+// shape.
+function makeState(
+  overrides: Partial<Record<keyof StateFile, Record<string, string>>> = {},
+): StateFile {
+  const state: StateFile = {
     credentials: {},
     assistants: {},
     structuredOutputs: {},
@@ -20,8 +24,13 @@ function makeState(overrides: Partial<StateFile> = {}): StateFile {
     simulations: {},
     simulationSuites: {},
     evals: {},
-    ...overrides,
   };
+  for (const [section, entries] of Object.entries(overrides)) {
+    state[section as keyof StateFile] = Object.fromEntries(
+      Object.entries(entries).map(([name, uuid]) => [name, { uuid }]),
+    );
+  }
+  return state;
 }
 
 test("resolveTarget: resolves assistant by local name to UUID", () => {
@@ -110,27 +119,12 @@ test("resolveSelection: rejects both suite and simulations simultaneously", () =
   );
 });
 
-test("resolveTarget: handles forward-compat ResourceState shape (Stack F)", () => {
-  // Stack F migrates state values from `string` to `{uuid: string, ...}`.
-  // The resolver must accept both shapes so this stack lands cleanly
-  // before F or after.
-  const state = {
-    credentials: {},
-    assistants: {
-      "future-agent": {
-        uuid: "uuid-future",
-        lastPulledHash: "abc123",
-      } as unknown as string,
-    },
-    structuredOutputs: {},
-    tools: {},
-    squads: {},
-    personalities: {},
-    scenarios: {},
-    simulations: {},
-    simulationSuites: {},
-    evals: {},
-  } as StateFile;
-  const target = resolveTarget(state, { assistant: "future-agent" });
-  assert.equal(target.id, "uuid-future");
+test("resolveTarget: still accepts a legacy bare-string state value", () => {
+  // `loadStateFile` reads the state JSON without migrating it, so a legacy
+  // file can still hold `name → "uuid"`. The resolver accepts both shapes.
+  const state = makeState();
+  (state.assistants as Record<string, unknown>)["legacy-agent"] =
+    "uuid-legacy";
+  const target = resolveTarget(state, { assistant: "legacy-agent" });
+  assert.equal(target.id, "uuid-legacy");
 });

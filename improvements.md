@@ -1709,6 +1709,16 @@ so `npm run build` never typechecks them and the compiler could not have
 caught these stale fixture shapes. Including them surfaces 37 existing type
 errors today; widening `include` is a separate change.
 
+**Follow-up 2026-10-01:** `tsconfig.json` now includes `tests/`, so
+`npm run build` and CI type-check the tests too. The 37 errors were all
+fixture drift: state entries still carrying `lastPulledHash` /
+`lastPushedHash` or bare-string values, an untyped `emptyLoaded()` fixture,
+and one real gap — the `reconcile-state-key` harness never passed the
+required `formatError`, so any test reaching that error path would have
+thrown a `TypeError` instead of exercising it. Fixtures now use the `{ uuid }`
+shape and mark "which copy won" with distinct UUIDs instead of removed hash
+fields.
+
 ---
 
 ## Out of scope (intentionally not improvements)

@@ -142,6 +142,8 @@ async function runReconcile(opts: RunOpts): Promise<void> {
       return existing ?? `uuid-${r.resourceId}-created`;
     },
     vapiEnv: "test-env",
+    formatError: (resourceId, error) =>
+      `${resourceId}: ${error instanceof Error ? error.message : String(error)}`,
   });
 }
 

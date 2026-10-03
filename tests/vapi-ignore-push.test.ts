@@ -644,7 +644,18 @@ test("findOrphanedResources: an explicit file scope cannot delete sibling orphan
 // for any squad/assistant that references an ignored assistant id.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function emptyLoaded() {
+function emptyLoaded(): Record<
+  | "tools"
+  | "structuredOutputs"
+  | "assistants"
+  | "squads"
+  | "personalities"
+  | "scenarios"
+  | "simulations"
+  | "simulationSuites"
+  | "evals",
+  { resourceId: string; filePath: string; data: Record<string, unknown> }[]
+> {
   return {
     tools: [],
     structuredOutputs: [],

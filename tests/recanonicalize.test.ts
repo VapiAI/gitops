@@ -189,16 +189,11 @@ test("recanonicalize: AUTO-RESOLVES when canonical slug claims the SAME UUID (du
   // SAME uuid_A. This is not a twin — it's one resource aliased twice.
   // Safe action: drop the UUID-suffixed key (canonical wins). Reported
   // as a rekey, not a conflict.
+  const canonical = makeStateEntry("aaaaaaaa-0000-0000-0000-000000000000");
   const state = makeStateFile({
     squads: {
-      foo: {
-        uuid: "aaaaaaaa-0000-0000-0000-000000000000",
-        lastPulledHash: "canonical-hash",
-      },
-      "foo-aaaaaaaa": {
-        uuid: "aaaaaaaa-0000-0000-0000-000000000000",
-        lastPulledHash: "stale-hash",
-      },
+      foo: canonical,
+      "foo-aaaaaaaa": makeStateEntry("aaaaaaaa-0000-0000-0000-000000000000"),
     },
   });
   const report = recanonicalizeStateKeys({
@@ -214,7 +209,7 @@ test("recanonicalize: AUTO-RESOLVES when canonical slug claims the SAME UUID (du
   // Canonical entry survives unchanged (its metadata is presumed
   // authoritative — we discard the stale alias, not merge metadata).
   assert.deepEqual(Object.keys(state.squads), ["foo"]);
-  assert.equal(state.squads["foo"]!.lastPulledHash, "canonical-hash");
+  assert.equal(state.squads["foo"], canonical);
 });
 
 test("recanonicalize: refuses when canonical local file is missing (would create phantom state mapping)", () => {

@@ -23,5 +23,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": ["src/**/*"]
+  // tests/ is included so `npm run build` (and CI) type-checks the tests,
+  // not only src/. tsx runs tests without type-checking.
+  "include": ["src/**/*", "tests/**/*"]
 }
