@@ -1,4 +1,4 @@
-import type { ResourceState, StateFile } from "./types.ts";
+import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ID Resolution - Convert resource IDs to Vapi UUIDs
@@ -358,8 +358,10 @@ export function extractReferencedIds(
   const scenarios: string[] = [];
   const simulations: string[] = [];
 
-  // Helper to clean IDs (remove comments)
-  const cleanId = (id: string) => id.split("##")[0]?.trim() ?? "";
+  // Helper to clean IDs (remove comments). A non-string entry (an empty
+  // `- ` list item, an object) comes back as "" instead of throwing.
+  const cleanId = (id: unknown) =>
+    typeof id === "string" ? (id.split("##")[0]?.trim() ?? "") : "";
 
   // Check root level toolIds
   if (Array.isArray(data.toolIds)) {
@@ -454,4 +456,55 @@ export function extractReferencedIds(
     scenarios,
     simulations,
   };
+}
+
+// The reference fields push resolves by name, by the type they name, and the
+// resource types that can carry them.
+export const REFERENCE_TYPES: Array<{
+  refKey: keyof ExtractedReferences;
+  refType: ResourceType;
+}> = [
+  { refKey: "tools", refType: "tools" },
+  { refKey: "structuredOutputs", refType: "structuredOutputs" },
+  { refKey: "assistants", refType: "assistants" },
+  { refKey: "personalities", refType: "personalities" },
+  { refKey: "scenarios", refType: "scenarios" },
+  { refKey: "simulations", refType: "simulations" },
+];
+
+export const RESOURCE_TYPES_WITH_REFS: ResourceType[] = [
+  "tools",
+  "structuredOutputs",
+  "assistants",
+  "squads",
+  "personalities",
+  "scenarios",
+  "simulations",
+  "simulationSuites",
+  "evals",
+];
+
+// Every reference push resolves, by type: `extractReferencedIds` plus scenario
+// judges' `evaluations[].structuredOutputId`, which resolveReferences handles
+// separately. Names are cleaned of `##` comments; "" marks an entry that is
+// empty or isn't a name. One collector for every reference rule, so a field
+// can't be checked by one rule and missed by another.
+export function referencesCollect(
+  data: Record<string, unknown>,
+): Map<ResourceType, string[]> {
+  const extracted = extractReferencedIds(data);
+  const refs = new Map<ResourceType, string[]>();
+  for (const { refKey, refType } of REFERENCE_TYPES)
+    refs.set(refType, [...extracted[refKey]]);
+  if (Array.isArray(data.evaluations))
+    for (const evaluation of data.evaluations) {
+      if (!evaluation || typeof evaluation !== "object") continue;
+      if (!("structuredOutputId" in evaluation)) continue;
+      const id = (evaluation as { structuredOutputId?: unknown })
+        .structuredOutputId;
+      refs
+        .get("structuredOutputs")!
+        .push(typeof id === "string" ? (id.split("##")[0]?.trim() ?? "") : "");
+    }
+  return refs;
 }

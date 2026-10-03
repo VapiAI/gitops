@@ -135,7 +135,8 @@ precisely.
    run it locally for the org it names and fix the errors. Without that org's
    `.env.<org>`, run `VAPI_PRIVATE_API_KEY=validate-only npm run validate -- <org>`;
    never ask for a real key just to validate. Don't weaken the check or the
-   workflow to get past it.
+   workflow to get past it, and never edit the state file or `.vapi-ignore`
+   to make a reference resolve: fix the name, or pull.
 4. **Build PR checks offline** if `vapi-checks.yml` exists:
    `npm run check -- --all --dry-run`. Fix anything it reports.
 5. **Deploy only with a yes** (safety rule 1): `npm run apply -- <org>`, or

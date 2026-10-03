@@ -15,7 +15,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { matchesIgnore } from "./config.ts";
-import { extractReferencedIds } from "./resolver.ts";
+import { RESOURCE_TYPES_WITH_REFS, referencesCollect } from "./resolver.ts";
 import { FOLDER_MAP } from "./resources.ts";
 import type { LoadedResources, ResourceFile, ResourceType } from "./types.ts";
 
@@ -429,41 +429,17 @@ function checkVoiceSchemas(resources: LoadedResources): ValidationFinding[] {
 // Promote it to a blocking validation finding.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const REF_TYPE_KEYS: Array<{
-  refKey: keyof ReturnType<typeof extractReferencedIds>;
-  refType: ResourceType;
-}> = [
-  { refKey: "tools", refType: "tools" },
-  { refKey: "structuredOutputs", refType: "structuredOutputs" },
-  { refKey: "assistants", refType: "assistants" },
-  { refKey: "personalities", refType: "personalities" },
-  { refKey: "scenarios", refType: "scenarios" },
-  { refKey: "simulations", refType: "simulations" },
-];
-
-const RESOURCE_TYPES_WITH_REFS: ResourceType[] = [
-  "tools",
-  "structuredOutputs",
-  "assistants",
-  "squads",
-  "personalities",
-  "scenarios",
-  "simulations",
-  "simulationSuites",
-  "evals",
-];
-
 function checkResourceRefs(
   resource: ResourceFile,
   type: ResourceType,
   ignorePatterns: string[],
 ): ValidationFinding[] {
   const findings: ValidationFinding[] = [];
-  const refs = extractReferencedIds(resource.data as Record<string, unknown>);
+  const refs = referencesCollect(resource.data as Record<string, unknown>);
 
-  for (const { refKey, refType } of REF_TYPE_KEYS) {
+  for (const [refType, ids] of refs) {
     const folder = FOLDER_MAP[refType];
-    for (const refId of refs[refKey]) {
+    for (const refId of ids) {
       if (!refId) continue;
       const matched = matchesIgnore(folder, refId, ignorePatterns);
       if (!matched) continue;
@@ -533,4 +509,23 @@ export function summarizeFindings(findings: ValidationFinding[]): string {
   );
   for (const f of findings) lines.push(formatFinding(f));
   return lines.join("\n");
+}
+
+// Format a finding as a GitHub Actions workflow command, so it shows on the
+// file in the pull request rather than only in the job log. `file` is
+// relative to the repository root.
+export function findingAnnotation(f: ValidationFinding, file?: string): string {
+  const escapeData = (s: string) =>
+    s.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  const escapeProperty = (s: string) =>
+    escapeData(s).replace(/:/g, "%3A").replace(/,/g, "%2C");
+  const command = f.severity === "error" ? "error" : "warning";
+  const properties = [
+    ...(file ? [`file=${escapeProperty(file)}`] : []),
+    `title=${escapeProperty(`${f.rule}: ${f.type}/${f.resourceId}`)}`,
+  ];
+  const where = f.fieldPath ? ` (${f.fieldPath})` : "";
+  return `::${command} ${properties.join(",")}::${escapeData(
+    `${f.type}/${f.resourceId}${where}: ${f.message}`,
+  )}`;
 }

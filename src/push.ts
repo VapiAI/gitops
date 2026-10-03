@@ -39,6 +39,7 @@ import {
   validateNoIgnoredReferences,
   validateResources,
 } from "./validate.ts";
+import { validateReferences } from "./validate-refs.ts";
 
 // Map a resource label to its state-file key. Used for snapshotting —
 // snapshot directories are keyed by the same names the state file uses.
@@ -1714,6 +1715,12 @@ async function main(): Promise<void> {
       // a config that references an ignored resource is a contradiction the
       // operator should see.
       ...validateNoIgnoredReferences(loadedResources, loadIgnorePatterns()),
+      ...validateReferences({
+        loaded: loadedResources,
+        org: VAPI_ENV,
+        state,
+        ignorePatterns: loadIgnorePatterns(),
+      }),
     ];
     if (findings.length > 0) {
       console.log(summarizeFindings(findings));
