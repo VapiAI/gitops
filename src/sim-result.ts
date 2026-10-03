@@ -40,11 +40,25 @@ export interface SimRunEvaluation {
   error?: string;
 }
 
+// One transcript message. Tool calls arrive as `tool_calls` (with ids and
+// function names) and their answers as `tool_call_result` (by call id).
+export interface SimRunMessage {
+  role?: string;
+  message?: string;
+  name?: string;
+  toolCallId?: string;
+  result?: unknown;
+  toolCalls?: Array<{ id?: string; function?: { name?: string } }>;
+}
+
 export interface SimRunItem {
   id: string;
   status?: string;
   results?: { passed?: boolean; evaluations?: SimRunEvaluation[] };
-  metadata?: { simulation?: { name?: string } };
+  metadata?: {
+    simulation?: { name?: string };
+    call?: { messages?: SimRunMessage[] };
+  };
 }
 
 export type SimRunVerdictStatus = "passed" | "failed" | "incomplete";

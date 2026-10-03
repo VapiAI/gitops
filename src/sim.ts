@@ -222,7 +222,7 @@ export function resolveSelection(
 
 // Fields of `POST /eval/simulation/run`'s response this runner reads. The
 // create response is the only place `url` and `simulationRunItemIds` appear.
-interface SimRunCreated extends SimRun {
+export interface SimRunCreated extends SimRun {
   url?: string;
   simulationRunItemIds?: string[];
 }
@@ -311,30 +311,30 @@ export async function simRunCancel(
   }
 }
 
-export async function runSimulation(
-  cfg: SimEnv,
-  selection: SimSelection,
-  target: SimTarget,
-  options: SimRunOptions = {},
-): Promise<SimRunSummary> {
-  const connection = connectionFor(cfg);
-  const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
-  const body: Record<string, unknown> = {
-    simulations: selection.entries,
-    target:
-      target.type === "assistant"
-        ? { type: "assistant", assistantId: target.id }
-        : { type: "squad", squadId: target.id },
-    transport: {
-      provider:
-        options.transport === "chat" ? "vapi.webchat" : "vapi.websocket",
-    },
-  };
-  if (options.iterations !== undefined) body.iterations = options.iterations;
+export interface SimRunExecuteOptions extends SimRunOptions {
+  // Called with the create response, before polling (prints the link, or
+  // posts a pending commit status pointing at it).
+  onCreated?: (created: SimRunCreated) => void | Promise<void>;
+  // Rewrite a "Status: …" line on a TTY while polling. Off when several runs
+  // poll at once.
+  progress?: boolean;
+}
 
-  console.log(
-    `🧪 Starting simulation run — ${selection.label} → ${target.type}/${target.resourceName}`,
-  );
+export interface SimRunExecuted {
+  summary: SimRunSummary;
+  items: SimRunItem[];
+}
+
+// Create a run from `body`, poll it until it ends or the deadline passes
+// (canceling it then, or on abort), wait for its items, and judge it with
+// simRunVerdict. Shared by `npm run sim` and the PR check.
+export async function simRunExecute(
+  connection: VapiConnection,
+  body: unknown,
+  options: SimRunExecuteOptions = {},
+): Promise<SimRunExecuted> {
+  const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
+  const progress = options.progress ?? true;
   const start = Date.now();
   // Creating a run queues paid work before the response returns, so a 5xx
   // here may still have started it: retry rate limits only.
@@ -349,8 +349,7 @@ export async function runSimulation(
   if (!runId) {
     throw new Error("POST /eval/simulation/run returned no run id");
   }
-  console.log(`   Run ID: ${runId}`);
-  if (created.url) console.log(`   Run: ${created.url}`);
+  await options.onCreated?.(created);
 
   const summary: SimRunSummary = {
     runId,
@@ -362,7 +361,7 @@ export async function runSimulation(
   };
   if (!(options.watch ?? true)) {
     summary.durationMs = Date.now() - start;
-    return summary;
+    return { summary, items: [] };
   }
 
   const deadline = start + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -387,11 +386,11 @@ export async function runSimulation(
       "GET",
       `/eval/simulation/run/${runId}`,
     );
-    if (process.stdout.isTTY) {
+    if (progress && process.stdout.isTTY) {
       process.stdout.write(`\r   Status: ${run.status ?? "unknown"}     `);
     }
   }
-  if (process.stdout.isTTY) process.stdout.write("\n");
+  if (progress && process.stdout.isTTY) process.stdout.write("\n");
 
   if (stopReason) {
     summary.canceled = await simRunCancel(connection, runId);
@@ -403,7 +402,7 @@ export async function runSimulation(
       failures: [],
     };
     summary.durationMs = Date.now() - start;
-    return summary;
+    return { summary, items: [] };
   }
 
   // Items can lag the run: keep re-reading until every item is terminal and
@@ -432,6 +431,38 @@ export async function runSimulation(
     expected: created.simulationRunItemIds?.length,
   });
   summary.durationMs = Date.now() - start;
+  return { summary, items };
+}
+
+export async function runSimulation(
+  cfg: SimEnv,
+  selection: SimSelection,
+  target: SimTarget,
+  options: SimRunOptions = {},
+): Promise<SimRunSummary> {
+  const body: Record<string, unknown> = {
+    simulations: selection.entries,
+    target:
+      target.type === "assistant"
+        ? { type: "assistant", assistantId: target.id }
+        : { type: "squad", squadId: target.id },
+    transport: {
+      provider:
+        options.transport === "chat" ? "vapi.webchat" : "vapi.websocket",
+    },
+  };
+  if (options.iterations !== undefined) body.iterations = options.iterations;
+
+  console.log(
+    `🧪 Starting simulation run — ${selection.label} → ${target.type}/${target.resourceName}`,
+  );
+  const { summary } = await simRunExecute(connectionFor(cfg), body, {
+    ...options,
+    onCreated: (created) => {
+      console.log(`   Run ID: ${created.id}`);
+      if (created.url) console.log(`   Run: ${created.url}`);
+    },
+  });
   return summary;
 }
 
