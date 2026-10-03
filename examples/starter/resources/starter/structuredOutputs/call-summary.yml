@@ -1,5 +1,7 @@
 name: call-summary
 type: ai
+assistant_ids:
+  - receptionist
 description: Summarizes the call for the front-desk log.
 schema:
   type: object

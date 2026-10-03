@@ -114,6 +114,9 @@ PR push. It asks for `statuses: write` only to post the direct links.
   `promotion.yml`, the engine (`src/**`, `package*.json`), nor the check's
   own `paths` skip it, and `Vapi Evals` posts success.
 - A newer push cancels the older run.
+- Separately, the **Validate resources** check (in `ci.yml`) runs
+  `npm run validate` on every org, including resources no check targets.
+  It's offline and runs whether or not PR checks are turned on.
 
 ## 7. Make it required (after a burn-in)
 
