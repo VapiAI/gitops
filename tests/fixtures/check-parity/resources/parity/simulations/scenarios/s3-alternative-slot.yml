@@ -1,0 +1,21 @@
+name: S3 alternative slot
+instructions: You are Priya Shah, phone 206-555-0177. You want a teeth cleaning next Tuesday. If Tuesday is not available, accept Wednesday at 11:00 if it is offered. Once the clinic confirms, say thanks and goodbye.
+evaluations:
+  - structuredOutputId: offered-alternative
+    comparator: "="
+    value: true
+    required: true
+  - structuredOutputId: booked-wednesday
+    comparator: "="
+    value: true
+    required: true
+toolMocks:
+  - toolName: lookup_patient
+    result: '{"found":true,"patientId":"P-1002","name":"Priya Shah"}'
+    enabled: true
+  - toolName: check_availability
+    result: '{"date":"next Tuesday","slots":[],"alternatives":[{"date":"next Wednesday","time":"11:00"},{"date":"next Thursday","time":"15:30"}]}'
+    enabled: true
+  - toolName: book_appointment
+    result: '{"success":true,"confirmation":"BK-7790","date":"next Wednesday","time":"11:00"}'
+    enabled: true

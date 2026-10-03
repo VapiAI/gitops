@@ -1,0 +1,4 @@
+name: booked-wednesday
+schema:
+  type: boolean
+  description: "Did the clinic confirm a booking for next Wednesday at 11:00?"

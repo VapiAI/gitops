@@ -19,6 +19,7 @@
     "validate": "tsx src/validate-cmd.ts",
     "audit": "tsx src/audit-cmd.ts",
     "sim": "tsx src/sim-cmd.ts",
+    "check": "tsx src/check-cmd.ts",
     "rollback": "tsx src/rollback-cmd.ts",
     "promote": "tsx src/promote-cmd.ts",
     "build": "tsc --noEmit",

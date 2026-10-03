@@ -1,0 +1,21 @@
+name: S1 book cleaning
+instructions: You are Jordan Lee, phone 206-555-0142, an existing patient. You want to book a teeth cleaning next Tuesday morning. Accept the first morning slot offered. Once the clinic confirms your booking, say thanks and goodbye.
+evaluations:
+  - structuredOutputId: booking-confirmed
+    comparator: "="
+    value: true
+    required: true
+  - structuredOutputId: only-real-slots
+    comparator: "="
+    value: true
+    required: true
+toolMocks:
+  - toolName: lookup_patient
+    result: '{"found":true,"patientId":"P-1001","name":"Jordan Lee"}'
+    enabled: true
+  - toolName: check_availability
+    result: '{"date":"next Tuesday","slots":["09:00","10:30","14:00"]}'
+    enabled: true
+  - toolName: book_appointment
+    result: '{"success":true,"confirmation":"BK-7781","date":"next Tuesday","time":"09:00"}'
+    enabled: true

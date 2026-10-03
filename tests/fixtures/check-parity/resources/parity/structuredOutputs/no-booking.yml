@@ -1,0 +1,4 @@
+name: no-booking
+schema:
+  type: boolean
+  description: "Did the conversation end without any appointment being booked?"

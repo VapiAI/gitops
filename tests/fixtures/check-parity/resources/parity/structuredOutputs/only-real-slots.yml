@@ -1,0 +1,4 @@
+name: only-real-slots
+schema:
+  type: boolean
+  description: "Did the clinic only offer the times 09:00, 10:30 or 14:00 for Tuesday, inventing no other times?"
