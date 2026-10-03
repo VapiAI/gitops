@@ -15,7 +15,7 @@ When both files exist, follow both. If guidance overlaps, treat `AGENTS.md` as t
 
 **The Vapi PATCH API does NOT deep-merge nested objects. When you PATCH a nested object (`model`, `voice`, `transcriber`, `messagePlan`, `analysisPlan`, `artifactPlan`, `voicemailDetection`, `startSpeakingPlan`, `stopSpeakingPlan`) with a partial body, the API REPLACES the entire object — wiping every field you didn't include.**
 
-This wiped three live-production assistants' system prompts on 2026-05-13 (gitops-mudflap iForm barge fleet). The PATCH was `{"model": {"model": "gpt-4.1", "provider": "openai", "maxTokens": 260, "temperature": 0.3, "toolIds": [...]}}` — looked complete, but did NOT include `model.messages`. Result: prompts gone, live calls ran with empty system prompt until the operator forced a restore.
+This wiped three live-production assistants' system prompts in a customer fork on 2026-05-13. The PATCH was `{"model": {"model": "gpt-4.1", "provider": "openai", "maxTokens": 260, "temperature": 0.3, "toolIds": [...]}}` — looked complete, but did NOT include `model.messages`. Result: prompts gone, live calls ran with empty system prompt until the operator forced a restore.
 
 **Mandatory workflow for any direct API PATCH against a nested object:**
 
@@ -88,8 +88,7 @@ file paths with line numbers so future readers can verify your claims.
 When a fix lands, mark the entry `[RESOLVED YYYY-MM-DD] (#<PR-number>)` at
 the top — don't delete it. The history is the point.
 
-Customer-fork logs (`gitops-mudflap/improvements.md`,
-`gitops-amazon3p/improvements.md`) feed upstream: when an entry there is
+Customer forks' own `improvements.md` logs feed upstream: when an entry there is
 generic enough to apply across customers, surface it here in the same
 revision.
 

@@ -38,12 +38,12 @@ function makeState(creds: Record<string, string>): StateFile {
 
 test("replaceCredentialRefs swaps at credentialId keys", () => {
   const state = makeState({
-    "roofr-server-credential": "11111111-1111-1111-1111-111111111111",
+    "acme-server-credential": "11111111-1111-1111-1111-111111111111",
   });
   const input = {
     server: {
       url: "https://example.com",
-      credentialId: "roofr-server-credential",
+      credentialId: "acme-server-credential",
     },
   };
   const out = replaceCredentialRefs(input, forwardMap(state));

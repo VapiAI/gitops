@@ -1,0 +1,5 @@
+name: booking-confirmed
+type: ai
+schema:
+  type: boolean
+  description: Did the assistant confirm a booking date and time with the caller?

@@ -1,0 +1,14 @@
+type: function
+function:
+  name: lookup_patient
+  description: Look up the caller's patient record by phone number.
+  parameters:
+    type: object
+    properties:
+      phone:
+        type: string
+        description: The caller's phone number
+    required:
+      - phone
+server:
+  url: https://example.com/vapi/lookup-patient

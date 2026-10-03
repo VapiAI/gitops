@@ -5,7 +5,7 @@ node_modules/
 pnpm-lock.yaml
 
 # Environment files (secrets - never commit these!)
-# Covers dev/stg/prod and any org slug (e.g. .env.roofr-production)
+# Covers dev/stg/prod and any org slug (e.g. .env.acme-production)
 .env
 .env.*
 !.env.example
