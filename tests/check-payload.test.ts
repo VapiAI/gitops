@@ -200,7 +200,11 @@ test("toolIds resolve by UUID through the source state, and server fields are st
     sourceState: { tools: { lookup: { uuid: UUID_A } } },
   });
   assert.deepEqual((assistantOf(result).model as { tools: unknown }).tools, [
-    { type: "function", function: { name: "lookup" } },
+    {
+      type: "function",
+      function: { name: "lookup" },
+      server: { url: "https://vapi-gitops-ci.invalid", timeoutSeconds: 1 },
+    },
   ]);
 });
 
@@ -285,7 +289,14 @@ test("hook do[].toolId becomes an inline tool", async () => {
       do: [
         {
           type: "tool",
-          tool: { type: "function", function: { name: "notify" } },
+          tool: {
+            type: "function",
+            function: { name: "notify" },
+            server: {
+              url: "https://vapi-gitops-ci.invalid",
+              timeoutSeconds: 1,
+            },
+          },
         },
       ],
     },
