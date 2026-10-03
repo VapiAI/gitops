@@ -20,6 +20,7 @@ import {
   SETUP_USAGE,
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
+import { userAgentGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -94,7 +95,10 @@ const c = {
 async function apiGet(token: string, endpoint: string): Promise<unknown> {
   const response = await fetch(`${vapiBaseUrl}${endpoint}`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": userAgentGet(),
+    },
   });
 
   if (!response.ok) {
@@ -367,7 +371,9 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const resourceDir = join(BASE_DIR, "resources", slug);
   const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
 
-  console.log(c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`));
+  console.log(
+    c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`),
+  );
 
   // Never clobber an org that already has local state. Re-running setup is
   // a destructive operation in the wizard (it deletes and re-pulls), and an
@@ -517,7 +523,9 @@ async function main(): Promise<void> {
   // so explain the non-interactive path instead.
   if (!process.stdin.isTTY) {
     console.error(
-      c.red("\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n"),
+      c.red(
+        "\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n",
+      ),
     );
     console.error(SETUP_USAGE);
     process.exit(1);

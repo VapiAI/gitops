@@ -145,6 +145,15 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 
 Every resource type has a section. Keys are sorted, so diffs stay readable.
 
+## What Vapi sees
+
+Every API request uses the org's private key and identifies the tool with a
+User-Agent: `vapi-gitops-<command>/<version>`, plus ` (ci)` when the `CI` or
+`GITHUB_ACTIONS` variable is set. For example, `npm run apply` in a GitHub
+workflow sends `vapi-gitops-apply/1.0.0 (ci)`. Vapi uses it to count how
+the tool is used. Nothing else is sent beyond the requests themselves; there
+is no separate telemetry.
+
 ## Where things live
 
 | Path | What it is |

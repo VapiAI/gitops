@@ -92,7 +92,12 @@ function runCleanup(
     ["--import", "tsx", "src/cleanup.ts", "test-cleanup-org", ...args],
     {
       cwd,
-      env: { ...process.env, VAPI_TOKEN: "fake-token-not-used" },
+      env: {
+        ...process.env,
+        VAPI_TOKEN: "fake-token-not-used",
+        // Nothing listens here: tests must never reach the real API.
+        VAPI_BASE_URL: "http://127.0.0.1:9",
+      },
       encoding: "utf-8",
       timeout: 20_000,
     },

@@ -319,6 +319,8 @@ For changes under `src/`, `tests/` or `.github/`:
   table in the same change.
 - Changing an example under `examples/`? Doc snippets that start with
   `# examples/<path>` must match the file exactly (`npm test` checks).
+- Every request to the Vapi API sends `"User-Agent": userAgentGet()` from
+  `src/user-agent.ts`; `npm test` fails on a `fetch` without it.
 - Commit messages follow Conventional Commits (`fix(pull): …`, `docs: …`).
 - When you hit engine friction ("this should be better"), add or update an
   entry in `improvements.md` in the same change. Upstream's log collects

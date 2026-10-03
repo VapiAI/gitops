@@ -19,9 +19,8 @@ import { fileURLToPath } from "node:url";
 process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
-const { detectOrphanYamls, formatGateMessage } = await import(
-  "../src/new-file-gate.ts"
-);
+const { detectOrphanYamls, formatGateMessage } =
+  await import("../src/new-file-gate.ts");
 
 import type { OrphanReport } from "../src/new-file-gate.ts";
 import type { ResourceState, ResourceType, StateFile } from "../src/types.ts";
@@ -459,7 +458,12 @@ function runPush(
     ["--import", "tsx", "src/push.ts", fx.env, ...extraArgs],
     {
       cwd: fx.dir,
-      env: { ...process.env, VAPI_TOKEN: "fake-token-not-used" },
+      env: {
+        ...process.env,
+        VAPI_TOKEN: "fake-token-not-used",
+        // Nothing listens here: tests must never reach the real API.
+        VAPI_BASE_URL: "http://127.0.0.1:9",
+      },
       encoding: "utf-8",
       timeout: 30_000,
     },
