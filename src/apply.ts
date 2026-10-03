@@ -2,6 +2,8 @@ import { execSync } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
+// Pins this command's User-Agent label for the pull and push it spawns.
+import "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Apply: Pull → Merge → Push (safe bidirectional sync)

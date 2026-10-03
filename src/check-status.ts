@@ -5,6 +5,8 @@
 // `Vapi Evals` (a stable, documented name) is what branch protection
 // requires: per-target statuses only exist on PRs that touch a check.
 
+import { userAgentGet } from "./user-agent.ts";
+
 export const AGGREGATE_CONTEXT = "Vapi Evals";
 
 export type CommitState = "pending" | "success" | "failure" | "error";
@@ -84,6 +86,8 @@ export async function commitStatusPost(
           Accept: "application/vnd.github+json",
           "Content-Type": "application/json",
           "X-GitHub-Api-Version": "2022-11-28",
+          // GitHub asks API clients to name themselves.
+          "User-Agent": userAgentGet("check"),
         },
         body: JSON.stringify({
           context: status.context,

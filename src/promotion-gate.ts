@@ -153,7 +153,8 @@ export async function promotionGateRun(
       connectionFor: () => ({
         token: connection.token,
         baseUrl: connection.baseUrl ?? DEFAULT_BASE_URL,
-        userAgent: userAgentGet("check"),
+        // Gate runs are counted apart from PR check runs.
+        userAgent: userAgentGet("promote"),
       }),
       deadline: gateDeadline(check, Date.now()),
       signal: controller.signal,
