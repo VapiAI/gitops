@@ -87,6 +87,7 @@ you which stack PR closes the row.**
 | 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
 | 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
 | 35  | A failed promotion pushed nothing, not even state       | git lost track of resources already on the platform | None       | RESOLVED 2026-10-01                             |
+| 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | Open                                            |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1882,6 +1883,50 @@ None needed once the fix below lands.
 ### Status
 
 **RESOLVED 2026-10-01.**
+
+---
+
+## 36. `cleanup` deletes resources excluded by `.vapi-ignore`
+
+**Discovered:** 2026-10-03, while reviewing the agent instructions for the public release.
+
+### Problem
+
+`.vapi-ignore` marks platform resources this repository must not manage, and
+push protects them: it never deletes an ignored resource, even under
+`--force`. `npm run cleanup` doesn't read `.vapi-ignore` at all, and treats
+every platform resource missing from the state file as an orphan. Ignored
+resources are never written to state, so they're exactly what cleanup lists,
+and a destructive run deletes them.
+
+### Current behavior (Verified)
+
+- `src/cleanup.ts` builds its keep-set from the state file only and deletes
+  every listed platform resource whose UUID isn't in it. It imports nothing
+  from the ignore helpers.
+- `src/pull.ts` skips ignored resources (never written, never tracked), and
+  `src/delete.ts` orphan-protects them during push.
+
+### Risk
+
+`npm run cleanup -- <org> --force --confirm <org>` in an org shared with
+another team deletes that team's assistants, tools or squads.
+
+### Current mitigation
+
+The default run is a dry run, and the destructive run needs `--confirm <org>`.
+The docs and `AGENTS.md` now tell people and agents to check the dry-run list
+against `.vapi-ignore` first.
+
+### Possible fix
+
+Load the org's ignore patterns in `cleanup.ts` and exclude matches from the
+deletion list (printing them as retained, as push does), with a test that a
+destructive cleanup keeps an ignored resource.
+
+### Status
+
+Open.
 
 ---
 
