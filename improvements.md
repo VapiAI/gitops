@@ -88,6 +88,7 @@ you which stack PR closes the row.**
 | 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
 | 35  | A failed promotion pushed nothing, not even state       | git lost track of resources already on the platform | None       | RESOLVED 2026-10-01                             |
 | 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | RESOLVED 2026-10-03                             |
+| 37  | Resource validation ran only at deploy time, after merge | A config `apply` refuses could merge and block deploys and promotion | #32        | RESOLVED 2026-10-03                             |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1926,6 +1927,58 @@ with and without the UUID suffix). Kept resources are listed as retained.
 `tests/cleanup-ignore.test.ts` runs a destructive cleanup against a stub API:
 before the fix it deleted an ignored assistant and tool along with the true
 orphan; after it, only the orphan.
+
+### Status
+
+**RESOLVED 2026-10-03.**
+
+---
+
+## 37. Resource validation ran only at deploy time, after merge
+
+**[RESOLVED 2026-10-03]**
+
+**Discovered:** 2026-10-03, while reviewing which static checks run before
+the PR check's simulations.
+
+### Problem
+
+`npm run validate` catches the shapes the API rejects (name length,
+structured-output lockstep, duplicated prompts, the `maxTokens` floor,
+per-provider voice schema), but nothing ran it before merge. A config that
+`apply` refuses could land on `main`, and was found only when someone
+deployed or promoted it.
+
+### Current behavior (Verified)
+
+- `src/apply.ts` runs `validate` before every deploy and stops on errors.
+  Promotion deploys through `apply`, so it stops too, but only after the
+  change merged.
+- `src/push.ts` runs the same validators but only warns unless `--strict`.
+- `ci.yml` ran the build and tests only. `tests/examples.test.ts`
+  validates `examples/`, not `resources/<org>/`.
+- The PR check's payload build (`npm run check -- --dry-run`) covers only
+  the resources its targets reach, and only in repos that turned PR checks on.
+
+### Risk
+
+A broken config merges green. Deploys and promotion out of `main` then stop
+until a fix PR lands, or, with plain `push`, the push continues and fails
+partway with an API 400.
+
+### Current mitigation
+
+None needed once the fix below lands.
+
+### Possible fix (landed)
+
+A **Validate resources** job in `.github/workflows/ci.yml` runs `validate`
+for every folder under `resources/` on every pull request, reporting every
+failing org rather than stopping at the first. `validate` makes no network
+call, but loading the engine's config requires a key, so the step sets a
+placeholder that is never sent; the job has no secrets, so it runs on forks.
+No engine change. `tests/ci-validate-workflow.test.ts` runs the step itself
+against fixture orgs.
 
 ### Status
 

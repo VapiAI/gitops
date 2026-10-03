@@ -139,7 +139,9 @@ npm run apply -- my-org      # pull the latest, merge, push
 ```
 
 Commit the changed files and `.vapi-state.my-org.json` so your team shares the
-same name → UUID mappings.
+same name → UUID mappings. Every pull request runs the same validation for
+every org in CI (the **Validate resources** check), so a config `apply` would
+refuse fails before it merges.
 
 ### 5. Test it
 
