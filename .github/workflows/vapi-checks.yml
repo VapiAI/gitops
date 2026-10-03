@@ -73,7 +73,8 @@ jobs:
           live=false
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             live=true
-          elif [[ "$HEAD_REPO" == "$GITHUB_REPOSITORY" && "$ACTOR" != "dependabot[bot]" && "$AUTHOR" != "dependabot[bot]" ]]; then
+          elif [[ "$EVENT" == "pull_request" && -n "$HEAD_REPO" && "$HEAD_REPO" == "$GITHUB_REPOSITORY" &&
+            "$ACTOR" != "dependabot[bot]" && "$AUTHOR" != "dependabot[bot]" ]]; then
             live=true
           fi
           echo "live=$live" >> "$GITHUB_OUTPUT"
