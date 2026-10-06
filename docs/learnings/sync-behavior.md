@@ -247,6 +247,26 @@ Do not delete the source state mapping or refresh it away before step 2. With
 no source files and no tombstone, promotion refuses the empty-source mirror
 instead of guessing that a full destination wipe was intended.
 
+## Assistant version labels
+
+On an org with assistant versioning, every assistant create or PATCH that
+changes content publishes a new version (`v8`, `v9`, …). The platform records
+no author on a version written with a private API key, so push labels it:
+
+- `versionName`: `gitops <commit>[+dirty] by <actor>`
+- `versionDescription`: the actor, the commit, and the dotted paths of the
+  fields that changed (`model.messages, voice.voiceId`), computed from the
+  dashboard payload before the PATCH and the PATCH response.
+
+The actor is `VAPI_GITOPS_ACTOR` if set, else `github:$GITHUB_ACTOR` in CI,
+else `git config user.email`. It is self-reported, so treat it as an audit
+trail, not proof. `+dirty` means `resources/<org>/` had uncommitted edits, so
+the commit alone does not reproduce the push.
+
+Push skips the label when nothing new was published (identical content is
+deduplicated) and in `--dry-run`. A failed label is a warning, never a failed
+push: the content is already live.
+
 ---
 
 ## Flag cheat sheet

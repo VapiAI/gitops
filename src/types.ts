@@ -94,3 +94,20 @@ export interface OrphanedResource {
   resourceId: string;
   uuid: string;
 }
+
+// Who pushed an assistant version, recorded in its version metadata.
+export interface VersionActor {
+  // Who pushed: the CI actor when set, else the local git identity.
+  name: string;
+  // Short commit SHA of HEAD, or null outside a git checkout.
+  commit: string | null;
+  // True when the pushed files had uncommitted edits, so the commit alone
+  // does not reproduce what was pushed.
+  dirty: boolean;
+}
+
+// Body of PATCH /assistant/:id/versions/:version.
+export interface VersionMetadata {
+  versionName: string;
+  versionDescription: string;
+}
