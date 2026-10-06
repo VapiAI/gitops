@@ -13,6 +13,7 @@ import {
   loadIgnorePatterns,
   OVERWRITE_DRIFT,
   removeExcludedKeys,
+  RESOURCES_DIR,
   STATE_FILE_PATH,
   STRICT_VALIDATION,
   VAPI_BASE_URL,
@@ -39,6 +40,11 @@ import {
   validateNoIgnoredReferences,
   validateResources,
 } from "./validate.ts";
+import {
+  changedFieldPaths,
+  versionActorResolve,
+  versionMetadataBuild,
+} from "./version-metadata.ts";
 
 // Map a resource label to its state-file key. Used for snapshotting —
 // snapshot directories are keyed by the same names the state file uses.
@@ -165,6 +171,45 @@ async function writeBaselineFromResponse(
   }
 }
 
+// Label the version an assistant push just published with who pushed it,
+// from which commit, and which fields changed. Only assistants: they are the
+// only resource whose versions accept metadata. Skips when the push published
+// nothing new (the platform dedups identical content), and never blocks the
+// push: the content is already live, the label is an audit trail.
+async function writeAssistantVersionMetadata(options: {
+  uuid: string;
+  before: unknown;
+  after: unknown;
+}): Promise<void> {
+  const { uuid, before, after } = options;
+  if (DRY_RUN) return;
+  const latestVersionRead = (value: unknown): string | null =>
+    value &&
+    typeof value === "object" &&
+    "latestVersion" in value &&
+    typeof value.latestVersion === "string"
+      ? value.latestVersion
+      : null;
+  const published = latestVersionRead(after);
+  if (!published || published === latestVersionRead(before)) return;
+  const metadata = versionMetadataBuild({
+    actor: versionActorResolve(RESOURCES_DIR),
+    changedPaths: before === undefined ? [] : changedFieldPaths(before, after),
+    created: before === undefined,
+  });
+  try {
+    await vapiRequest("PATCH", `/assistant/${uuid}/versions/${published}`, {
+      ...metadata,
+    });
+    console.log(`   🏷️  ${published}: ${metadata.versionName}`);
+  } catch (err) {
+    console.warn(
+      `   ⚠️  failed to label ${published} of assistant ${uuid}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+}
+
 async function upsertResourceWithStateRecovery(options: {
   resourceLabel: string;
   resourceId: string;
@@ -197,6 +242,13 @@ async function upsertResourceWithStateRecovery(options: {
     console.log(`  ✨ Creating ${resourceLabel}: ${resourceId}`);
     const result = await vapiRequest("POST", createEndpoint, createPayload);
     await writeBaselineFromResponse(result.id, result, fullState);
+    if (resourceLabel === "assistant") {
+      await writeAssistantVersionMetadata({
+        uuid: result.id,
+        before: undefined,
+        after: result,
+      });
+    }
     return result.id;
   }
 
@@ -210,13 +262,14 @@ async function upsertResourceWithStateRecovery(options: {
   // what would happen, and skipped if no baseline hash.
   // When we successfully fetch the platform payload, snapshot it (and our
   // outgoing payload) so `npm run rollback` has a target.
+  // Platform payload fetched by the drift check, reused for the rollback
+  // snapshot below so we don't fire a second GET at the same endpoint, and
+  // as the "before" side of the version-metadata field diff.
+  let platformPayloadForSnapshot: unknown;
   if (!DRY_RUN) {
     const stateEntry = stateSection[resourceId];
     if (stateEntry) {
       const driftResourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
-      // Platform payload fetched by the drift check, reused for the rollback
-      // snapshot below so we don't fire a second GET at the same endpoint.
-      let platformPayloadForSnapshot: unknown;
       // The drift check now owns the full hash computation (platform, local,
       // and baseline all canonicalized via canonical.ts). Push just hands it
       // the full state + resource type — no hash plumbing at the call site.
@@ -341,6 +394,13 @@ async function upsertResourceWithStateRecovery(options: {
     // the freshest possible "last known platform state." Hash it as the new
     // drift baseline so the next push of a further local edit is clean.
     await writeBaselineFromResponse(existingUuid, result, fullState);
+    if (resourceLabel === "assistant" && platformPayloadForSnapshot) {
+      await writeAssistantVersionMetadata({
+        uuid: existingUuid,
+        before: platformPayloadForSnapshot,
+        after: result,
+      });
+    }
     return existingUuid;
   } catch (error) {
     if (!(error instanceof VapiApiError) || error.statusCode !== 404) {
@@ -745,7 +805,8 @@ export function cleanDestinationAssistantIds(destinations: unknown): unknown {
 function countAuthoredAssistantRefs(assistantIds: unknown): number {
   if (!Array.isArray(assistantIds)) return 0;
   return assistantIds.filter(
-    (ref) => typeof ref === "string" && (ref.split("##")[0]?.trim() ?? "") !== "",
+    (ref) =>
+      typeof ref === "string" && (ref.split("##")[0]?.trim() ?? "") !== "",
   ).length;
 }
 
