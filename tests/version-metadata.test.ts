@@ -9,12 +9,12 @@ import {
 const BASE = {
   id: "a1",
   orgId: "o1",
-  name: "Matt",
+  name: "Support agent",
   updatedAt: "2026-10-01T00:00:00.000Z",
   latestVersion: "v7",
   model: {
-    provider: "anthropic-bedrock",
-    model: "claude-haiku-4-5",
+    provider: "openai",
+    model: "gpt-4.1",
     messages: [{ role: "system", content: "old prompt" }],
   },
   voice: { provider: "11labs", voiceId: "abc" },
@@ -56,25 +56,25 @@ test("changedFieldPaths stops descending at maxDepth", () => {
 
 test("versionMetadataBuild puts the actor and commit in the name and description", () => {
   const metadata = versionMetadataBuild({
-    actor: { name: "dhruva@vapi.ai", commit: "abc1234", dirty: false },
+    actor: { name: "dev@example.com", commit: "abc1234", dirty: false },
     changedPaths: ["model.messages", "voice.voiceId"],
     created: false,
   });
   assert.deepEqual(metadata, {
-    versionName: "gitops abc1234 by dhruva@vapi.ai",
+    versionName: "gitops abc1234 by dev@example.com",
     versionDescription:
-      "Pushed by dhruva@vapi.ai from commit abc1234 via vapi-gitops.\n" +
+      "Pushed by dev@example.com from commit abc1234 via vapi-gitops.\n" +
       "Changed: model.messages, voice.voiceId",
   });
 });
 
 test("versionMetadataBuild marks a push with uncommitted edits as dirty", () => {
   const metadata = versionMetadataBuild({
-    actor: { name: "dhruva@vapi.ai", commit: "abc1234", dirty: true },
+    actor: { name: "dev@example.com", commit: "abc1234", dirty: true },
     changedPaths: ["name"],
     created: false,
   });
-  assert.equal(metadata.versionName, "gitops abc1234+dirty by dhruva@vapi.ai");
+  assert.equal(metadata.versionName, "gitops abc1234+dirty by dev@example.com");
 });
 
 test("versionMetadataBuild fits a large change in the API limits with a +N more tail", () => {
@@ -94,13 +94,13 @@ test("versionMetadataBuild fits a large change in the API limits with a +N more 
 
 test("versionMetadataBuild says created for a first push", () => {
   const metadata = versionMetadataBuild({
-    actor: { name: "dhruva@vapi.ai", commit: null, dirty: false },
+    actor: { name: "dev@example.com", commit: null, dirty: false },
     changedPaths: [],
     created: true,
   });
   assert.equal(
     metadata.versionDescription,
-    "Pushed by dhruva@vapi.ai from commit no-commit via vapi-gitops.\n" +
+    "Pushed by dev@example.com from commit no-commit via vapi-gitops.\n" +
       "Created by gitops.",
   );
 });
