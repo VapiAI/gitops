@@ -17,6 +17,21 @@ npm run validate -- <org>
 npm run apply -- <org>
 ```
 
+CI runs the same validator on every pull request, for every org under
+`resources/` (the **Validate resources** check in `.github/workflows/ci.yml`).
+It needs no secrets, so it runs on forks too. Make it a required check in
+branch protection, so a config that `apply` would refuse can't reach
+`main`, where it would block deploys and promotion.
+
+Two things to know before you require it:
+
+- It validates every org on every pull request, so one org with errors
+  blocks every pull request in the repository, including those from teams
+  that never touch that org.
+- If you merge through a GitHub merge queue, first add `merge_group:` to
+  `ci.yml`'s `on:` triggers, or the required check never reports and the
+  queue stalls.
+
 To deploy only some resources, pass resource types or file paths. `apply`
 and `push` accept the same scoping:
 

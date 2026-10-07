@@ -81,3 +81,30 @@ falling through to a full deploy. Pass either:
 - a resource type — `npm run push -- my-org assistants`, or
 - a path — `npm run push -- my-org assistants/foo.yml` (short form)
   or `npm run push -- my-org resources/my-org/assistants/foo.yml` (long form).
+
+## "Validate resources" fails in CI
+
+The check runs `npm run validate` for every org under `resources/`. The
+job log names each failing org, and that org's log group lists every
+finding. To reproduce locally:
+
+```bash
+VAPI_PRIVATE_API_KEY=validate-only npm run validate -- <org>
+```
+
+`validate` never calls the API, but the engine won't start without a key, so
+a placeholder is enough. You don't need that org's real key or its
+`.env.<org>`.
+
+Each error names the resource (`assistants/<id>`), field and rule. Plain `push` only warns about
+these errors, so a repository that has been deploying with `push` can carry
+some from before the check existed; they show up on the next pull request,
+whatever it changes. Fix them in that PR or a separate one first. `apply`
+refuses to deploy until they're fixed anyway.
+
+A `Failed to import TypeScript resource … is not set` error from this check
+means a `.ts` resource reads a variable from `.env.<org>`, which CI doesn't
+have. Build `.ts` resources from files in the repository instead.
+
+A folder under `resources/` that isn't a valid org name (lowercase letters,
+digits and hyphens) fails too. Rename it, or move it out of `resources/`.

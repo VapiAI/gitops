@@ -89,6 +89,8 @@ destinations:
 # examples/starter/resources/starter/structuredOutputs/call-summary.yml
 name: call-summary
 type: ai
+assistant_ids:
+  - receptionist
 description: Summarizes the call for the front-desk log.
 schema:
   type: object
@@ -180,4 +182,6 @@ simulationIds:
 
 Any resource can also be a `.ts` file whose default export is the resource
 object, useful for generating config. It is executed when loaded, so treat
-`.ts` resources like code in review.
+`.ts` resources like code in review. CI validates `.ts` resources without your
+`.env.<org>`, so build them from files in the repository, not from
+`process.env`.
