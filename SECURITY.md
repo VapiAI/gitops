@@ -22,5 +22,6 @@ acknowledge the report and keep you updated as we investigate.
   module, including in `validate`, `promote` plans and PR checks. Review them
   like code, and only run them from trusted branches.
 - **PR checks run with your key on same-repository branches.** Forked PRs get
-  a dry run with no secrets. See "Cost and safety" in the README's
-  PR Checks section for what a check still sends to real providers.
+  a dry run with no secrets. See "Cost and safety" in
+  [docs/guides/pr-checks.md](docs/guides/pr-checks.md#cost-and-safety) for
+  what a check still sends to real providers.

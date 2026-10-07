@@ -232,7 +232,7 @@ Base URL: `https://api.vapi.ai`
 `npm run check` sends the target and its tests **inline** in one
 `POST /eval/simulation/run` (`target.assistant` / `target.squad`, and
 `{type: "simulation", name, scenario, personality}` entries), built from the
-branch's files. Setup is in the README's "PR Checks" section; these are the
+branch's files. Setup is in [docs/guides/pr-checks.md](../guides/pr-checks.md); these are the
 behaviours worth knowing when a check surprises you.
 
 - **Inline matches stored, with two known differences.** A 2026-10-01 parity

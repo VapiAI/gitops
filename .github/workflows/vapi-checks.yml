@@ -3,7 +3,7 @@ name: Vapi checks
 # Runs the simulation checks in vapi-checks.yml against the PR branch's own
 # files: each target is built inline and sent in one simulation run, so
 # nothing is deployed. Opt in with the repository variable
-# VAPI_CHECKS_ENABLED=true; see "PR checks" in the README.
+# VAPI_CHECKS_ENABLED=true; see docs/guides/pr-checks.md.
 #
 # Never `pull_request_target`: the branch's code runs here, so it must only
 # ever get this repository's secrets when the branch is this repository's.

@@ -7,7 +7,7 @@ A small dental-clinic front desk, as a complete gitops org:
 - a simulation suite (`core`) with a personality, a scenario that mocks its
   tools, and a check in `vapi-checks.yml`.
 
-The README's File Formats section is built from these files, and CI checks
+The [file formats guide](../../docs/guides/file-formats.md) is built from these files, and CI checks
 that every example here passes `validate` and that the PR check builds. To
 try it:
 
