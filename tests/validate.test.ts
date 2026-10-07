@@ -370,3 +370,68 @@ test("voice-provider-schema: cartesia membersOverrides.voice in squad checked", 
   assert.equal(findings.length, 1);
   assert.equal(findings[0]!.fieldPath, "membersOverrides.voice.speed");
 });
+
+const { findingAnnotation } = await import("../src/validate.ts");
+
+test("findingAnnotation: errors and warnings become GitHub workflow commands on the file", () => {
+  assert.deepEqual(
+    [
+      findingAnnotation(
+        {
+          severity: "error",
+          type: "assistants",
+          resourceId: "front-desk",
+          rule: "name-length",
+          message: "100% too long:\nsee docs, then fix",
+          fieldPath: "name",
+        },
+        "resources/clinic/assistants/front-desk.md",
+      ),
+      findingAnnotation({
+        severity: "warn",
+        type: "tools",
+        resourceId: "a,b",
+        rule: "reference-by-uuid",
+        message: "uses a UUID",
+      }),
+    ],
+    [
+      "::error file=resources/clinic/assistants/front-desk.md,title=name-length%3A assistants/front-desk::assistants/front-desk (name): 100%25 too long:%0Asee docs, then fix",
+      "::warning title=reference-by-uuid%3A tools/a%2Cb::tools/a,b: uses a UUID",
+    ],
+  );
+});
+
+const { validateNoIgnoredReferences } = await import("../src/validate.ts");
+const { validateReferences } = await import("../src/validate-refs.ts");
+
+test("a judge that references an ignored structured output is reported once, by reference-to-ignored", () => {
+  const loaded = emptyResources();
+  loaded.scenarios.push({
+    resourceId: "s",
+    filePath: "/fake/s.yml",
+    data: { evaluations: [{ structuredOutputId: "legacy-so" }] },
+  });
+  const patterns = ["structuredOutputs/legacy-*"];
+  const rules = [
+    ...validateNoIgnoredReferences(loaded, patterns),
+    ...validateReferences({
+      loaded,
+      org: "test-fixture-org",
+      state: {
+        credentials: {},
+        assistants: {},
+        structuredOutputs: {},
+        tools: {},
+        squads: {},
+        personalities: {},
+        scenarios: {},
+        simulations: {},
+        simulationSuites: {},
+        evals: {},
+      },
+      ignorePatterns: patterns,
+    }),
+  ].map((f) => `${f.rule} ${f.type}/${f.resourceId}`);
+  assert.deepEqual(rules, ["reference-to-ignored scenarios/s"]);
+});

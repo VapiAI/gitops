@@ -82,13 +82,14 @@ you which stack PR closes the row.**
 | 28  | Handoff tools 400 on first push into an empty org          | Push aborts before the assistant-linking pass runs  | None       | RESOLVED 2026-08-01                             |
 | 29  | SO linking sent filtered `assistantIds` arrays              | Silent unlink of live-but-untracked assistants      | None       | RESOLVED 2026-08-03 (#51)                       |
 | 30  | Tool-linking pass could PATCH a raw assistant slug          | Mid-push 400 naming the wrong resource              | None       | RESOLVED 2026-08-03 (#51)                       |
-| 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Open                                            |
+| 31  | Unresolved references handled 3 inconsistent ways, no dangling-ref check | Same authoring mistake, three different failure modes | None | Mitigated 2026-10-03 (#77): validate/apply/CI block it; plain push only warns |
 | 32  | Test suite never ran in CI; 20 tests rotted after the hash store | Regression guards for #22/#23 silently stopped running | None | RESOLVED 2026-09-30 (#56)                      |
 | 33  | `npm run sim` reported every run as passed                | A failing suite exited 0 — false green             | None       | RESOLVED 2026-10-01                             |
 | 34  | No pre-merge simulation signal; simulations only tested what was deployed | A PR that breaks an agent merges green           | #33        | RESOLVED 2026-10-01                             |
 | 35  | A failed promotion pushed nothing, not even state       | git lost track of resources already on the platform | None       | RESOLVED 2026-10-01                             |
 | 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | RESOLVED 2026-10-03                             |
 | 37  | Resource validation ran only at deploy time, after merge | A config `apply` refuses could merge and block deploys and promotion | #32        | RESOLVED 2026-10-03 (#76)                       |
+| 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -1568,6 +1569,8 @@ the repo and a subsequent push runs.
 
 ## 31. Unresolved references are handled three different ways depending on the field, and `validate.ts` has no dangling-reference check
 
+**[Mitigated 2026-10-03] (#77)**: validate, apply and CI block it; plain `push` only warns, and the three runtime behaviours remain.
+
 **Discovered:** while fixing #29 and #30 — those two entries close the
 loudest and quietest failure modes for their specific fields, but the
 underlying question ("what happens when a reference resolves to nothing")
@@ -1646,9 +1649,42 @@ conditions; it doesn't require picking one runtime behavior (filter vs.
 defer vs. 400) for every field, since it stops the push before any of those
 three behaviors gets a chance to run.
 
+### Possible fix (landed)
+
+`src/validate-refs.ts` uses `referencesCollect` (`src/resolver.ts`): the
+`extractReferencedIds` walk plus scenario judges'
+`evaluations[].structuredOutputId`, the same collector `reference-to-ignored`
+uses. It reports an error for any
+name that matches no local file and no state entry (`dangling-reference`).
+Names matched by `.vapi-ignore` are left to `reference-to-ignored`, which
+`npm run validate` now runs too. Alongside it: `override-tool-by-name`
+(an error: push never resolves `toolIds` inside overrides),
+`malformed-reference` (an error: an empty or non-name list entry, which used
+to crash `validate`), `unresolved-credential` and `reference-by-uuid`
+(warnings; only for a UUID this repo tracks, naming the file to use).
+`validate` skips `.vapi-ignore`d files, as push does. `validate`
+reads the committed state file, so the check runs offline and in CI, and
+`apply` stops on it before its pull. `push` runs the same checks with its
+other validators: warnings by default, blocking under `--strict`.
+
 ### Status
 
-**Open.**
+**Mitigated 2026-10-03 (#77).** `validate`, `apply` and the Validate
+resources check stop an unresolved reference before any of that runs. Still
+open:
+
+- Plain `push` only warns (unless `--strict`), then filters, defers or sends
+  raw names exactly as before.
+- A reference whose file was deleted, while its state entry remains, passes
+  validation. Under `push --force` the orphan pass deletes the target and its
+  state entry before the apply pass, and the reference then hits the
+  resolver's silent drop.
+- Names push never resolves still go unchecked: `hooks[].do[].toolId` and
+  `artifactPlan.structuredOutputIds` inside overrides, `model.toolRefs` at any
+  depth, and `toolIds` in a squad's inline `members[].assistant`. Only
+  `toolIds` inside overrides are checked.
+- Annotations carry a file but no line, so GitHub shows them at the top of
+  the file, and it keeps at most 10 per type per step.
 
 ---
 
@@ -1983,6 +2019,45 @@ against fixture orgs.
 ### Status
 
 **RESOLVED 2026-10-03.**
+
+---
+
+## 38. Promotion can't carry a simulation that uses a stock personality by UUID
+
+**Discovered:** 2026-10-03, while testing the promotion check gate (#66).
+
+### Problem
+
+Every org has Vapi's stock simulation personalities, with fixed UUIDs
+(`a0000000-0000-4000-8000-00000000000<n>`). A simulation can reference one by
+that UUID, and `npm run check` accepts it. Promotion's dependency check
+doesn't: it treats the UUID as a managed dependency that must exist as a file
+in the source org.
+
+### Current behavior (Verified)
+
+Promoting a simulation with `personalityId: a0000000-…` fails with
+"Referenced managed dependency is missing from source:
+personalities/a0000000-…", and nothing is promoted.
+
+### Risk
+
+Teams that use stock personalities can't promote their tests, and can't gate
+an org on a check whose tests use them.
+
+### Current mitigation
+
+Use personality files under `simulations/personalities/` in any org you
+promote out of. The promotion guide says so.
+
+### Possible fix
+
+Treat stock personality UUIDs as present in every org in promotion's
+dependency check, as `check-payload.ts` already does.
+
+### Status
+
+**Open.**
 
 ---
 

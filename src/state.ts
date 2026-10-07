@@ -48,7 +48,7 @@ function migrateSection(
 // State Management
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createEmptyState(): StateFile {
+export function createEmptyState(): StateFile {
   return {
     credentials: {},
     assistants: {},

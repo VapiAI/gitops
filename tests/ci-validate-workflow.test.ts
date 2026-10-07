@@ -45,7 +45,10 @@ assert.ok(
 const STEP: Step = FOUND;
 
 // Run the step in a scratch repository holding the given org folders.
-function validateStepRun(orgs: Record<string, (dir: string) => void>): {
+function validateStepRun(
+  orgs: Record<string, (dir: string) => void>,
+  extraEnv: Record<string, string> = {},
+): {
   code: number | null;
   output: string;
 } {
@@ -67,7 +70,12 @@ function validateStepRun(orgs: Record<string, (dir: string) => void>): {
       cwd: root,
       encoding: "utf8",
       timeout: 60_000,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, ...STEP.env },
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        ...extraEnv,
+        ...STEP.env,
+      },
     });
     return { code: result.status, output: `${result.stdout}${result.stderr}` };
   } finally {
@@ -129,6 +137,57 @@ test("validate step fails naming only the invalid org, after checking all of the
       error: run.output.includes("::error::Validation failed for: clinic."),
     },
     { code: 1, bothValidated: true, reason: true, error: true },
+    run.output,
+  );
+});
+
+test("on GitHub, a broken reference fails the step and is annotated on its file", () => {
+  const run = validateStepRun(
+    {
+      clinic: (dir) => {
+        starterCopy(dir);
+        const squad = join(dir, "squads", "front-desk.yml");
+        writeFileSync(
+          squad,
+          readFileSync(squad, "utf8").replace(
+            "assistantId: scheduler",
+            "assistantId: schedular",
+          ),
+        );
+      },
+    },
+    { GITHUB_ACTIONS: "true" },
+  );
+  assert.deepEqual(
+    [
+      run.code,
+      run.output.includes(
+        "::error file=resources/clinic/squads/front-desk.yml,title=dangling-reference%3A squads/front-desk::",
+      ),
+    ],
+    [1, true],
+    run.output,
+  );
+});
+
+test("a .vapi-ignore'd file is skipped, as push skips it, even with a broken reference", () => {
+  const run = validateStepRun({
+    clinic: (dir) => {
+      starterCopy(dir);
+      writeFileSync(
+        join(dir, ".vapi-ignore"),
+        "assistants/legacy/**\ntools/old-*\n",
+      );
+      mkdirSync(join(dir, "assistants", "legacy"));
+      writeFileSync(
+        join(dir, "assistants", "legacy", "desk.yml"),
+        "name: Legacy Desk\nmodel: { provider: openai, model: gpt-4.1, toolIds: [old-crm-lookup] }\n",
+      );
+    },
+  });
+  assert.deepEqual(
+    [run.code, run.output.includes("Validated 1 org(s): clinic")],
+    [0, true],
     run.output,
   );
 });
