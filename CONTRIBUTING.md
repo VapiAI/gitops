@@ -43,5 +43,6 @@ Commit messages and PR titles follow [Conventional Commits](https://www.conventi
 Don't edit `docs/changelog.md` here. It's a template for your own
 deployment's change log once you fork the repo.
 
-Coding agents (Claude Code, Cursor, Codex) read [`AGENTS.md`](AGENTS.md) and
-[`CLAUDE.md`](CLAUDE.md); keep them in step when a convention changes.
+Coding agents (Claude Code, Codex, Cursor) all follow [`AGENTS.md`](AGENTS.md);
+`CLAUDE.md` imports it. Update `AGENTS.md` when a convention changes, and keep
+it under 30 KB (`npm test` checks) so Codex reads all of it.
