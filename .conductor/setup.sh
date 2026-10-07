@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Conductor setup script for gitops-mudflap.
+# Conductor setup script for this repository.
 #
 # Wire-up: this script is dispatched from `conductor.json` at the repo root:
 #   {"scripts": {"setup": "bash .conductor/setup.sh"}}

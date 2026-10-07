@@ -1,0 +1,34 @@
+name: Bug report
+description: Something in the sync engine, CLI or workflows didn't work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command you ran and its output. Remove API keys and any customer data.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit or release of this repo you're on (`git log -1 --oneline`).
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: Output of `node --version`.
+  - type: dropdown
+    id: region
+    attributes:
+      label: Vapi region
+      options: [US, EU]

@@ -851,7 +851,7 @@ export async function pullResourceType(
       //   - `state[resourceType]` carries prior-pull claims loaded from
       //     disk. Without this, if the dashboard returns the new same-name
       //     twin BEFORE the tracked one, the new twin sees `newStateSection`
-      //     empty and clobbers the tracked file. The customer's mudflap-prod
+      //     empty and clobbers the tracked file. A customer's production
       //     5-Rileys investigation surfaced this ordering dependency.
       //   - `newStateSection` carries intra-pull claims from earlier
       //     iterations. Handles the converse (tracked-then-twin order).
