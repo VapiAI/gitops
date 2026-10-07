@@ -96,20 +96,36 @@ jobs:
           PROMOTION_OUTCOME: ${{ steps.promotion.outcome }}
         run: |
           set -euo pipefail
-          paths=(':(glob).vapi-state.*.json')
+          git add -A -- ':(glob).vapi-state.*.json'
           if [[ "$PROMOTION_OUTCOME" == "success" ]]; then
-            paths+=(resources)
+            git add -A -- resources
+          elif [[ -s tmp/promotion-applied.txt ]]; then
+            # A later transition failed. Stage each file exactly as it stood
+            # when its transition finished applying (promote-cmd stored that
+            # content in git's object store), so the failed transition's
+            # rewrites — even of the same files — are never committed.
+            while IFS=$'\t' read -r blob path; do
+              [[ -n "$path" ]] || continue
+              if [[ "$blob" == "-" ]]; then
+                git rm -q --cached --ignore-unmatch -- ":(literal)$path"
+              else
+                git update-index --add --cacheinfo "100644,$blob,$path"
+              fi
+            done < tmp/promotion-applied.txt
           fi
 
-          if [[ -z "$(git status --porcelain -- "${paths[@]}")" ]]; then
+          if git diff --cached --quiet; then
             echo "Promotion produced no Git changes."
             exit 0
           fi
 
           git config user.name "vapi-gitops[bot]"
           git config user.email "vapi-gitops[bot]@users.noreply.github.com"
-          git add -A -- "${paths[@]}"
           git commit -m "chore: record promoted Vapi state [skip promotion]"
+          # Unstaged rewrites from a failed transition would make the rebase
+          # refuse to run, and then nothing would be pushed, state included.
+          git reset --hard HEAD
+          git clean -fd -- resources
           for attempt in 1 2 3; do
             git pull --rebase origin main
             if git push; then
