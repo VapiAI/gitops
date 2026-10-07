@@ -1,5 +1,6 @@
 import { DRY_RUN, VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
 import type { VapiResponse } from "./types.ts";
+import { userAgentGet } from "./user-agent.ts";
 import {
   INITIAL_DELAY_MS,
   MAX_RETRIES,
@@ -97,6 +98,7 @@ export async function vapiRequest<T = VapiResponse>(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
       },
       body: JSON.stringify(body),
     });
@@ -140,6 +142,7 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
       method: "GET",
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
       },
     });
 
@@ -188,6 +191,7 @@ export async function vapiDelete(endpoint: string): Promise<void> {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
       },
     });
 

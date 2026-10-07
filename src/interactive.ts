@@ -9,6 +9,7 @@ import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // the launcher, which runs before any org/token is selected.
 import { isBackupCopyFile } from "./slug-utils.ts";
 import type { StateFile } from "./types.ts";
+import { userAgentGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -223,7 +224,10 @@ async function apiGet(
 ): Promise<unknown> {
   const response = await fetch(`${baseUrl}${endpoint}`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": userAgentGet(),
+    },
   });
   if (!response.ok) {
     const text = await response.text();

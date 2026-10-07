@@ -459,7 +459,12 @@ function runPush(
     ["--import", "tsx", "src/push.ts", fx.env, ...extraArgs],
     {
       cwd: fx.dir,
-      env: { ...process.env, VAPI_TOKEN: "fake-token-not-used" },
+      env: {
+        ...process.env,
+        VAPI_TOKEN: "fake-token-not-used",
+        // Nothing listens here: tests must never reach the real API.
+        VAPI_BASE_URL: "http://127.0.0.1:9",
+      },
       encoding: "utf-8",
       timeout: 30_000,
     },

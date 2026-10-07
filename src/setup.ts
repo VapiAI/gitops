@@ -20,6 +20,7 @@ import {
   SETUP_USAGE,
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
+import { userAgentGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -94,7 +95,10 @@ const c = {
 async function apiGet(token: string, endpoint: string): Promise<unknown> {
   const response = await fetch(`${vapiBaseUrl}${endpoint}`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": userAgentGet(),
+    },
   });
 
   if (!response.ok) {
