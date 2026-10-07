@@ -186,11 +186,10 @@ npm run cleanup -- <org>
 npm run cleanup -- <org> --force --confirm <org>
 ```
 
-**Check the dry-run list before a destructive run.** Cleanup treats every
-platform resource that isn't in `.vapi-state.<org>.json` as an orphan, and it
-does not read `.vapi-ignore`: resources you've excluded with `.vapi-ignore`
-are never in the state file, so they appear in the list and `--force` would
-delete them.
+Cleanup treats every platform resource that isn't in
+`.vapi-state.<org>.json` as an orphan, except those matched by
+`resources/<org>/.vapi-ignore`: it lists those as retained and never deletes
+them. Still read the dry-run list before a destructive run.
 
 **When the list includes Vapi's built-in fixtures** (for example the stock
 simulation personalities, which can't be deleted — see

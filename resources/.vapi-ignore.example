@@ -10,6 +10,8 @@
 #     id matches `.vapi-ignore`.
 #   - `--force` on push bypasses the load-filter (so a deliberate override
 #     can flow through) BUT the orphan-protect still applies.
+#   - `npm run cleanup -- <org>` never deletes a matched resource, even with
+#     `--force --confirm <org>`; it lists it as retained.
 #   - A resource that references an ignored resource (e.g. a squad
 #     pointing at `assistants/foo` while `assistants/foo` is ignored) is
 #     a validation ERROR — `--strict` push aborts before any API call.

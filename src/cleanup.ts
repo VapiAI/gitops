@@ -1,7 +1,16 @@
 import { resolve } from "path";
 import { fileURLToPath } from "url";
-import { VAPI_BASE_URL, VAPI_ENV, VAPI_TOKEN } from "./config.ts";
+import {
+  loadIgnorePatterns,
+  matchesIgnore,
+  VAPI_BASE_URL,
+  VAPI_ENV,
+  VAPI_TOKEN,
+} from "./config.ts";
+import { FOLDER_MAP } from "./resource-parse.ts";
+import { slugify } from "./slug-utils.ts";
 import { loadState } from "./state.ts";
+import type { ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dangerous Sync - Delete everything NOT in state file
@@ -68,6 +77,30 @@ async function vapiDelete(endpoint: string): Promise<void> {
 interface VapiResource {
   id: string;
   name?: string;
+  function?: { name?: string };
+}
+
+// The .vapi-ignore pattern a platform resource matches, or null. Checks the
+// ids pull would give it — its name slug with the UUID suffix (what pull
+// writes for an untracked resource) and without it — so a pattern written
+// against either form protects the resource.
+function ignoredBy(
+  folder: string,
+  resource: VapiResource,
+  patterns: string[],
+): string | null {
+  if (patterns.length === 0) return null;
+  // Truthy, not ??: pull treats an empty name as missing (extractName).
+  const name = resource.name || resource.function?.name;
+  const shortId = resource.id.slice(0, 8);
+  const ids = name
+    ? [`${slugify(name)}-${shortId}`, slugify(name)]
+    : [`resource-${shortId}`];
+  for (const id of ids) {
+    const matched = matchesIgnore(folder, id, patterns);
+    if (matched) return matched;
+  }
+  return null;
 }
 
 function readConfirmToken(argv: string[]): string | undefined {
@@ -149,43 +182,75 @@ async function main(): Promise<void> {
   }[] = [];
 
   // Fetch and compare each resource type
-  const resourceTypes = [
+  const resourceTypes: Array<{
+    type: ResourceType;
+    name: string;
+    endpoint: string;
+    deleteEndpoint: string;
+  }> = [
     {
+      type: "assistants",
       name: "assistants",
       endpoint: "/assistant",
       deleteEndpoint: "/assistant",
     },
-    { name: "tools", endpoint: "/tool", deleteEndpoint: "/tool" },
     {
+      type: "tools",
+      name: "tools",
+      endpoint: "/tool",
+      deleteEndpoint: "/tool",
+    },
+    {
+      type: "structuredOutputs",
       name: "structured outputs",
       endpoint: "/structured-output",
       deleteEndpoint: "/structured-output",
     },
-    { name: "squads", endpoint: "/squad", deleteEndpoint: "/squad" },
     {
+      type: "squads",
+      name: "squads",
+      endpoint: "/squad",
+      deleteEndpoint: "/squad",
+    },
+    {
+      type: "personalities",
       name: "personalities",
       endpoint: "/eval/simulation/personality",
       deleteEndpoint: "/eval/simulation/personality",
     },
     {
+      type: "scenarios",
       name: "scenarios",
       endpoint: "/eval/simulation/scenario",
       deleteEndpoint: "/eval/simulation/scenario",
     },
     {
+      type: "simulations",
       name: "simulations",
       endpoint: "/eval/simulation",
       deleteEndpoint: "/eval/simulation",
     },
     {
+      type: "simulationSuites",
       name: "simulation suites",
       endpoint: "/eval/simulation/suite",
       deleteEndpoint: "/eval/simulation/suite",
     },
-    { name: "evals", endpoint: "/eval", deleteEndpoint: "/eval" },
+    {
+      type: "evals",
+      name: "evals",
+      endpoint: "/eval",
+      deleteEndpoint: "/eval",
+    },
   ];
 
-  for (const { name, endpoint, deleteEndpoint } of resourceTypes) {
+  // Resources this repo must not manage (.vapi-ignore) are never written to
+  // state, so every one of them would look like an orphan here. Keep them,
+  // as push's orphan-protection does.
+  const ignorePatterns = loadIgnorePatterns();
+  let retained = 0;
+
+  for (const { type, name, endpoint, deleteEndpoint } of resourceTypes) {
     console.log(`📥 Fetching ${name}...`);
     try {
       // Enable debug for structured outputs to see response format
@@ -202,7 +267,16 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const orphans = resources.filter((r) => !stateIds.has(r.id));
+      const orphans: VapiResource[] = [];
+      for (const r of resources.filter((r) => !stateIds.has(r.id))) {
+        const matched = ignoredBy(FOLDER_MAP[type], r, ignorePatterns);
+        if (matched) {
+          console.log(
+            `   🚫 ${r.name || r.function?.name || r.id} retained (matched .vapi-ignore: ${matched})`,
+          );
+          retained++;
+        } else orphans.push(r);
+      }
 
       if (orphans.length > 0) {
         console.log(
@@ -227,6 +301,12 @@ async function main(): Promise<void> {
   console.log(
     "\n═══════════════════════════════════════════════════════════════",
   );
+
+  if (retained > 0) {
+    console.log(
+      `\n🚫 ${retained} resource(s) not in state were kept because they match .vapi-ignore`,
+    );
+  }
 
   if (toDelete.length === 0) {
     console.log("✅ Nothing to delete - all resources match state file\n");
