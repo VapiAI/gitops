@@ -2,9 +2,16 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { CheckDefinition } from "./check-config.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
+import type { PromotionGateResult } from "./promotion-gate.ts";
+import {
+  promotionChecksLoad,
+  promotionGatePlanLine,
+  promotionGateRun,
+} from "./promotion-gate.ts";
 import {
   promotionConfigParse,
   promotionPlanApply,
@@ -42,6 +49,17 @@ export const APPLIED_PATHS_FILE = "tmp/promotion-applied.txt";
 
 export interface PromotionDeps {
   childRun: typeof orgScriptRun;
+  checkRun: (
+    check: CheckDefinition,
+    connection: OrgConnection,
+  ) => Promise<PromotionGateResult>;
+}
+
+// Gated orgs' checks, and the orgs whose check already passed in this run.
+// A pass stays valid until a transition applies into that org.
+interface PromotionGates {
+  checks: Map<string, CheckDefinition>;
+  passed: Set<string>;
 }
 
 function argumentsParse(args: string[]): PromotionArguments {
@@ -216,6 +234,7 @@ async function transitionRun(
   tokens: Map<string, string>,
   allowEmptySourceDeletion: boolean,
   deps: PromotionDeps,
+  gates: PromotionGates,
 ): Promise<boolean> {
   const run = deps.childRun;
   if (apply) {
@@ -248,7 +267,23 @@ async function transitionRun(
   for (const change of plan.changes)
     console.log(`  ${change.kind.padEnd(6)} ${change.path}`);
   if (plan.changes.length === 0) console.log("  no changes");
-  if (!apply || plan.changes.length === 0) return false;
+  if (plan.changes.length === 0) return false;
+  const check = gates.checks.get(transition.source);
+  if (check && !apply)
+    console.log(await promotionGatePlanLine(ROOT_DIR, check));
+  if (!apply) return false;
+  if (check && !gates.passed.has(transition.source)) {
+    console.log(`  check  running ${check.name} in ${transition.source}…`);
+    const result = await deps.checkRun(
+      check,
+      orgConnection(config, transition.source, tokens),
+    );
+    if (result.outcome !== "passed")
+      throw new Error(
+        `Promotion out of ${transition.source} blocked: check ${check.name} ${result.outcome} (${result.url ?? result.reason})`,
+      );
+    gates.passed.add(transition.source);
+  }
   await promotionPlanApply(plan);
   const changedPaths = plan.changes.map(
     (change) => `resources/${transition.target}/${change.path}`,
@@ -260,18 +295,30 @@ async function transitionRun(
     ["--force", "--allow-new-files", "--resolve=ours", ...changedPaths],
   );
   appliedPathsRecord(transition.target);
+  // The target's files just changed, so an earlier pass no longer covers it.
+  gates.passed.delete(transition.target);
   return plan.changes.some((change) => change.kind === "delete");
 }
 
 export async function promotionCommandRun(
   args = process.argv.slice(2),
-  deps: PromotionDeps = { childRun: orgScriptRun },
+  overrides: Partial<PromotionDeps> = {},
 ): Promise<void> {
+  const deps: PromotionDeps = {
+    childRun: orgScriptRun,
+    checkRun: (check, connection) =>
+      promotionGateRun(ROOT_DIR, check, connection),
+    ...overrides,
+  };
   const parsed = argumentsParse(args);
   const configPath = resolve(ROOT_DIR, "promotion.yml");
   if (!existsSync(configPath))
     throw new Error("promotion.yml is required at the repository root");
   const config = promotionConfigParse(readFileSync(configPath, "utf8"));
+  const gates: PromotionGates = {
+    checks: promotionChecksLoad(ROOT_DIR, config),
+    passed: new Set(),
+  };
   const tokens = parsed.apply
     ? tokensParse(TOKENS_ENV)
     : new Map<string, string>();
@@ -293,6 +340,7 @@ export async function promotionCommandRun(
       tokens,
       deletionAuthorizedSources.has(sourceKey),
       deps,
+      gates,
     );
     if (deleted)
       deletionAuthorizedSources.add(

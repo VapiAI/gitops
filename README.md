@@ -439,6 +439,30 @@ its cleaned state after downstream deletion completes.
 See [sync behavior](docs/learnings/sync-behavior.md#cross-org-promotion-deletions)
 for the exact lifecycle.
 
+#### Check before promoting (optional)
+
+Gate an org on a [PR check](#pr-checks-simulations-against-your-branch):
+nothing is promoted **out of** it unless the check passes there first.
+
+```yaml
+# promotion.yml
+orgs:
+  example-staging:
+    check: staging-core   # a vapi-checks.yml check whose org (and runOrg) is example-staging
+```
+
+- Plans print `check  would run staging-core in example-staging (<n> simulations × <t> targets)`
+  and run nothing.
+- On `--apply`, the check runs against `resources/example-staging/` at the
+  promoted commit, in example-staging, with that org's key from
+  `VAPI_PROMOTION_TOKENS`, before any file is written to the destination. A
+  failure, an incomplete run (timeout, billing) or a build error blocks the
+  transition with the run link; transitions that already applied are still
+  committed.
+- A pass is reused for later transitions out of the same org in the same run,
+  until something is promoted into it.
+- Transitions with no changes skip the check.
+
 #### Rolling Back a Promotion
 
 Treat a promotion rollback as a new, auditable Git change: revert the source
@@ -587,6 +611,12 @@ Require the **commit status `Vapi Evals`** in branch protection — not the
   the repository first). A later PR event on the same commit resets the
   status, so dispatch again after that. Running one named check by hand
   never changes `Vapi Evals`.
+
+### Gate promotion on a check (optional)
+
+Multi-org repos can require a check to pass in an org before anything is
+promoted out of it: set `orgs.<org>.check: <name>` in `promotion.yml` (see
+[Check before promoting](#check-before-promoting-optional)).
 
 ### Dedicated CI org (optional; recommended with `toolMocks: off`)
 
