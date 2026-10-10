@@ -2,16 +2,15 @@
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Per-resource state metadata. The state file is a pure `name → { uuid }`
-// map: the only thing it records is which platform UUID a local resource
-// file is bound to. Nothing else.
+// Per-resource state metadata. `latestVersion` records the latest version
+// observed from Vapi; it is metadata, not part of the desired resource config.
 //
 // The "last known platform state" content hash that drives drift detection
 // lives OUTSIDE this file, in the gitignored per-developer hash store at
 // `.vapi-state-hash/<org>/<uuid>` (see `hash-store.ts`). Keeping hashes out
-// of the committed state file means the state diff is purely semantic
-// (added/removed/re-bound resources) and the drift baseline is local to each
-// developer's working copy.
+// of the committed state file means state carries identity and observed Vapi
+// version metadata, while content hashes remain local to each developer's
+// working copy.
 //
 // Legacy state files (bare string values, or objects carrying lastPulledHash /
 // lastPushedHash / lastPulledAt) are NOT loaded by the sync commands — the
@@ -20,6 +19,7 @@
 // store from the old hashes.
 export interface ResourceState {
   uuid: string;
+  latestVersion?: string;
 }
 
 // `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. Each section

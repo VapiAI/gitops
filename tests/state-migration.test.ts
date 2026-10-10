@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  assertStateMigrated,
+  migrateAll,
+} from "../src/migrate-hash-store.ts";
 import {
   asResourceState,
   canonicalize,
@@ -10,8 +16,8 @@ import type { ResourceState } from "../src/types.ts";
 
 // Stack F — state schema migration coverage.
 //
-// Each state value is a ResourceState — a pure `{ uuid }`. Drift baselines
-// moved to the per-developer hash store (.vapi-state-hash/), so the helpers
+// Each state value is a ResourceState — `{ uuid, latestVersion? }`. Drift
+// baselines moved to the per-developer hash store (.vapi-state-hash/), so helpers
 // must strip any legacy hash/timestamp field rather than carry it forward:
 // saveState must never re-emit one. These specs pin the behavior of the public
 // helpers without importing the full state.ts module (which loads config.ts
@@ -22,8 +28,15 @@ test("asResourceState: wraps a bare string UUID as { uuid }", () => {
   assert.deepEqual(result, { uuid: "uuid-abc-123" });
 });
 
-test("asResourceState: keeps only the uuid of an object entry", () => {
+test("asResourceState: keeps the uuid of an object entry", () => {
   assert.deepEqual(asResourceState({ uuid: "u" }), { uuid: "u" });
+});
+
+test("asResourceState: preserves latestVersion metadata", () => {
+  assert.deepEqual(asResourceState({ uuid: "u", latestVersion: "v8" }), {
+    uuid: "u",
+    latestVersion: "v8",
+  });
 });
 
 test("asResourceState: strips legacy hash/timestamp fields", () => {
@@ -44,19 +57,68 @@ test("asResourceState: rejects non-string-non-object values", () => {
   assert.equal(asResourceState({ uuid: 42 }), undefined);
 });
 
+test("state migration accepts and preserves latestVersion metadata", async () => {
+  const dir = await mkdtemp(join(process.cwd(), ".test-state-version-"));
+  const statePath = join(dir, ".vapi-state.fixture.json");
+  try {
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        assistants: { agent: { uuid: "u1", latestVersion: "v8" } },
+      }),
+    );
+    assert.doesNotThrow(() => assertStateMigrated(statePath));
+
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        assistants: {
+          agent: {
+            uuid: "u1",
+            latestVersion: "v8",
+            lastPulledAt: "legacy",
+          },
+        },
+      }),
+    );
+    await migrateAll(dir);
+    const migrated = JSON.parse(await readFile(statePath, "utf-8"));
+    assert.deepEqual(migrated.assistants.agent, {
+      uuid: "u1",
+      latestVersion: "v8",
+    });
+  } finally {
+    await rm(statePath, { force: true });
+    await rm(`${statePath}.tmp`, { force: true });
+    await rmdir(dir).catch(() => undefined);
+  }
+});
+
 test("upsertState: creates a new entry when none exists", () => {
   const section: Record<string, ResourceState> = {};
   upsertState(section, "agent-a", { uuid: "u1" });
   assert.deepEqual(section["agent-a"], { uuid: "u1" });
 });
 
-test("upsertState: writes only the uuid, even when the patch carries legacy fields", () => {
+test("upsertState: ignores legacy fields and accepts latestVersion metadata", () => {
   // A caller still holding an old-shaped object must not smuggle a hash back
   // into the state file; baselines belong to the hash store.
   const section: Record<string, ResourceState> = {};
-  const legacyPatch = { uuid: "u1", lastPushedHash: "new-push-hash" };
+  const legacyPatch = {
+    uuid: "u1",
+    latestVersion: "v3",
+    lastPushedHash: "new-push-hash",
+  };
   upsertState(section, "agent-a", legacyPatch);
-  assert.deepEqual(section["agent-a"], { uuid: "u1" });
+  assert.deepEqual(section["agent-a"], { uuid: "u1", latestVersion: "v3" });
+});
+
+test("upsertState: an update without a version preserves the observed version", () => {
+  const section: Record<string, ResourceState> = {
+    "agent-a": { uuid: "u1", latestVersion: "v8" },
+  };
+  upsertState(section, "agent-a", { uuid: "u1" });
+  assert.deepEqual(section["agent-a"], { uuid: "u1", latestVersion: "v8" });
 });
 
 test("upsertState: overwrites uuid if it changes", () => {
@@ -64,7 +126,7 @@ test("upsertState: overwrites uuid if it changes", () => {
     "agent-a": { uuid: "u-old" },
   };
   upsertState(section, "agent-a", { uuid: "u-new" });
-  assert.equal(section["agent-a"]!.uuid, "u-new");
+  assert.deepEqual(section["agent-a"], { uuid: "u-new" });
 });
 
 test("hashPayload: produces stable hash regardless of insertion order", () => {

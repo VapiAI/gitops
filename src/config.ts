@@ -302,10 +302,10 @@ export const STATE_FILE_PATH = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const UPDATE_EXCLUDED_KEYS: Record<ResourceType, string[]> = {
-  tools: ["type"],
-  assistants: [],
+  tools: ["type", "latestVersion"],
+  assistants: ["latestVersion"],
   structuredOutputs: ["type"],
-  squads: [],
+  squads: ["latestVersion"],
   personalities: [],
   scenarios: [],
   simulations: [],

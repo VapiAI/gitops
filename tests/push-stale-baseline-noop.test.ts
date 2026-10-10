@@ -4,6 +4,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -37,10 +38,11 @@ const SLUG = "stale-baseline-bot-c95f4c6b";
 
 // Dashboard payload. cleanResource strips id/orgId; the remaining shape must
 // canonicalize to exactly what the local .md parses to (see LOCAL_MD).
-function dashboardBody() {
+function dashboardBody(latestVersion = "v8") {
   return {
     id: UUID,
     orgId: "org-test",
+    latestVersion,
     name: "Stale Baseline Bot",
     model: {
       provider: "openai",
@@ -114,7 +116,7 @@ function startStub(
   });
 }
 
-test("push: stale lastPulledHash does not block when local and dashboard agree", async () => {
+test("push: stale baseline does not block and PATCH latestVersion is saved to state", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vapi-push-stale-"));
 
   cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
@@ -161,7 +163,7 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
   // Route order matters: the by-id GET must match before the list GET.
   const { worker, port } = await startStub([
     { method: "GET", pathStartsWith: `/assistant/${UUID}`, body: dashboardBody() },
-    { method: "PATCH", pathStartsWith: `/assistant/${UUID}`, body: dashboardBody() },
+    { method: "PATCH", pathStartsWith: `/assistant/${UUID}`, body: dashboardBody("v9") },
     { method: "GET", pathStartsWith: "/assistant", body: [dashboardBody()] },
   ]);
 
@@ -215,6 +217,14 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
       /Applied 1 resource/,
       `push must apply the resource (PATCH no-op)\n${out}`,
     );
+
+    const savedState = JSON.parse(
+      readFileSync(join(dir, `.vapi-state.${ENV}.json`), "utf-8"),
+    );
+    assert.deepEqual(savedState.assistants[SLUG], {
+      uuid: UUID,
+      latestVersion: "v9",
+    });
   } finally {
     worker.postMessage({ type: "shutdown" });
     await new Promise<void>((resolveShutdown) => {

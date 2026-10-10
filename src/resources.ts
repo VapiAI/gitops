@@ -42,7 +42,9 @@ export function hashLocalResource(
   const filePath = findLocalResourceFile(type, resourceId);
   if (!filePath) return null;
   try {
-    return hashPayload(parseResourceDataFromFile(filePath));
+    const data = parseResourceDataFromFile(filePath);
+    delete data.latestVersion;
+    return hashPayload(data);
   } catch {
     return null;
   }

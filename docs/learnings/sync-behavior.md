@@ -15,7 +15,7 @@ function of which of them exist and whether their contents agree.
 | Artifact | Where | Committed? | Meaning |
 |---|---|---|---|
 | **Local file** (`L`) | `resources/<org>/<type>/<name>.md\|yml` | yes | The declarative source of truth you edit |
-| **State entry** (`S`) | `.vapi-state.<org>.json` → `{ "<name>": { "uuid": … } }` | yes | The ONLY thing state stores: which platform UUID a local name is bound to |
+| **State entry** (`S`) | `.vapi-state.<org>.json` -> `{ "<name>": { "uuid": "...", "latestVersion": "vN" } }` | yes | UUID binding and optional observed Vapi version; version metadata is excluded from content hashes |
 | **Baseline** (`B`) | `.vapi-state-hash/<org>/<uuid>` | **no** (per-developer, gitignored) | sha256 of the last platform content *you* saw (last pull or push) |
 | **Dashboard resource** (`D`) | Vapi platform | n/a | What's live |
 
@@ -58,6 +58,14 @@ UUIDs → names):
 > one obviously-correct direction and flows silently.
 
 ---
+
+## Version metadata and drift
+
+`latestVersion` records the most recent Vapi version observed by pull or a
+successful write. It is stored in the committed state mapping, not in resource
+configuration or the per-developer content baseline. If the assistant config
+at v6 is later restored and published as v8 after a different v7, identical v6
+and v8 configs hash the same and do not create a conflict.
 
 ## Content scenarios (resource exists everywhere: L + S + B + D)
 
@@ -202,8 +210,10 @@ sweep, which consume the resources today without consuming the verdict.
 
 `pull`, `push`, and `apply` all **hard-refuse** with
 `Run \`npm run migrate\` first.` The migration (no org argument, no token
-needed) slims every `.vapi-state.<org>.json` to `name → { uuid }` and seeds
-each org's `.vapi-state-hash/` from the legacy hashes. Idempotent.
+needed) normalizes each `.vapi-state.<org>.json` mapping to
+`{ uuid, latestVersion? }` and seeds each org's `.vapi-state-hash/` from
+the legacy hashes. Existing version metadata is retained and does not
+participate in content drift. Idempotent.
 
 ### G. Local file renamed
 

@@ -29,6 +29,7 @@ export const EXCLUDED_FIELDS = [
   "orgId",
   "createdAt",
   "updatedAt",
+  "latestVersion", // Vapi version metadata is tracked in the state file
   "analyticsMetadata",
   "isDeleted",
   // Computed/derived fields that shouldn't be synced back
