@@ -150,9 +150,16 @@ async function writeBaselineFromResponse(
   uuid: string,
   response: unknown,
   state: StateFile,
+  stateSection: Record<string, ResourceState>,
+  resourceId: string,
 ): Promise<void> {
   if (DRY_RUN) return;
   if (!response || typeof response !== "object") return;
+  const latestVersion = (response as Record<string, unknown>).latestVersion;
+  upsertState(stateSection, resourceId, {
+    uuid,
+    ...(typeof latestVersion === "string" ? { latestVersion } : {}),
+  });
   try {
     const credReverse = credentialReverseMap(state);
     const hash = hashPayload(
@@ -198,7 +205,13 @@ async function upsertResourceWithStateRecovery(options: {
   if (!existingUuid) {
     console.log(`  ✨ Creating ${resourceLabel}: ${resourceId}`);
     const result = await vapiRequest("POST", createEndpoint, createPayload);
-    await writeBaselineFromResponse(result.id, result, fullState);
+    await writeBaselineFromResponse(
+      result.id,
+      result,
+      fullState,
+      stateSection,
+      resourceId,
+    );
     return result.id;
   }
 
@@ -343,7 +356,13 @@ async function upsertResourceWithStateRecovery(options: {
     // The PATCH response is the full resource as the platform now stores it —
     // the freshest possible "last known platform state." Hash it as the new
     // drift baseline so the next push of a further local edit is clean.
-    await writeBaselineFromResponse(existingUuid, result, fullState);
+    await writeBaselineFromResponse(
+      existingUuid,
+      result,
+      fullState,
+      stateSection,
+      resourceId,
+    );
     return existingUuid;
   } catch (error) {
     if (!(error instanceof VapiApiError) || error.statusCode !== 404) {
@@ -959,12 +978,24 @@ export async function applyEval(
       `/eval/${existingUuid}`,
       updatePayload,
     );
-    await writeBaselineFromResponse(existingUuid, result, state);
+    await writeBaselineFromResponse(
+      existingUuid,
+      result,
+      state,
+      state.evals,
+      resourceId,
+    );
     return existingUuid;
   } else {
     console.log(`  ✨ Creating eval: ${resourceId}`);
     const result = await vapiRequest("POST", "/eval", payload);
-    await writeBaselineFromResponse(result.id, result, state);
+    await writeBaselineFromResponse(
+      result.id,
+      result,
+      state,
+      state.evals,
+      resourceId,
+    );
     return result.id;
   }
 }
@@ -1019,7 +1050,13 @@ export async function updateToolAssistantRefs(
     // This PATCH mutates the platform AFTER the main upsert wrote its
     // baseline — refresh it from the linking response, or the next push would
     // see drift we caused ourselves.
-    await writeBaselineFromResponse(uuid, result, state);
+    await writeBaselineFromResponse(
+      uuid,
+      result,
+      state,
+      state.tools,
+      resourceId,
+    );
   }
 }
 
@@ -1092,7 +1129,13 @@ export async function updateStructuredOutputAssistantRefs(
       });
       // Same post-upsert mutation as the tool-linking PATCH above — refresh
       // the baseline from the response to avoid self-inflicted drift.
-      await writeBaselineFromResponse(uuid, result, state);
+      await writeBaselineFromResponse(
+        uuid,
+        result,
+        state,
+        state.structuredOutputs,
+        resourceId,
+      );
     }
   }
 }

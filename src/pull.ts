@@ -62,6 +62,15 @@ const ENDPOINT_MAP: Record<ResourceType, string> = {
   evals: "/eval",
 };
 
+function stateMappingForResource(resource: VapiResource): ResourceState {
+  return {
+    uuid: resource.id,
+    ...(typeof resource.latestVersion === "string"
+      ? { latestVersion: resource.latestVersion }
+      : {}),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Git Helpers (detect locally changed files to skip during pull)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -918,9 +927,9 @@ export async function pullResourceType(
           });
           if (driftCounts) driftCounts[direction]++;
 
-          // The drift baseline now lives in the hash store, NOT in the state
-          // section that gets wholesale-replaced at end-of-loop. So the
-          // preserve branches just write the `{ uuid }` mapping and leave the
+          // The content baseline now lives in the hash store, NOT in the state
+          // section that gets wholesale-replaced at end-of-loop. Preserve
+          // branches refresh version metadata while leaving the
           // `.vapi-state-hash/<org>/<uuid>` file untouched — the baseline
           // survives by construction, no carry-forward needed.
           if (direction === "both-diverged") {
@@ -932,14 +941,15 @@ export async function pullResourceType(
               platformHash,
               lastPulledHash: baseline,
             });
-            // Preserve the `{ uuid }` mapping. `resolveBothDivergedResources`
+            // Preserve the resource mapping. `resolveBothDivergedResources`
             // will rewrite the baseline to the resolve-mode-appropriate hash
             // after the per-type loop; if the operator doesn't pass --resolve,
             // the baseline file is left intact so the next pull still sees drift.
-            const existing = state[resourceType][resourceId];
-            if (existing) {
-              newStateSection[resourceId] = existing;
-            }
+            upsertState(
+              newStateSection,
+              resourceId,
+              stateMappingForResource(resource),
+            );
             skipped++;
             continue;
           }
@@ -964,7 +974,11 @@ export async function pullResourceType(
             console.log(
               `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            upsertState(
+              newStateSection,
+              resourceId,
+              stateMappingForResource(resource),
+            );
             skipped++;
             continue;
           }
@@ -1002,7 +1016,11 @@ export async function pullResourceType(
         changedFiles.has(yamlPath)
       ) {
         console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-        upsertState(newStateSection, resourceId, { uuid: resource.id });
+        upsertState(
+          newStateSection,
+          resourceId,
+          stateMappingForResource(resource),
+        );
         skipped++;
         continue;
       }
@@ -1029,7 +1047,11 @@ export async function pullResourceType(
           const stateMtime = statSync(stateFilePath).mtimeMs;
           if (localMtime > stateMtime) {
             console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            upsertState(
+              newStateSection,
+              resourceId,
+              stateMappingForResource(resource),
+            );
             skipped++;
             continue;
           }
@@ -1051,7 +1073,11 @@ export async function pullResourceType(
         console.log(
           `   🗑️  ${resourceId} (deleted locally, intent in state — add to .vapi-ignore to stop tracking)`,
         );
-        upsertState(newStateSection, resourceId, { uuid: resource.id });
+        upsertState(
+          newStateSection,
+          resourceId,
+          stateMappingForResource(resource),
+        );
         skipped++;
         continue;
       }
@@ -1113,7 +1139,11 @@ export async function pullResourceType(
         `   ⚠️  ${resourceType}/${resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(newStateSection, resourceId, { uuid: resource.id });
+    upsertState(
+      newStateSection,
+      resourceId,
+      stateMappingForResource(resource),
+    );
     await writeBaseline(
       VAPI_ENV,
       resource.id,
@@ -1209,7 +1239,11 @@ async function resolveBothDivergedResources(options: {
       // No file write — local is preserved. Set the baseline to the platform
       // state at resolve time so the next classifyDrift correctly reports
       // `local-ahead` instead of re-flagging `both-diverged`.
-      upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+      upsertState(
+        section,
+        entry.resourceId,
+        stateMappingForResource(entry.resource),
+      );
       await writeBaseline(VAPI_ENV, entry.resource.id, entry.platformHash);
       continue;
     }
@@ -1235,7 +1269,11 @@ async function resolveBothDivergedResources(options: {
         `   ⚠️  ${entry.resourceType}/${entry.resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+    upsertState(
+      section,
+      entry.resourceId,
+      stateMappingForResource(entry.resource),
+    );
     await writeBaseline(
       VAPI_ENV,
       entry.resource.id,

@@ -29,7 +29,7 @@ export function stateUuid(
   return entry?.uuid;
 }
 
-// Migrate one section: wrap any legacy string values as { uuid: string }.
+// Migrate one section: normalize each mapping to { uuid, latestVersion? }.
 // Mutates in place — safe because the parent `loadState()` clones first via
 // the empty-state spread.
 function migrateSection(

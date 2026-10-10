@@ -96,6 +96,7 @@ function renamedDashboardBody() {
   return {
     id: UUID_X,
     orgId: "org-test",
+    latestVersion: "v8",
     name: "Call Transfer Test 1",
     model: {
       provider: "openai",
@@ -119,7 +120,7 @@ voice:
 marker:original-local
 `;
 
-test("pull: dashboard rename of tracked resource preserves the local filename (no duplicate)", async () => {
+test("pull: tracked assistant preserves its filename and stores latestVersion in state", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vapi-pull-rename-"));
 
   cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
@@ -210,6 +211,11 @@ test("pull: dashboard rename of tracked resource preserves the local filename (n
       `${TRACKED_SLUG}.md must still exist; dir: ${readdirSync(assistantsDir).join(", ")}`,
     );
     const content = readFileSync(trackedPath, "utf-8");
+    assert.doesNotMatch(
+      content,
+      /latestVersion/,
+      "version metadata stays out of the resource file",
+    );
     assert.match(
       content,
       /marker:renamed-on-dashboard/,
@@ -237,6 +243,12 @@ test("pull: dashboard rename of tracked resource preserves the local filename (n
       UUID_X,
       `state[${TRACKED_SLUG}] must still map to X; got ${JSON.stringify(finalState.assistants)}`,
     );
+    assert.equal(
+      finalState.assistants[TRACKED_SLUG]?.latestVersion,
+      "v8",
+      "pull records the dashboard latestVersion in state metadata",
+    );
+
     assert.equal(
       finalState.assistants[NAME_DERIVED_SLUG],
       undefined,

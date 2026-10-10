@@ -1,5 +1,6 @@
 // One-time migration from the legacy fat state file to the slim
-// `name → { uuid }` state file + `.vapi-state-hash/<org>/<uuid>` baseline store.
+// `name → { uuid, latestVersion? }` state file +
+// `.vapi-state-hash/<org>/<uuid>` baseline store.
 //
 // This whole module is a REMOVABLE SEAM. When the migration is no longer
 // needed, delete this file + `migrate-cmd.ts`, remove the `assertStateMigrated`
@@ -33,14 +34,17 @@ export interface MigrationResult {
   orgs: OrgMigrationResult[];
 }
 
-// A legacy entry is anything that isn't already exactly `{ uuid: string }`:
-// a bare string (oldest form) or an object carrying extra fields
-// (lastPulledHash / lastPulledAt / lastPushedHash / platformVersionId).
+// A legacy entry is a bare string (oldest form) or an object carrying fields
+// other than the current state metadata (`uuid`, `latestVersion`).
 function isLegacyEntry(value: unknown): boolean {
   if (typeof value === "string") return true;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const keys = Object.keys(value as Record<string, unknown>);
-    return keys.some((k) => k !== "uuid");
+    const record = value as Record<string, unknown>;
+    return (
+      keys.some((k) => k !== "uuid" && k !== "latestVersion") ||
+      ("latestVersion" in record && typeof record.latestVersion !== "string")
+    );
   }
   return false;
 }
@@ -65,8 +69,9 @@ function uuidOf(value: unknown): string | undefined {
 }
 
 // Treat a top-level value as a "section" if it's a plain object whose values
-// look like state entries (string or { uuid }). This avoids hard-coding the
-// section list, so the migration keeps working if a section is added later.
+// look like state entries (string or `{ uuid, latestVersion? }`). This avoids
+// hard-coding the section list, so migration keeps working if a section is
+// added later.
 function isSection(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -93,7 +98,10 @@ async function migrateOne(
   let seeded = 0;
   let skipped = 0;
   let needsSlim = false;
-  const slim: Record<string, Record<string, { uuid: string }>> = {};
+  const slim: Record<
+    string,
+    Record<string, { uuid: string; latestVersion?: string }>
+  > = {};
 
   for (const [sectionKey, section] of Object.entries(raw)) {
     if (!isSection(section)) {
@@ -102,7 +110,10 @@ async function migrateOne(
       (slim as Record<string, unknown>)[sectionKey] = section;
       continue;
     }
-    const slimSection: Record<string, { uuid: string }> = {};
+    const slimSection: Record<
+      string,
+      { uuid: string; latestVersion?: string }
+    > = {};
     for (const [resourceId, value] of Object.entries(section)) {
       if (isLegacyEntry(value)) needsSlim = true;
       const uuid = uuidOf(value);
@@ -118,7 +129,14 @@ async function migrateOne(
           skipped++;
         }
       }
-      slimSection[resourceId] = { uuid };
+      const latestVersion =
+        value && typeof value === "object"
+          ? (value as { latestVersion?: unknown }).latestVersion
+          : undefined;
+      slimSection[resourceId] = {
+        uuid,
+        ...(typeof latestVersion === "string" ? { latestVersion } : {}),
+      };
     }
     slim[sectionKey] = slimSection;
   }
@@ -151,7 +169,7 @@ export async function migrateAll(
 }
 
 // Guard called at the entry of pull/push/apply. Throws if the given state file
-// is still in the legacy format (any entry that isn't exactly `{ uuid }`). A
+// is still in the legacy format (hash/timestamp fields or bare-string entries). A
 // missing or empty file is new-style by definition (fresh repos / --bootstrap
 // must not be blocked). Shape-only check — never inspects the hash store.
 //

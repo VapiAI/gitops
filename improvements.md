@@ -90,6 +90,7 @@ you which stack PR closes the row.**
 | 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | RESOLVED 2026-10-03                             |
 | 37  | Resource validation ran only at deploy time, after merge | A config `apply` refuses could merge and block deploys and promotion | #32        | RESOLVED 2026-10-03 (#76)                       |
 | 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
+| 39  | `latestVersion` metadata can cause false content drift | Matching configs can appear drifted across published versions | None | Open |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2061,12 +2062,56 @@ dependency check, as `check-payload.ts` already does.
 
 ---
 
+## 39. `latestVersion` metadata can cause false content drift
+
+**Discovered:** 2026-10-10, while tracing version-only drift after a push.
+
+### Problem
+
+Vapi can advance a resource version even when its effective configuration later
+returns to an earlier value. For example, an assistant can be published as v6,
+changed and published as v7, then reverted and published as v8. The v6 and v8
+configurations are identical, but a local v6 resource can conflict with the
+platform v8 resource if the version number is treated as configuration.
+
+### Current behavior (upstream/main before this change)
+
+The state mapping records the resource UUID but not its observed Vapi version.
+`latestVersion` is included in resource data and content hashes, while a
+successful POST or PATCH refreshes the hash baseline without recording the
+returned version in state. A version-only difference can therefore look like
+content drift. The affected paths are `src/types.ts`, `src/canonical.ts`,
+`src/resources.ts`, `src/pull.ts`, and `src/push.ts`.
+
+### Risk
+
+A version-only difference can trigger an unnecessary conflict even when the
+local and dashboard configurations are identical.
+
+### Current mitigation
+
+There is no version-aware CLI workaround on the base branch. Compare the
+resource configuration manually before resolving a reported conflict.
+
+### Possible fix
+
+Store the observed Vapi version as state metadata, exclude it from resource
+files and content hashes, and persist the version returned by successful API
+writes. The implementation in this PR follows that approach; see
+`src/types.ts:20-23`, `src/pull.ts:65-71`, `src/push.ts:149-162`, and
+`src/resources.ts:42-48`.
+
+### Status
+
+**Open.**
+
+---
+
 ## Out of scope (intentionally not improvements)
 
-- **State file is identity-only and not git-ignored.** It's intentionally
-  committed so all collaborators share the same local→UUID mapping.
-  The proposal in #4 is *additive* — keep identity mappings, add
-  content hashes.
+- **State file is committed; content hashes are not.** It shares resource
+  UUID mappings and observed Vapi version metadata across collaborators.
+  Content baselines remain per-developer in the gitignored hash store.
 - **`push -- <env>` does not require an interactive confirmation prompt.**
   That's a UX choice — adding a prompt would break automation. The right
   place to add friction is `--dry-run` (#5).

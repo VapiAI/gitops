@@ -58,13 +58,12 @@ export function hashPayload(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
-// Normalize a state value to the slim `{ uuid }` shape. Accepts a bare string
-// (oldest legacy form) or an object with a `uuid` field, and discards any other
-// fields a legacy file may still carry (lastPulledHash, lastPulledAt,
-// lastPushedHash). Returns undefined if no uuid can be recovered — at load time
-// that means a corrupt state file. Note: the `assertStateMigrated` guard
-// normally blocks legacy-shaped files before they reach here; this stripping is
-// a belt-and-suspenders so `saveState` can never re-emit a legacy field.
+// Normalize a state value to `{ uuid, latestVersion? }`. Accepts a bare string
+// (oldest legacy form) or an object with a `uuid` field, and discards legacy
+// hash/timestamp fields. Returns undefined if no uuid can be recovered — at
+// load time that means a corrupt state file. Note: the `assertStateMigrated`
+// guard normally blocks legacy-shaped files before they reach here; this
+// stripping is a belt-and-suspenders so `saveState` cannot re-emit them.
 export function asResourceState(value: unknown): ResourceState | undefined {
   if (typeof value === "string") return { uuid: value };
   if (
@@ -72,20 +71,34 @@ export function asResourceState(value: unknown): ResourceState | undefined {
     typeof value === "object" &&
     typeof (value as { uuid?: unknown }).uuid === "string"
   ) {
-    return { uuid: (value as { uuid: string }).uuid };
+    const entry = value as { uuid: string; latestVersion?: unknown };
+    return {
+      uuid: entry.uuid,
+      ...(typeof entry.latestVersion === "string"
+        ? { latestVersion: entry.latestVersion }
+        : {}),
+    };
   }
   return undefined;
 }
 
-// Set the `{ uuid }` mapping for a resource. The state file no longer carries
-// any per-resource field beyond the UUID, so this is a plain assignment — the
-// drift baseline now lives in the hash store, not here.
+// Set a resource mapping while retaining its observed Vapi version when the
+// caller has no newer version to record. A changed UUID starts a fresh mapping.
 export function upsertState(
   section: Record<string, ResourceState>,
   resourceId: string,
   patch: ResourceState,
 ): void {
-  section[resourceId] = { uuid: patch.uuid };
+  const existing = section[resourceId];
+  section[resourceId] = {
+    uuid: patch.uuid,
+    ...(typeof patch.latestVersion === "string"
+      ? { latestVersion: patch.latestVersion }
+      : existing?.uuid === patch.uuid &&
+          typeof existing.latestVersion === "string"
+        ? { latestVersion: existing.latestVersion }
+        : {}),
+  };
 }
 
 // Pronunciation-dictionary drop check. Detects when a dictionary attachment

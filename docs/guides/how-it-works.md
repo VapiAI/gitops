@@ -5,7 +5,7 @@
 Resources are scoped by organization, with names you choose (not fixed `dev`/`stg`/`prod`). Each org gets:
 
 - `.env.<org>` — private API key and base URL
-- `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
+- `.vapi-state.<org>.json` - committed resource name-to-UUID mappings and optional observed Vapi versions
 - `.vapi-state-hash/<org>/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
 - `resources/<org>/` — all resource files
 
@@ -136,7 +136,7 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 
 ```json
 {
-  "assistants": { "my-assistant": { "uuid": "9c0f3f42-…" } },
+  "assistants": { "my-assistant": { "uuid": "9c0f3f42-...", "latestVersion": "v8" } },
   "credentials": { "my-cred": { "uuid": "2f6db611-…" } },
   "squads": { "my-squad": { "uuid": "51a9e1c7-…" } },
   "tools": { "my-tool": { "uuid": "d4b8a2e0-…" } }
@@ -144,6 +144,11 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 ```
 
 Every resource type has a section. Keys are sorted, so diffs stay readable.
+
+`latestVersion` is optional Vapi metadata recorded in the state file, not desired resource configuration.
+Pull and successful writes update the observed version. The CLI excludes it from resource files and content hashes,
+and from update payloads for versioned resources, so a version-only change does not create drift. For example,
+v6 and v8 can have identical configuration even when v7 contained an intervening change.
 
 ## What Vapi sees
 
@@ -161,7 +166,7 @@ requests themselves; there is no separate telemetry.
 | Path | What it is |
 | --- | --- |
 | `resources/<org>/` | Your resources, one folder per org |
-| `.vapi-state.<org>.json` | Name → UUID mappings per org (committed) |
+| `.vapi-state.<org>.json` | Name → UUID mappings and optional Vapi version metadata per org (committed) |
 | `.env.<org>` | API key and generated binding IDs (gitignored) |
 | `promotion.yml`, `vapi-checks.yml` | Promotion pipelines and PR checks (copy from the `*.example.yml` files) |
 | `resources/<org>/.vapi-ignore` | Platform resources this repo shouldn't manage (see `resources/.vapi-ignore.example`) |
