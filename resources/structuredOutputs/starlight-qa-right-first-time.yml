@@ -1,0 +1,259 @@
+name: starlight_qa_right_first_time
+type: ai
+target: messages
+description: |
+  Evaluates the RIGHT FIRST TIME quality of a Brent Council Housing Benefits call.
+  This is 1 of 4 equally-weighted QA categories for the Starlight project.
+
+  IMPORTANT - AUTO-FAIL RULES:
+  Questions 2.3, 2.4, and 2.5 are auto-fail. If ANY of these receives a "no" result,
+  set auto_fail to true. When auto_fail is true across ANY of the 4 QA categories,
+  the ENTIRE call evaluation fails (not just this section).
+
+  MULTILINGUAL TRANSCRIPTS:
+  The call may be conducted in any language. Evaluate the transcript in whatever language
+  it occurs in. Do not penalise the agent for using a language other than English if the
+  caller initiated in that language.
+
+  AI AGENT ADAPTATION NOTES:
+  - Question 2.3 (safeguarding): Evaluate whether the agent properly identified and
+    handled any safeguarding concerns such as vulnerability indicators, signs of abuse,
+    or welfare concerns. Use not_applicable only if no safeguarding scenario arose.
+  - Question 2.4 (system logging): Use not_applicable for AI agent calls as AI agents
+    do not directly update case management systems.
+
+  GLOSSARY OF BRENT COUNCIL TERMS:
+  RSF - Resident Support Fund | DHP - Discretionary Housing Payment |
+  CIC/s - Change in Circumstances | CTS - Council Tax Support |
+  HB - Housing Benefit | UC - Universal Credit | Recons - Reconsideration |
+  Portal/My Account/CAS - Citizen Access Service (customer self-service portal) |
+  Non Dep - Non dependants | OP - Overpayments | LHA - Local Housing Allowance |
+  HSF - Household Support Fund | SB - Switchboard |
+  Welfare Benefit - PIP, Disability Allowance, ESA, etc.
+model:
+  provider: openai
+  model: gpt-4.1
+  temperature: 0
+assistant_ids: []
+workflow_ids: []
+schema:
+  type: object
+  description: "Right First Time QA evaluation for Brent Council Housing Benefits calls."
+  properties:
+    question_2_1:
+      type: object
+      description: "2.1 Asked open ended questions to fully understand the enquiry and didn't interrupt inappropriately."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent asked open-ended questions and did not interrupt inappropriately; no if the agent failed to probe or interrupted the caller; not_applicable only in exceptional circumstances."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given, referencing specific parts of the conversation."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript supporting the evaluation."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation where this occurred."
+    question_2_2:
+      type: object
+      description: "2.2 Took ownership of the customer's enquiry and all concerns addressed."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent took ownership and addressed all concerns raised; no if concerns were ignored or ownership was not demonstrated; not_applicable only in exceptional circumstances."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_2_3:
+      type: object
+      description: "2.3 Effectively managed any presented safeguarding. AUTO-FAIL: If result is 'no', the entire evaluation fails."
+      properties:
+        result:
+          type: string
+          description: "yes if safeguarding concerns were properly identified and handled (e.g. vulnerability indicators, signs of abuse, welfare concerns); no if safeguarding concerns were present but not addressed; not_applicable if no safeguarding scenario arose during the call."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_2_4:
+      type: object
+      description: "2.4 Details and case history checked and logged and systems accurately updated. AUTO-FAIL: If result is 'no', the entire evaluation fails."
+      properties:
+        result:
+          type: string
+          description: "yes if case details were checked and systems updated accurately; no if details were not checked or systems not updated when required; not_applicable for AI agent calls as AI agents do not directly update case management systems."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_2_5:
+      type: object
+      description: "2.5 Escalation process followed correctly. AUTO-FAIL: If result is 'no', the entire evaluation fails."
+      properties:
+        result:
+          type: string
+          description: "yes if escalation was handled correctly when needed; no if escalation was required but not followed or followed incorrectly; not_applicable if no escalation was needed during the call."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_2_6:
+      type: object
+      description: "2.6 Correct disposition allocated."
+      properties:
+        result:
+          type: string
+          description: "yes if the correct disposition or outcome code was allocated; no if the wrong disposition was used; not_applicable if disposition allocation was not relevant to this call."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_2_7:
+      type: object
+      description: "2.7 Reference number provided where available."
+      properties:
+        result:
+          type: string
+          description: "yes if a reference number was provided to the caller when one was available; no if a reference number was available but not provided; not_applicable if no reference number was available or relevant."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    question_2_8:
+      type: object
+      description: "2.8 Any remaining questions answered and other possible queries addressed."
+      properties:
+        result:
+          type: string
+          description: "yes if the agent asked whether there were any remaining questions and addressed them; no if the agent did not check for further questions or left queries unanswered; not_applicable only in exceptional circumstances."
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        reasoning:
+          type: string
+          description: "Explanation of why this result was given."
+        evidence:
+          type: array
+          description: "Relevant excerpts from the transcript."
+          items:
+            type: object
+            properties:
+              message_text:
+                type: string
+                description: "The exact text from the transcript."
+              timestamp:
+                type: string
+                description: "The timestamp or position in the conversation."
+    auto_fail:
+      type: boolean
+      description: "Set to true if ANY auto-fail question (2.3, 2.4, 2.5) received a 'no' result. When true, the ENTIRE call evaluation fails across all categories."
+    overall_pass:
+      type: boolean
+      description: "Set to true only if auto_fail is false. When auto_fail is true, this must be false regardless of other question results."
+    category_score:
+      type: string
+      description: "Fraction of questions that received 'yes' out of total applicable questions, e.g. '6/8' or '5/6'. Exclude not_applicable questions from both numerator and denominator."
