@@ -279,7 +279,7 @@ function liveCopy(stub: LiveStub): string {
   return root;
 }
 
-test("a live --all run posts pending then success per target, the aggregate, the job summary and JSON", async () => {
+test("with one target, a live --all run posts only the aggregate (pending, then success, both linking the run), plus the job summary and JSON", async () => {
   await withLiveStub(async (stub) => {
     const root = liveCopy(stub);
     try {
@@ -306,20 +306,48 @@ test("a live --all run posts pending then success per target, the aggregate, the
         {
           code: 0,
           statuses: [
-            [
-              "Vapi Evals / core / squads/dental",
-              "pending",
-              "https://dashboard.vapi.ai/run-1",
-            ],
-            [
-              "Vapi Evals / core / squads/dental",
-              "success",
-              "https://dashboard.vapi.ai/run-1",
-            ],
-            ["Vapi Evals", "success", "https://dashboard.vapi.ai/run-1"],
+            ["Vapi Simulations", "pending", "https://dashboard.vapi.ai/run-1"],
+            ["Vapi Simulations", "success", "https://dashboard.vapi.ai/run-1"],
           ],
           summary: true,
           json: ["passed"],
+        },
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+test("with several targets, each gets its own status linking its run, and the aggregate links the workflow run", async () => {
+  await withLiveStub(async (stub) => {
+    const root = liveCopy(stub);
+    try {
+      writeFileSync(
+        join(root, "vapi-checks.yml"),
+        "version: 1\nchecks:\n  core:\n    org: parity\n    targets: [squads/dental]\n    suites: [core]\n  again:\n    org: parity\n    targets: [squads/dental]\n    suites: [core]\n",
+      );
+      await withGitHubEnv(stub, join(root, "summary.md"), () =>
+        run(["--all"], root),
+      );
+      const contexts = stub.statuses.map((s) => `${s.context} ${s.state}`);
+      const aggregate = stub.statuses.at(-1);
+      assert.deepEqual(
+        {
+          perTarget: contexts.filter((c) => c.includes(" / ")).sort(),
+          aggregate: [aggregate?.context, aggregate?.state],
+          aggregateLinksWorkflow:
+            aggregate?.target_url?.includes("/actions/runs/"),
+        },
+        {
+          perTarget: [
+            "Vapi Simulations / again / squads/dental pending",
+            "Vapi Simulations / again / squads/dental success",
+            "Vapi Simulations / core / squads/dental pending",
+            "Vapi Simulations / core / squads/dental success",
+          ],
+          aggregate: ["Vapi Simulations", "success"],
+          aggregateLinksWorkflow: true,
         },
       );
     } finally {
@@ -341,7 +369,7 @@ test("a failing live run exits 1 and turns the aggregate red", async () => {
         [
           1,
           {
-            context: "Vapi Evals",
+            context: "Vapi Simulations",
             state: "failure",
             description: "1 failed",
             target_url: "https://dashboard.vapi.ai/run-1",
@@ -364,8 +392,8 @@ test("a single named check never posts the aggregate", async () => {
       assert.deepEqual(
         stub.statuses.map((s) => s.context),
         [
-          "Vapi Evals / core / squads/dental",
-          "Vapi Evals / core / squads/dental",
+          "Vapi Simulations / core / squads/dental",
+          "Vapi Simulations / core / squads/dental",
         ],
       );
     } finally {
@@ -404,7 +432,13 @@ test("an unaffected change runs nothing and posts a green aggregate", async () =
         [
           0,
           0,
-          [["Vapi Evals", "success", "No checks affected by this change"]],
+          [
+            [
+              "Vapi Simulations",
+              "success",
+              "No checks affected by this change",
+            ],
+          ],
         ],
       );
     } finally {
@@ -426,7 +460,7 @@ test("a dry run of an affected PR (fork or Dependabot) posts an error aggregate 
           stub.vapiPosts,
           stub.statuses.map((s) => [s.context, s.state]),
         ],
-        [0, 0, [["Vapi Evals", "error"]]],
+        [0, 0, [["Vapi Simulations", "error"]]],
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -447,7 +481,7 @@ test("an invalid vapi-checks.yml still posts an error aggregate", async () => {
           result.code,
           stub.statuses.map((s) => [s.context, s.state, s.description]),
         ],
-        [2, [["Vapi Evals", "error", "vapi-checks.yml is invalid"]]],
+        [2, [["Vapi Simulations", "error", "vapi-checks.yml is invalid"]]],
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

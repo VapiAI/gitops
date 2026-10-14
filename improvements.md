@@ -1850,7 +1850,8 @@ None needed once the fix below lands.
   and servers dead-ended (`src/check-mocks.ts`); the verdict is the strict
   `simRunVerdict` from #33.
 - `.github/workflows/vapi-checks.yml` (opt-in via `VAPI_CHECKS_ENABLED`) runs
-  affected checks on each PR and posts `Vapi Evals` commit statuses that link
+  affected checks on each PR and posts `Vapi Simulations` commit statuses (called `Vapi Evals` until
+  2026-10-13) that link
   straight to the run; forks and Dependabot get a keyless dry run.
 - Docs: README "PR Checks", `docs/learnings/simulations.md` "Inline PR
   Checks".

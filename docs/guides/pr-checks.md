@@ -106,13 +106,15 @@ PR push. It asks for `statuses: write` only to post the direct links.
 
 ## 6. What a PR shows
 
-- `Vapi Evals`, plus `Vapi Evals / <check> / <target>` per target. **Details**
-  opens the run in Vapi.
+- `Vapi Simulations`, the overall result. When one target ran, **Details**
+  opens its run in Vapi. When several did, each also gets
+  `Vapi Simulations / <check> / <target>`, whose **Details** opens that run,
+  and the overall status links to the workflow run.
 - A job summary: per-target result, failing judges with expected vs actual,
   and any "unmocked tool called" notices. No PR comments.
 - PRs that touch neither a check's org, its state, `vapi-checks.yml`,
   `promotion.yml`, the engine (`src/**`, `package*.json`), nor the check's
-  own `paths` skip it, and `Vapi Evals` posts success.
+  own `paths` skip it, and `Vapi Simulations` posts success.
 - A newer push cancels the older run.
 - Separately, the **Validate resources** check (in `ci.yml`) runs
   `npm run validate` on every org, including resources no check targets.
@@ -120,18 +122,22 @@ PR push. It asks for `statuses: write` only to post the direct links.
 
 ## 7. Make it required (after a burn-in)
 
-Require the **commit status `Vapi Evals`** in branch protection — not the
+Require the **commit status `Vapi Simulations`** in branch protection — not the
 `vapi-checks` job (fork dry runs succeed) and not the per-target statuses
 (PRs that don't touch a check never get them).
 
 - **Fork PRs** run a dry run without secrets and can't post statuses (the
-  token is read-only), so a required `Vapi Evals` blocks them.
+  token is read-only), so a required `Vapi Simulations` blocks them.
 - **Dependabot PRs** that change `package*.json` post `error`.
 - **To unblock either**, a maintainer runs Actions → Vapi checks → Run
   workflow on the PR's branch with `check` blank (push a fork's branch into
   the repository first). A later PR event on the same commit resets the
   status, so dispatch again after that. Running one named check by hand
-  never changes `Vapi Evals`.
+  never changes `Vapi Simulations`.
+
+This status was called `Vapi Evals` before 2026-10-13. If you already
+require `Vapi Evals`, require `Vapi Simulations` instead after you merge in
+the update, or every pull request waits for a status that no longer posts.
 
 ## Gate promotion on a check (optional)
 

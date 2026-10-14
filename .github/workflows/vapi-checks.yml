@@ -16,13 +16,13 @@ on:
       check:
         description: >-
           Check name from vapi-checks.yml. Leave blank to run every check and
-          update the Vapi Evals status on the dispatched commit.
+          update the Vapi Simulations status on the dispatched commit.
         required: false
         type: string
 
 permissions:
   contents: read
-  # Only to post the `Vapi Evals` commit statuses that link to each run.
+  # Only to post the `Vapi Simulations` commit statuses that link to each run.
   statuses: write
 
 concurrency:

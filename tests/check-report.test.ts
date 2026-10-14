@@ -69,7 +69,7 @@ test("the markdown report has a summary row per target and detail for anything n
       dryRun: false,
     }),
     [
-      "## Vapi Evals",
+      "## Vapi Simulations",
       "",
       "| Check | Target | Result | Simulations | Run |",
       "|---|---|---|---|---|",
