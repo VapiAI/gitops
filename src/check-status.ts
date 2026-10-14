@@ -1,13 +1,16 @@
 // GitHub commit statuses for PR checks. Plain fetch, no dependency.
 //
-// Per check and target: `Vapi Evals / <check> / <target>`, pending with the
-// run link as soon as the run exists, then the verdict. The aggregate
-// `Vapi Evals` (a stable, documented name) is what branch protection
-// requires: per-target statuses only exist on PRs that touch a check.
+// The aggregate `Vapi Simulations` (a stable, documented name) is what branch
+// protection requires: per-target statuses only exist on PRs that touch a
+// check. With several targets, each also gets `Vapi Simulations / <check> /
+// <target>`, pending with the run link as soon as the run exists, then the
+// verdict, so every run is one click away. With one, the aggregate carries the
+// pending state and links to the run itself, and no per-target status is
+// posted: it would only repeat the aggregate.
 
 import { userAgentGet } from "./user-agent.ts";
 
-export const AGGREGATE_CONTEXT = "Vapi Evals";
+export const AGGREGATE_CONTEXT = "Vapi Simulations";
 
 export type CommitState = "pending" | "success" | "failure" | "error";
 

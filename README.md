@@ -20,7 +20,7 @@ come back here to manage what you build.
   per org.
 - **Tests on every pull request.** Simulation suites run against the branch's
   own files, with tools mocked and nothing deployed, and report a
-  `Vapi Evals` status that links to the run.
+  `Vapi Simulations` status that links to the run.
 - **A field guide to Vapi.** [`docs/learnings/`](docs/learnings/README.md)
   collects hard-won gotchas and recipes for assistants, squads, transfers,
   voicemail detection, latency and more.

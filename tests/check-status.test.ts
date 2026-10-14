@@ -95,7 +95,7 @@ test("statuses post to the head SHA with the run link, and long descriptions are
         "POST /repos/acme/gitops/statuses/abc",
         "Bearer t",
         {
-          context: "Vapi Evals / core / squads/main",
+          context: "Vapi Simulations / core / squads/main",
           state: "failure",
           description: 140,
           target_url: "https://run",
@@ -110,7 +110,7 @@ test("a rejected status (read-only token) only warns", async () => {
     assert.equal(
       await commitStatusPost(
         { token: "t", repo: "acme/gitops", sha: "abc", apiUrl },
-        { context: "Vapi Evals", state: "success", description: "ok" },
+        { context: "Vapi Simulations", state: "success", description: "ok" },
       ),
       false,
     );

@@ -68,7 +68,7 @@ function detailLines(result: CheckTargetResult): string[] {
 
 export function checkReportMarkdown(input: CheckReportInput): string {
   const lines = [
-    `## Vapi Evals${input.dryRun ? " (dry run: payloads built, nothing sent)" : ""}`,
+    `## Vapi Simulations${input.dryRun ? " (dry run: payloads built, nothing sent)" : ""}`,
     "",
   ];
   if (input.results.length > 0) {

@@ -2,7 +2,7 @@
 //
 // Builds each check target's inline simulation-run payload from the files
 // on disk (check-payload.ts, check-mocks.ts) and, unless --dry-run, runs it
-// in the check's run org and reports a strict verdict — as `Vapi Evals`
+// in the check's run org and reports a strict verdict — as `Vapi Simulations`
 // commit statuses when the PR workflow's GitHub env is set, and always as
 // a markdown report (the job summary in CI).
 //
@@ -42,7 +42,7 @@ const USAGE = [
   "",
   "Options:",
   `  <check>                  A check name from ${CHECKS_CONFIG_FILE}`,
-  "  --all                    Every check (also posts the aggregate Vapi Evals status)",
+  "  --all                    Every check (also posts the aggregate Vapi Simulations status)",
   "  --dry-run                Build the payloads offline; nothing is sent",
   "  --print-payload [dir]    Write each payload as JSON (default: tmp/check-payloads)",
   "  --changed-since <ref>    Only checks affected by changes since the merge base with <ref>",
@@ -297,6 +297,10 @@ async function liveRun(
   const post = async (status: CommitStatus) => {
     if (statusEnv) await commitStatusPost(statusEnv, status);
   };
+  // With one target in an --all run, the aggregate speaks for it: pending here
+  // with the run link, and the verdict (also linking the run) when the run
+  // ends. A per-target status would only repeat it.
+  const single = parsed.all && jobs.length === 1;
   try {
     console.log(
       `\n🧪 Running ${plural(jobs.filter((job) => job.result.body).length, "target")}…`,
@@ -308,13 +312,16 @@ async function liveRun(
       signal: controller.signal,
       onRunCreated: (job, url) =>
         post({
-          context: targetContext(job.check.name, checkTargetLabel(job.target)),
+          context: single
+            ? AGGREGATE_CONTEXT
+            : targetContext(job.check.name, checkTargetLabel(job.target)),
           state: "pending",
           description: "Simulations running",
           targetUrl: url,
         }),
-      onResult: (result) =>
-        post({
+      onResult: async (result) => {
+        if (single) return;
+        await post({
           context: targetContext(
             result.job.check.name,
             checkTargetLabel(result.job.target),
@@ -322,7 +329,8 @@ async function liveRun(
           state: outcomeState(result.outcome),
           description: result.reason,
           targetUrl: result.url ?? statusEnv?.runUrl,
-        }),
+        });
+      },
     });
   } finally {
     process.off("SIGINT", abort);
