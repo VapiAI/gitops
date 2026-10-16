@@ -2062,6 +2062,53 @@ dependency check, as `check-payload.ts` already does.
 
 ---
 
+## 40. Pull summary reports dashboard-ahead resources as preserved
+
+**Discovered:** 2026-10-10, while reviewing pull/apply output after a dashboard edit.
+
+### Problem
+
+The pull engine syncs a dashboard-ahead resource down when the local file is
+unchanged, but the final drift summary says the resource was "preserved
+locally". The summary also counts every existing resource as updated, even
+when the serialized file content is identical to disk.
+
+### Current behavior
+
+Each resource line correctly shows a down arrow and says that the unchanged
+local file is being synced down. The final summary uses stale preserve-local
+wording. Pull and apply also report unchanged existing resources as updated
+because the counter follows the resource's existence in state rather than
+whether the generated file content changed.
+
+The stale summary wording dates to commit 4136fde, which added drift labels
+for preserved resources. Commit 965a057 later changed dashboard-ahead
+handling to sync the dashboard version down, but did not update that summary
+text. Apply uses the same pull engine and reporting path.
+
+### Risk
+
+The summary contradicts the action shown on the resource line and can make a
+clean pull look like it changed every tracked resource. That obscures actual
+changes during review.
+
+### Current mitigation
+
+Read each resource line for its action and compare files directly to identify
+which resources changed.
+
+### Possible fix
+
+Label dashboard-ahead summary entries as synced down. Count an existing
+resource as updated only when the generated file content differs from disk;
+keep the normal file write behavior for identical content.
+
+### Status
+
+**Open.**
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally

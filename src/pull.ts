@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { dirname, extname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { stringify } from "yaml";
@@ -530,7 +530,7 @@ async function writeResourceFile(
   resourceType: ResourceType,
   resourceId: string,
   data: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ filePath: string; changed: boolean }> {
   const folderPath = FOLDER_MAP[resourceType];
   const dir = join(RESOURCES_DIR, folderPath);
 
@@ -544,11 +544,12 @@ async function writeResourceFile(
       await mkdir(dirname(filePath), { recursive: true });
 
       const yamlContent = stringify(cleanedData, YAML_OPTIONS);
+      const content = `---\n${yamlContent}---\n\n${systemPrompt}\n`;
+      const changed =
+        !existsSync(filePath) || (await readFile(filePath, "utf-8")) !== content;
+      await writeFile(filePath, content);
 
-      const mdContent = `---\n${yamlContent}---\n\n${systemPrompt}\n`;
-      await writeFile(filePath, mdContent);
-
-      return filePath;
+      return { filePath, changed };
     }
   }
 
@@ -556,11 +557,12 @@ async function writeResourceFile(
   const filePath = join(dir, `${resourceId}.yml`);
   await mkdir(dirname(filePath), { recursive: true });
 
-  const yamlContent = stringify(data, YAML_OPTIONS);
+  const content = stringify(data, YAML_OPTIONS);
+  const changed =
+    !existsSync(filePath) || (await readFile(filePath, "utf-8")) !== content;
+  await writeFile(filePath, content);
 
-  await writeFile(filePath, yamlContent);
-
-  return filePath;
+  return { filePath, changed };
 }
 
 // Write the dashboard version of a resource as a sibling
@@ -588,11 +590,12 @@ export async function writeDashboardBackup(
     .toISOString()
     .replace(/\.\d{3}Z$/, "")
     .replace(/:/g, "-");
-  return writeResourceFile(
+  const backup = await writeResourceFile(
     resourceType,
     `${resourceId}.${timestamp}.bkp`,
     withCredNames,
   );
+  return backup.filePath;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1065,6 +1068,7 @@ export async function pullResourceType(
     // fallback. Encodes the 3-step pipeline (cleanResource → resolve refs →
     // replace credential UUIDs) plus the _platformDefault marker.
     const withCredNames = canonicalizeForHash(resource, state, credReverse);
+    let fileChanged = false;
 
     if (bootstrap) {
       const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
@@ -1073,11 +1077,13 @@ export async function pullResourceType(
       );
     } else {
       // Write to file
-      const filePath = await writeResourceFile(
+      const written = await writeResourceFile(
         resourceType,
         resourceId,
         withCredNames,
       );
+      fileChanged = written.changed;
+      const filePath = written.filePath;
       const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
       const relPath = relative(BASE_DIR, filePath);
       console.log(
@@ -1086,7 +1092,7 @@ export async function pullResourceType(
     }
 
     if (isNew) created++;
-    else updated++;
+    else if (fileChanged) updated++;
 
     // Record the `{ uuid }` mapping in state and write the drift baseline into
     // the hash store.
@@ -1250,7 +1256,7 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
   const lines: string[] = [];
   if (counts["dashboard-ahead"] > 0) {
     lines.push(
-      `   ✏️  dashboard-ahead : ${counts["dashboard-ahead"]}  (these resources have UI edits since last pull; preserved locally)`,
+      `   ⬇️  dashboard-ahead : ${counts["dashboard-ahead"]}  (dashboard changes synced down to local)`,
     );
   }
   if (counts["local-ahead"] > 0) {
