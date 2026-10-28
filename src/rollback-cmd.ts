@@ -12,6 +12,7 @@ import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
 import { userAgentGet } from "./user-agent.ts";
 
@@ -22,6 +23,8 @@ interface RollbackEnv {
   env: string;
   token: string;
   baseUrl: string;
+  /** Where the key came from, for messages. */
+  source: string;
 }
 
 function loadEnvFile(env: string): RollbackEnv {
@@ -58,7 +61,7 @@ function loadEnvFile(env: string): RollbackEnv {
     console.error(`❌ ${missingApiKeyMessage(env)}`);
     process.exit(1);
   }
-  return { env, token, baseUrl };
+  return { env, token, baseUrl, source: resolved?.source ?? "the environment" };
 }
 
 function printUsage(): void {
@@ -138,6 +141,24 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadEnvFile(args.env);
+  // Rollback PATCHes resources by the UUIDs in this org's state, so a key for
+  // another org must stop here (see org-pin.ts).
+  try {
+    const outcome = await orgPinCheck({
+      rootDir: BASE_DIR,
+      org: args.env,
+      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet() },
+      keySource: cfg.source,
+    });
+    if (outcome.kind === "unverified")
+      console.warn(
+        `⚠️  Couldn't confirm which Vapi org the key belongs to, so it wasn't checked against resources/${args.env}/${ORG_PIN_FILE}.`,
+      );
+  } catch (error) {
+    if (!(error instanceof OrgPinMismatchError)) throw error;
+    console.error(`❌ ${error.message}`);
+    process.exit(1);
+  }
   const entries = await loadSnapshot(BASE_DIR, args.env, args.to!);
   if (entries.length === 0) {
     console.log("Snapshot directory exists but contains no resources.");

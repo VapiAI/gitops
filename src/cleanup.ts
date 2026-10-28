@@ -7,6 +7,7 @@ import {
   VAPI_ENV,
   VAPI_TOKEN,
 } from "./config.ts";
+import { orgPinGuard } from "./api.ts";
 import { FOLDER_MAP } from "./resource-parse.ts";
 import { slugify } from "./slug-utils.ts";
 import { loadState } from "./state.ts";
@@ -28,6 +29,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
+  await orgPinGuard();
   await sleep(REQUEST_DELAY_MS);
   const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
     headers: {
@@ -68,6 +70,7 @@ async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
 }
 
 async function vapiDelete(endpoint: string): Promise<void> {
+  await orgPinGuard();
   await sleep(REQUEST_DELAY_MS);
   const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
     method: "DELETE",

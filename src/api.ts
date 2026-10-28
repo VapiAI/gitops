@@ -1,4 +1,12 @@
-import { DRY_RUN, VAPI_BASE_URL, VAPI_TOKEN } from "./config.ts";
+import {
+  BASE_DIR,
+  DRY_RUN,
+  VAPI_BASE_URL,
+  VAPI_ENV,
+  VAPI_TOKEN,
+  VAPI_TOKEN_SOURCE,
+} from "./config.ts";
+import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
 import type { VapiResponse } from "./types.ts";
 import { userAgentGet } from "./user-agent.ts";
 import {
@@ -21,6 +29,47 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DRY_RUN_COUNTS = { POST: 0, PATCH: 0, DELETE: 0 };
+
+let orgPinChecked: Promise<void> | undefined;
+
+/**
+ * Check the key against resources/<org>/.vapi-org.json once per process,
+ * before the first request (see org-pin.ts). A mismatch exits instead of
+ * throwing, because several callers catch request errors and retry or carry
+ * on, and none of them should reach the wrong org.
+ */
+export function orgPinGuard(): Promise<void> {
+  orgPinChecked ??= (async () => {
+    try {
+      const outcome = await orgPinCheck({
+        rootDir: BASE_DIR,
+        org: VAPI_ENV,
+        connection: {
+          token: VAPI_TOKEN ?? "",
+          baseUrl: VAPI_BASE_URL,
+          userAgent: userAgentGet(),
+        },
+        keySource: VAPI_TOKEN_SOURCE,
+      });
+      if (outcome.kind === "pinned")
+        console.log(
+          `📌 Pinned resources/${VAPI_ENV}/ to Vapi org ${outcome.orgId} (${ORG_PIN_FILE}). Commit it with the folder.`,
+        );
+      if (outcome.kind === "unverified")
+        console.warn(
+          `⚠️  Couldn't confirm which Vapi org the key belongs to, so it wasn't checked against resources/${VAPI_ENV}/${ORG_PIN_FILE}.`,
+        );
+    } catch (error) {
+      if (error instanceof OrgPinMismatchError) {
+        console.error(`❌ ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  })();
+  return orgPinChecked;
+}
+
 
 export function getDryRunCounts(): {
   POST: number;
@@ -75,6 +124,7 @@ export async function vapiRequest<T = VapiResponse>(
   endpoint: string,
   body: Record<string, unknown>,
 ): Promise<T> {
+  await orgPinGuard();
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   if (DRY_RUN) {
@@ -134,6 +184,7 @@ export async function vapiRequest<T = VapiResponse>(
 }
 
 export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
+  await orgPinGuard();
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -177,6 +228,7 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
 }
 
 export async function vapiDelete(endpoint: string): Promise<void> {
+  await orgPinGuard();
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   if (DRY_RUN) {
