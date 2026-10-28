@@ -136,7 +136,7 @@ test("connectionLoad names the token variable when no key is found", () => {
         }),
       {
         message:
-          "Missing token for org acme; set VAPI_CHECK_TOKENS or .env.acme",
+          "Missing token for org acme; set VAPI_CHECK_TOKENS, VAPI_PRIVATE_API_KEY_ACME or .env.acme",
       },
     );
   } finally {
@@ -193,6 +193,26 @@ test("childRun throws when the script fails", () => {
           args: [],
         }),
       { message: "fail.ts failed for acme" },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("connectionLoad uses VAPI_PRIVATE_API_KEY_<ORG> before .env.<org>", () => {
+  const root = mkdtempSync(join(tmpdir(), "org-connection-"));
+  try {
+    writeFileSync(join(root, ".env.acme-dev"), "VAPI_PRIVATE_API_KEY=file-key\n");
+    const base = { rootDir: root, org: "acme-dev", tokensEnvName: "TEST_TOKENS" };
+    assert.deepEqual(
+      withEnv("VAPI_PRIVATE_API_KEY_ACME_DEV", "org-var-key", () => [
+        connectionLoad({ ...base, tokens: new Map([["acme-dev", "map-key"]]) }),
+        connectionLoad({ ...base, tokens: new Map() }),
+      ]),
+      [
+        { token: "map-key", baseUrl: undefined },
+        { token: "org-var-key", baseUrl: undefined },
+      ],
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

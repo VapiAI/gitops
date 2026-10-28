@@ -120,9 +120,19 @@ run commands without one, so pass the org name to skip every prompt:
 cp .env.example .env.my-org          # then paste the private API key into VAPI_PRIVATE_API_KEY
 npm run setup -- my-org
 
-# Option B — the key is already in the environment (CI secret, shell export)
-VAPI_PRIVATE_API_KEY=... npm run setup -- my-org
+# Option B — the key is already exported under the org's own name (for example in your shell profile)
+export VAPI_PRIVATE_API_KEY_MY_ORG=...
+npm run setup -- my-org
 ```
+
+**Several orgs, one shell.** Every command looks for the org's key in this
+order: `VAPI_PRIVATE_API_KEY_<ORG>` (the org name upper-cased, hyphens as
+underscores: `acme-dev` → `VAPI_PRIVATE_API_KEY_ACME_DEV`), then
+`VAPI_PRIVATE_API_KEY`, then `.env.<org>`. Export the per-org name, not
+`VAPI_PRIVATE_API_KEY`: the generic name applies to every org, so one org's
+key would be used for all of them. When it overrides a different key in
+`.env.<org>`, commands warn and setup refuses. A CI job that works in one
+org can keep using `VAPI_PRIVATE_API_KEY`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

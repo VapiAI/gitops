@@ -6,7 +6,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { resolveApiKey } from "./api-key.ts";
+import { orgApiKeyVar, resolveApiKey } from "./api-key.ts";
 
 export interface OrgConnection {
   token: string;
@@ -69,10 +69,11 @@ export function connectionLoad(args: ConnectionLoadArgs): OrgConnection {
     VAPI_PRIVATE_API_KEY: envValue(envContent, "VAPI_PRIVATE_API_KEY"),
     VAPI_TOKEN: envValue(envContent, "VAPI_TOKEN"),
   });
-  const token = tokens.get(org) ?? envToken;
+  const token =
+    tokens.get(org) ?? (process.env[orgApiKeyVar(org)]?.trim() || envToken);
   if (!token)
     throw new Error(
-      `Missing token for org ${org}; set ${tokensEnvName} or .env.${org}`,
+      `Missing token for org ${org}; set ${tokensEnvName}, ${orgApiKeyVar(org)} or .env.${org}`,
     );
   return {
     token,
@@ -96,6 +97,8 @@ export function childRun(run: ChildRunArgs): void {
     ...process.env,
     VAPI_PRIVATE_API_KEY: connection.token,
     VAPI_TOKEN: connection.token,
+    // The child resolves the per-org variable first, so pin it too.
+    [orgApiKeyVar(org)]: connection.token,
   };
   if (connection.baseUrl) environment.VAPI_BASE_URL = connection.baseUrl;
   if (!connection.baseUrl) delete environment.VAPI_BASE_URL;

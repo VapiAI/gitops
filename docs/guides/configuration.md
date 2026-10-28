@@ -15,6 +15,22 @@ A variable already set in your shell or CI environment takes precedence over
 the file. `.env.<org>.local` and `.env.local` are also read, after
 `.env.<org>`, and only fill in variables that are still unset.
 
+### Keys in your shell
+
+Commands look for an org's key in this order:
+
+1. `VAPI_PRIVATE_API_KEY_<ORG>`: the org name upper-cased, with hyphens as
+   underscores (`acme-dev` → `VAPI_PRIVATE_API_KEY_ACME_DEV`).
+2. `VAPI_PRIVATE_API_KEY` (or `VAPI_TOKEN`) in the environment.
+3. `VAPI_PRIVATE_API_KEY` (or `VAPI_TOKEN`) in `.env.<org>`.
+
+To keep keys in your shell profile, export one `VAPI_PRIVATE_API_KEY_<ORG>`
+per org. Don't export `VAPI_PRIVATE_API_KEY` there: it applies to every org,
+so one org's key would be used for all of them. When the generic variable
+overrides a different key in `.env.<org>`, commands print a warning and
+`npm run setup` refuses to continue. Setup also refuses a key that another
+org's `.env` file already holds.
+
 ## CI and workflow settings
 
 Set these in GitHub under **Settings → Secrets and variables → Actions**.

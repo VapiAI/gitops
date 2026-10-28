@@ -53,7 +53,7 @@ plain `npm run pull` (it never overwrites local edits), `npm run push -- <org>
 **2. Never handle API keys.** Don't ask the human to paste a key into chat,
 don't print or read out `.env.*` files, never pass a key as a command-line
 argument, and never commit `.env.*`. Keys live in `.env.<org>` (gitignored)
-or the environment.
+or the environment, as `VAPI_PRIVATE_API_KEY_<ORG>`.
 
 **3. Reference resources by ID, never by UUID.** A resource's ID is its path
 under the type folder without the extension (`tools/lookup-patient.yml` is
@@ -98,9 +98,12 @@ wizard needs a terminal. Instead:
 1. `nvm use` (or check `node --version` satisfies `engines` in `package.json`), then `npm ci`.
 2. **Get the API key without handling it.** Ask the human to create
    `.env.<org>` from `.env.example` and put a Vapi **private API key** in
-   `VAPI_PRIVATE_API_KEY`, or confirm it's already exported. Point them to
-   https://dashboard.vapi.ai/org/api-keys → **Private API Keys** (a public key
-   won't work).
+   `VAPI_PRIVATE_API_KEY`, or confirm it's already exported as
+   `VAPI_PRIVATE_API_KEY_<ORG>` (`acme-dev` → `VAPI_PRIVATE_API_KEY_ACME_DEV`).
+   Point them to https://dashboard.vapi.ai/org/api-keys → **Private API Keys**
+   (a public key won't work). If setup or a command reports a different key in
+   `.env.<org>`, stop and tell the human: the exported key may be another
+   org's. Don't unset variables or edit `.env` files to silence it.
 3. Ask whether to download the org's existing resources:
    - Managing an existing org → `npm run setup -- <org>` (`--resources all`, the default).
    - Authoring from scratch → `npm run setup -- <org> --resources none` (state only, no files).

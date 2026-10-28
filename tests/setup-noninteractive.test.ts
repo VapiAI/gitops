@@ -118,6 +118,8 @@ function runSetup(cwd: string, args: string[], env: Record<string, string> = {})
   delete baseEnv.VAPI_TOKEN;
   delete baseEnv.VAPI_PRIVATE_API_KEY;
   delete baseEnv.VAPI_BASE_URL;
+  for (const name of Object.keys(baseEnv))
+    if (name.startsWith("VAPI_PRIVATE_API_KEY_")) delete baseEnv[name];
   const result = spawnSync("node", ["--import", "tsx", "src/setup.ts", ...args], {
     cwd,
     env: { ...baseEnv, ...env },
@@ -184,6 +186,58 @@ test("direct setup refuses to touch an org that already exists locally", () => {
     assert.match(res.output, /npm run pull -- my-org/);
     // Must fail before any network call.
     assert.doesNotMatch(res.output, /Validating against/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ── Keys that may belong to another org ──────────────────────────────────
+// Setup writes the key into .env.<org> and downloads that org, so it refuses
+// a key that may be another org's instead of filling the folder with it.
+
+test("direct setup refuses a generic exported key that differs from .env.<org>", () => {
+  const fx = sandbox();
+  try {
+    writeFileSync(join(fx.dir, ".env.my-org"), "VAPI_PRIVATE_API_KEY=my-org-key\n");
+    const res = runSetup(fx.dir, ["my-org"], { VAPI_PRIVATE_API_KEY: "other-org-key" });
+    assert.equal(res.code, 1);
+    assert.match(res.output, /not the different key in \.env\.my-org/);
+    assert.match(res.output, /VAPI_PRIVATE_API_KEY_MY_ORG/);
+    assert.doesNotMatch(res.output, /Validating against/);
+    assert.doesNotMatch(res.output, /my-org-key|other-org-key/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("direct setup refuses a key another org's .env file already holds", () => {
+  const fx = sandbox();
+  try {
+    writeFileSync(join(fx.dir, ".env.acme-dev"), "VAPI_PRIVATE_API_KEY=dev-key\n");
+    const res = runSetup(fx.dir, ["acme-prod"], { VAPI_PRIVATE_API_KEY: "dev-key" });
+    assert.equal(res.code, 1);
+    assert.match(res.output, /already the key in \.env\.acme-dev/);
+    assert.doesNotMatch(res.output, /Validating against/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("direct setup uses the org's own variable over a generic key and the file", () => {
+  const fx = sandbox();
+  try {
+    writeFileSync(join(fx.dir, ".env.my-org"), "VAPI_PRIVATE_API_KEY=stale-key\n");
+    const res = runSetup(fx.dir, ["my-org"], {
+      VAPI_PRIVATE_API_KEY: "other-org-key",
+      VAPI_PRIVATE_API_KEY_MY_ORG: "my-org-key",
+    });
+    // Gets past the key checks; the test API base is unreachable, so it then
+    // fails at validation.
+    assert.match(
+      res.output,
+      /Using API key from the VAPI_PRIVATE_API_KEY_MY_ORG environment variable/,
+    );
+    assert.match(res.output, /Validating against/);
   } finally {
     fx.cleanup();
   }

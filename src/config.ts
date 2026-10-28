@@ -1,4 +1,4 @@
-import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -215,7 +215,10 @@ function parseFlags(): {
 // Environment File Loading
 // ─────────────────────────────────────────────────────────────────────────────
 
-function loadEnvFile(env: string, baseDir: string): void {
+// Returns the files' own values (first file wins), so key resolution can tell
+// a key from .env.<org> apart from one that was exported in the shell.
+function loadEnvFile(env: string, baseDir: string): Record<string, string> {
+  const fileVars: Record<string, string> = {};
   const envFiles = [
     join(baseDir, `.env.${env}`), // e.g. .env.my-org
     join(baseDir, `.env.${env}.local`), // e.g. .env.my-org.local (local overrides)
@@ -243,6 +246,7 @@ function loadEnvFile(env: string, baseDir: string): void {
           value = value.slice(1, -1);
         }
 
+        if (fileVars[key] === undefined) fileVars[key] = value;
         // Only set if not already defined (env vars take precedence)
         if (process.env[key] === undefined) {
           process.env[key] = value;
@@ -251,6 +255,7 @@ function loadEnvFile(env: string, baseDir: string): void {
       console.log(`📁 Loaded env file: ${basename(envFile)}`);
     }
   }
+  return fileVars;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -273,23 +278,29 @@ export const {
   applyFilter: APPLY_FILTER,
 } = parseFlags();
 
-// The private API key: VAPI_PRIVATE_API_KEY (canonical) or VAPI_TOKEN (legacy).
-// Capture the real environment before .env files are merged in, so an
-// exported key of either name still beats a key in the .env file.
-const ENV_API_KEY = resolveApiKey(process.env);
+// The private API key. Capture the real environment before .env files are
+// merged in, so an exported key still beats a key in the .env file:
+// VAPI_PRIVATE_API_KEY_<ORG>, then VAPI_PRIVATE_API_KEY / VAPI_TOKEN, then
+// .env.<org>. See resolveOrgApiKey.
+const SHELL_ENV = { ...process.env };
 
-loadEnvFile(VAPI_ENV, BASE_DIR);
+const ENV_FILE_VARS = loadEnvFile(VAPI_ENV, BASE_DIR);
+const API_KEY = resolveOrgApiKey(VAPI_ENV, SHELL_ENV, ENV_FILE_VARS);
 
 // API configuration
-export const VAPI_TOKEN = ENV_API_KEY ?? resolveApiKey(process.env);
+export const VAPI_TOKEN = API_KEY?.token;
 export const VAPI_BASE_URL = process.env.VAPI_BASE_URL || "https://api.vapi.ai";
 
 if (!VAPI_TOKEN) {
   console.error(`❌ ${missingApiKeyMessage(VAPI_ENV)}`);
   process.exit(1);
 }
-// Some call sites read process.env.VAPI_TOKEN directly; keep them working
-// when only VAPI_PRIVATE_API_KEY was provided.
+if (API_KEY?.warning) console.warn(`⚠️  ${API_KEY.warning}`);
+else if (API_KEY && API_KEY.source !== `.env.${VAPI_ENV}`)
+  console.log(`🔑 Using the API key from ${API_KEY.source}`);
+// Some call sites read the variables directly; keep them on the key chosen
+// above, so code reading the generic name can't see another org's key.
+process.env.VAPI_PRIVATE_API_KEY = VAPI_TOKEN;
 process.env.VAPI_TOKEN = VAPI_TOKEN;
 
 // Paths

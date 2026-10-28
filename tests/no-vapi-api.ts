@@ -4,3 +4,6 @@
 process.env.VAPI_BASE_URL = "http://127.0.0.1:9";
 delete process.env.VAPI_PRIVATE_API_KEY;
 delete process.env.VAPI_TOKEN;
+// Per-org keys (VAPI_PRIVATE_API_KEY_<ORG>) a developer exports in their shell.
+for (const name of Object.keys(process.env))
+  if (name.startsWith("VAPI_PRIVATE_API_KEY_")) delete process.env[name];
