@@ -8,7 +8,7 @@
 // Self-contained (does not import config.ts) so it can run in isolation
 // without triggering the global CLI parser.
 
-import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -49,7 +49,9 @@ function loadEnvFile(env: string): RollbackEnv {
       if (envVars[key] === undefined) envVars[key] = value;
     }
   }
-  const token = resolveApiKey(process.env, envVars);
+  const resolved = resolveOrgApiKey(env, process.env, envVars);
+  if (resolved?.warning) console.warn(`⚠️  ${resolved.warning}`);
+  const token = resolved?.token;
   const baseUrl =
     process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
   if (!token) {

@@ -1,4 +1,4 @@
-import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
@@ -166,7 +166,9 @@ function loadOrgEnv(slug: string): { token: string; baseUrl: string } {
     vars[trimmed.slice(0, eq).trim()] = val;
   }
 
-  const token = resolveApiKey(vars);
+  const resolved = resolveOrgApiKey(slug, process.env, vars);
+  if (resolved?.warning) console.warn(`⚠️  ${resolved.warning}`);
+  const token = resolved?.token;
   if (!token) {
     throw new Error(missingApiKeyMessage(slug));
   }

@@ -7,8 +7,8 @@
 //
 // The API key is deliberately NOT accepted as an argument: argv ends up in
 // shell history, process listings, and agent transcripts. It comes from the
-// VAPI_PRIVATE_API_KEY (or legacy VAPI_TOKEN) environment variable or an existing
-// `.env.<org>` file instead.
+// VAPI_PRIVATE_API_KEY_<ORG> or VAPI_PRIVATE_API_KEY (or legacy VAPI_TOKEN)
+// environment variable or an existing `.env.<org>` file instead.
 
 export type SetupRegion = "us" | "eu";
 export type SetupResources = "all" | "none";
@@ -41,12 +41,13 @@ Options (non-interactive):
   -h, --help               Show this help
 
 Needs a Vapi PRIVATE API key, from https://dashboard.vapi.ai/org/api-keys
-(Private API Keys section). It is read from VAPI_PRIVATE_API_KEY in the environment
-or in an existing .env.<org> file (legacy VAPI_TOKEN also works), and is
-never accepted as a command-line argument.
+(Private API Keys section). It is read from VAPI_PRIVATE_API_KEY_<ORG> in the
+environment (my-org → VAPI_PRIVATE_API_KEY_MY_ORG), then VAPI_PRIVATE_API_KEY in
+the environment, then an existing .env.<org> file (legacy VAPI_TOKEN also works).
+It is never accepted as a command-line argument.
 
 Examples:
-  VAPI_PRIVATE_API_KEY=... npm run setup -- my-org
+  VAPI_PRIVATE_API_KEY_MY_ORG=... npm run setup -- my-org
   npm run setup -- my-org --resources none        (with .env.my-org already created)`;
 
 /** Parse the arguments that follow `npm run setup --`. */
@@ -66,7 +67,7 @@ export function parseSetupArgs(argv: string[]): SetupArgs {
         mode: "error",
         message:
           "Refusing to read an API key from the command line (it would leak into shell history and logs). " +
-          "Set VAPI_PRIVATE_API_KEY in the environment or put it in .env.<org> instead.",
+          "Set VAPI_PRIVATE_API_KEY_<ORG> in the environment or put it in .env.<org> instead.",
       };
     }
 
@@ -145,7 +146,5 @@ export function readEnvValue(content: string, key: string): string | undefined {
   return undefined;
 }
 
-/** Placeholder values copied from .env.example should not count as a token. */
-export function isPlaceholderToken(token: string): boolean {
-  return /^your-.*-here$/i.test(token) || token === "<your-key>";
-}
+// Lives in api-key.ts so the engine's key resolution skips placeholders too.
+export { isPlaceholderToken } from "./api-key.ts";

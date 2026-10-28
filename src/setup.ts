@@ -1,6 +1,6 @@
 import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -8,13 +8,13 @@ import {
   API_KEY_VAR,
   API_KEYS_URL,
   LEGACY_API_KEY_VAR,
-  resolveApiKey,
+  orgApiKeyVar,
+  resolveOrgApiKey,
 } from "./api-key.ts";
 import { updateEnvConnection } from "./bindings.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import {
   type DirectSetupOptions,
-  isPlaceholderToken,
   parseSetupArgs,
   readEnvValue,
   SETUP_USAGE,
@@ -302,7 +302,12 @@ async function deleteExistingOrg(slug: string): Promise<void> {
 // Pull integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-function invokePull(slug: string, selectedIds: Set<string>): void {
+function invokePull(
+  slug: string,
+  selectedIds: Set<string>,
+  token: string,
+  baseUrl: string,
+): void {
   // Group selected resources by type so we can pass --id per invocation
   const byType = new Map<string, string[]>();
   for (const id of selectedIds) {
@@ -315,9 +320,16 @@ function invokePull(slug: string, selectedIds: Set<string>): void {
 
   const binDir = join(BASE_DIR, "node_modules", ".bin");
   const pathSep = process.platform === "win32" ? ";" : ":";
+  // Pin the key that was just pasted and validated. The child pulls resolve
+  // exported variables before .env.<org>, so an exported key for another
+  // org would otherwise download that org into this one's folder.
   const env = {
     ...process.env,
     PATH: `${binDir}${pathSep}${process.env.PATH ?? ""}`,
+    [orgApiKeyVar(slug)]: token,
+    VAPI_PRIVATE_API_KEY: token,
+    VAPI_TOKEN: token,
+    VAPI_BASE_URL: baseUrl,
   };
 
   execSync(`tsx src/pull.ts ${slug} --bootstrap --bindings-only`, {
@@ -360,6 +372,21 @@ function runPullScript(args: string[]): void {
   });
 }
 
+// The org whose .env.<org> already holds this key, if any. Each org has its
+// own key, so a match means the key was meant for that org.
+function orgWithKey(slug: string, token: string): string | undefined {
+  for (const name of readdirSync(BASE_DIR)) {
+    const org = name.match(/^\.env\.([a-z0-9-]+)$/)?.[1];
+    if (!org || org === slug || org === "example" || org === "local") continue;
+    const content = readFileSync(join(BASE_DIR, name), "utf-8");
+    const key =
+      readEnvValue(content, API_KEY_VAR) ??
+      readEnvValue(content, LEGACY_API_KEY_VAR);
+    if (key === token) return org;
+  }
+  return undefined;
+}
+
 function fail(message: string): never {
   console.error(c.red(`\n  ✗ ${message}\n`));
   process.exit(1);
@@ -383,37 +410,39 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
         `    To start over, a human should run the interactive wizard: npm run setup`,
     );
   }
-
-  // ── Token: env var first, then an existing .env.<org> ────────────────
+  // ── Token: VAPI_PRIVATE_API_KEY_<ORG>, the generic variable, then .env.<org>
   const envFileContent = existsSync(envPath)
     ? await readFile(envPath, "utf-8")
     : "";
-  const fromEnv = resolveApiKey(process.env);
-  const fromFile = resolveApiKey({
-    VAPI_PRIVATE_API_KEY: readEnvValue(envFileContent, "VAPI_PRIVATE_API_KEY"),
-    VAPI_TOKEN: readEnvValue(envFileContent, "VAPI_TOKEN"),
+  const resolved = resolveOrgApiKey(slug, process.env, {
+    [API_KEY_VAR]: readEnvValue(envFileContent, API_KEY_VAR),
+    [LEGACY_API_KEY_VAR]: readEnvValue(envFileContent, LEGACY_API_KEY_VAR),
   });
-  const token =
-    fromEnv && !isPlaceholderToken(fromEnv)
-      ? fromEnv
-      : fromFile && !isPlaceholderToken(fromFile)
-        ? fromFile
-        : undefined;
 
-  if (!token) {
+  if (!resolved) {
     fail(
       `No Vapi private API key found.\n` +
         `    Copy one from ${API_KEYS_URL} (Private API Keys section), then either:\n` +
         `    • add it to .env.${slug} as ${API_KEY_VAR}=<private API key> (see .env.example), or\n` +
-        `    • export ${API_KEY_VAR}=<private API key> in the environment\n` +
+        `    • export ${orgApiKeyVar(slug)}=<private API key> in the environment\n` +
         `    Then re-run: npm run setup -- ${slug}`,
     );
   }
-  console.log(
-    c.dim(
-      `  Using API key from ${fromEnv && token === fromEnv ? `${process.env[API_KEY_VAR]?.trim() ? API_KEY_VAR : LEGACY_API_KEY_VAR} environment variable` : `.env.${slug}`}`,
-    ),
-  );
+  // Setup writes the key into .env.<org> and downloads that org, so a key
+  // that may belong to another org is a hard stop here, not a warning.
+  if (resolved.warning) {
+    fail(`${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`);
+  }
+  const otherOrg = orgWithKey(slug, resolved.token);
+  if (otherOrg) {
+    fail(
+      `The key from ${resolved.source} is already the key in .env.${otherOrg}.\n` +
+        `    Each org has its own key, so this is probably ${otherOrg}'s key, not ${slug}'s.\n` +
+        `    Use ${slug}'s own key, or delete .env.${otherOrg} if it is out of date.`,
+    );
+  }
+  const token = resolved.token;
+  console.log(c.dim(`  Using API key from ${resolved.source}`));
 
   // ── Region: flag > VAPI_BASE_URL > auto-detect ────────────────────────
   const configuredBase =
@@ -449,6 +478,7 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
 
   // Child pulls give process env precedence over .env files, so pin the
   // validated connection explicitly rather than inheriting a stale value.
+  process.env[orgApiKeyVar(slug)] = token;
   process.env.VAPI_PRIVATE_API_KEY = token;
   process.env.VAPI_TOKEN = token;
   process.env.VAPI_BASE_URL = vapiBaseUrl;
@@ -661,7 +691,7 @@ async function main(): Promise<void> {
     console.log("  Writing environment file only.\n");
     await writeEnvFile(slug, trimmedKey, vapiBaseUrl);
     await mkdir(resourceDir, { recursive: true });
-    invokePull(slug, new Set());
+    invokePull(slug, new Set(), trimmedKey, vapiBaseUrl);
     printSummary(slug);
     return;
   }
@@ -765,7 +795,7 @@ async function main(): Promise<void> {
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(slug, selectedIds);
+  invokePull(slug, selectedIds, trimmedKey, vapiBaseUrl);
 
   // ── Done ──────────────────────────────────────────────────────────────
 

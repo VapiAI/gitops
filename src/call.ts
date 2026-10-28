@@ -1,4 +1,4 @@
-import { missingApiKeyMessage, resolveApiKey } from "./api-key.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
@@ -149,7 +149,9 @@ function loadEnvFile(env: string): { token: string; baseUrl: string } {
     }
   }
 
-  const token = resolveApiKey(process.env, envVars);
+  const resolved = resolveOrgApiKey(env, process.env, envVars);
+  if (resolved?.warning) console.warn(`⚠️  ${resolved.warning}`);
+  const token = resolved?.token;
   const baseUrl =
     process.env.VAPI_BASE_URL || envVars.VAPI_BASE_URL || "https://api.vapi.ai";
 
