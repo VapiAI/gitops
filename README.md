@@ -182,13 +182,18 @@ To test every pull request automatically, set up [PR checks](docs/guides/pr-chec
 - **Secrets stay out of git.** API keys live in `.env.<org>` (gitignored) or
   CI secrets. Credentials are referenced by name and bound to each org's own
   credentials.
+- **Each folder is pinned to its org.** The first command that can see which
+  org a key belongs to records it in `resources/<org>/.vapi-org.json`. After
+  that, every command checks the key against it before any request, and stops
+  if the key belongs to a different org, so a wrong key can't pull another
+  org's resources into the folder or push the folder into another org.
 - **`apply` is the default deploy.** It pulls first, so it won't overwrite
   changes made in the dashboard since your last pull. `pull` only syncs down;
   raw `push` skips the pull and is rarely what you want.
 
 | Path | Committed? | What it is |
 | --- | --- | --- |
-| `resources/<org>/` | Yes | Your resources |
+| `resources/<org>/` | Yes | Your resources, and `.vapi-org.json`, the org the folder belongs to |
 | `.vapi-state.<org>.json` | Yes | Name → UUID mappings for the org |
 | `.env.<org>` | **No** | API key and generated binding IDs |
 | `.vapi-state-hash/` | No | Your local baseline for detecting dashboard edits |

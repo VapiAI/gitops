@@ -110,7 +110,12 @@ wizard needs a terminal. Instead:
    Add `--region eu` for EU orgs if auto-detection picks the wrong one.
 4. Verify: `npm run validate -- <org>` passes, and `resources/<org>/` plus
    `.vapi-state.<org>.json` exist.
-5. Commit `resources/<org>/` and `.vapi-state.<org>.json`. Never commit `.env.<org>`.
+5. Commit `resources/<org>/` (including `.vapi-org.json`) and `.vapi-state.<org>.json`. Never commit `.env.<org>`.
+
+If a command stops because the key "belongs to Vapi org …, but resources/<org>/
+is pinned to org …", the key is for another org. Stop and tell the human.
+Never delete or edit `.vapi-org.json` to get past it: that file is the only
+thing tying the folder to its org.
 
 If setup says the org is "already set up locally", don't delete anything to
 work around it — run `npm run pull -- <org>`, or ask the human.
@@ -138,8 +143,8 @@ precisely.
    run it locally for the org it names and fix the errors. Without that org's
    `.env.<org>`, run `VAPI_PRIVATE_API_KEY=validate-only npm run validate -- <org>`;
    never ask for a real key just to validate. Don't weaken the check or the
-   workflow to get past it, and never edit the state file or `.vapi-ignore`
-   to make a reference resolve: fix the name, or pull.
+   workflow to get past it, and never edit the state file, `.vapi-ignore` or
+   `.vapi-org.json` to make a reference resolve: fix the name, or pull.
 4. **Build PR checks offline** if `vapi-checks.yml` exists:
    `npm run check -- --all --dry-run`. Fix anything it reports.
 5. **Deploy only with a yes** (safety rule 1): `npm run apply -- <org>`, or

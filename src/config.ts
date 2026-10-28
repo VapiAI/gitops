@@ -289,6 +289,8 @@ const API_KEY = resolveOrgApiKey(VAPI_ENV, SHELL_ENV, ENV_FILE_VARS);
 
 // API configuration
 export const VAPI_TOKEN = API_KEY?.token;
+/** Where VAPI_TOKEN came from, for messages that must never show the key. */
+export const VAPI_TOKEN_SOURCE = API_KEY?.source ?? "the environment";
 export const VAPI_BASE_URL = process.env.VAPI_BASE_URL || "https://api.vapi.ai";
 
 if (!VAPI_TOKEN) {

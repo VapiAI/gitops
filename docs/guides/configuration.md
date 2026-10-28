@@ -49,6 +49,7 @@ Set these in GitHub under **Settings → Secrets and variables → Actions**.
 | --- | --- |
 | `promotion.yml` | Promotion pipelines between orgs. Start from `promotion.example.yml`. |
 | `vapi-checks.yml` | PR checks. Start from `vapi-checks.example.yml`. |
+| `resources/<org>/.vapi-org.json` | The Vapi org ID the folder belongs to. Written by the first command that can see the key's org, then checked by every command before any request: a key for another org stops the command. If a folder genuinely moves to another org, delete the file in a reviewed commit. |
 | `resources/<org>/.vapi-ignore` | Platform resources this repo shouldn't manage, as glob patterns. See `resources/.vapi-ignore.example` and [YAML conventions](../learnings/yaml-conventions.md). |
 
 ## Other environment variables
