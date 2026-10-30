@@ -20,7 +20,7 @@ import {
   SETUP_USAGE,
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -98,6 +98,7 @@ async function apiGet(token: string, endpoint: string): Promise<unknown> {
     headers: {
       Authorization: `Bearer ${token}`,
       "User-Agent": userAgentGet(),
+      "x-vapi-client": vapiClientGet(),
     },
   });
 

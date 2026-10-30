@@ -34,10 +34,31 @@ test("every fetch in src/ sets the User-Agent", () => {
   assert.deepEqual(missing, []);
 });
 
+// The Vapi API also gets x-vapi-client on every request. The GitHub status
+// call is the one fetch that must not send it: it isn't a Vapi request.
+test("every Vapi fetch in src/ sets x-vapi-client", () => {
+  const missing: string[] = [];
+  const files = readdirSync(SRC, { recursive: true, encoding: "utf8" });
+  for (const file of files.filter((f) => f.endsWith(".ts"))) {
+    readFileSync(join(SRC, file), "utf8")
+      .split(/\bfetch\(/)
+      .slice(1)
+      .forEach((rest, i) => {
+        const call = rest.slice(0, rest.indexOf(");") + 2);
+        const github = call.includes('"X-GitHub-Api-Version"');
+        if (!github && !call.includes('"x-vapi-client"'))
+          missing.push(`${file} (fetch #${i + 1})`);
+      });
+  }
+  assert.deepEqual(missing, []);
+});
+
 test("api.ts requests carry the command's User-Agent", async () => {
   const seen: Array<string | undefined> = [];
+  const seenClient: Array<string | string[] | undefined> = [];
   const server = createServer((req, res) => {
     seen.push(req.headers["user-agent"]);
+    seenClient.push(req.headers["x-vapi-client"]);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end("[]");
   });
@@ -53,10 +74,15 @@ test("api.ts requests carry the command's User-Agent", async () => {
   delete process.env.GITHUB_ACTIONS;
   try {
     const { vapiGet } = await import("../src/api.ts");
-    const { userAgentGet } = await import("../src/user-agent.ts");
+    const { userAgentGet, vapiClientGet } = await import("../src/user-agent.ts");
     await vapiGet("/assistant");
     assert.deepEqual(seen, [userAgentGet()]);
     assert.match(seen[0] ?? "", /^vapi-gitops-apply\/[^ ]+$/);
+    assert.deepEqual(seenClient, [vapiClientGet()]);
+    assert.match(
+      String(seenClient[0]),
+      /^gitops\/[^;]+; command=apply; run=[0-9a-f-]{36}$/,
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

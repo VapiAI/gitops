@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "url";
 import type { Environment, StateFile } from "./types.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -366,6 +366,7 @@ async function createCall(
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.token}`,
       "User-Agent": userAgentGet(),
+      "x-vapi-client": vapiClientGet(),
     },
     body: JSON.stringify(body),
   });

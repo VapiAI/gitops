@@ -9,7 +9,7 @@ import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // the launcher, which runs before any org/token is selected.
 import { isBackupCopyFile } from "./slug-utils.ts";
 import type { StateFile } from "./types.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -229,6 +229,7 @@ async function apiGet(
     headers: {
       Authorization: `Bearer ${token}`,
       "User-Agent": userAgentGet(),
+      "x-vapi-client": vapiClientGet(),
     },
   });
   if (!response.ok) {

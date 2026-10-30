@@ -17,7 +17,7 @@ import {
   type SimRunVerdict,
 } from "./sim-result.ts";
 import type { StateFile } from "./types.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   VapiApiError,
   vapiFetchJson,
@@ -240,6 +240,7 @@ function connectionFor(cfg: SimEnv): VapiConnection {
     token: cfg.token,
     baseUrl: cfg.baseUrl,
     userAgent: userAgentGet("sim"),
+    vapiClient: vapiClientGet("sim"),
   };
 }
 

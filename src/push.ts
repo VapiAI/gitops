@@ -35,7 +35,7 @@ import {
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   summarizeFindings,
   validateNoIgnoredReferences,
@@ -358,6 +358,7 @@ async function upsertResourceWithStateRecovery(options: {
                 headers: {
                   Authorization: `Bearer ${process.env.VAPI_TOKEN}`,
                   "User-Agent": userAgentGet(),
+                  "x-vapi-client": vapiClientGet(),
                 },
               },
             );

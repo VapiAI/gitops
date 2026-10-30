@@ -229,6 +229,7 @@ function runArgs(
       token: "t",
       baseUrl: stub.baseUrl,
       userAgent: "vapi-gitops-check/test",
+      vapiClient: "gitops/test; command=check",
     }),
     deadline: DEADLINE_FAR(),
     pollIntervalMs: 1,

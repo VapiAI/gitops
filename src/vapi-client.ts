@@ -10,6 +10,8 @@ export interface VapiConnection {
   token: string;
   baseUrl: string;
   userAgent: string;
+  // The `x-vapi-client` header, from vapiClientGet in user-agent.ts.
+  vapiClient: string;
 }
 
 // "transient": retry 429 and 5xx. "rate-limit-only": retry 429 only — for
@@ -87,6 +89,7 @@ export async function vapiFetchJson<T>(
         Authorization: `Bearer ${connection.token}`,
         "Content-Type": "application/json",
         "User-Agent": connection.userAgent,
+        "x-vapi-client": connection.vapiClient,
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });

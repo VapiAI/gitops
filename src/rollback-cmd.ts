@@ -14,7 +14,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -147,7 +147,7 @@ async function main(): Promise<void> {
     const outcome = await orgPinCheck({
       rootDir: BASE_DIR,
       org: args.env,
-      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet() },
+      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
       keySource: cfg.source,
     });
     if (outcome.kind === "unverified")
@@ -211,6 +211,7 @@ async function main(): Promise<void> {
         Authorization: `Bearer ${cfg.token}`,
         "Content-Type": "application/json",
         "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
       body: JSON.stringify(entry.payload.platform),
     });

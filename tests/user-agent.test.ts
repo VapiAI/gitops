@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import { runSimulation } from "../src/sim.ts";
-import { userAgentGet } from "../src/user-agent.ts";
+import { RUN_ID_ENV, userAgentGet, vapiClientGet } from "../src/user-agent.ts";
 
 // The User-Agent is how gitops traffic is counted in the platform's request
 // logs and analytics (simulation runs by `user_agent` on the run-started
@@ -86,11 +86,17 @@ test("userAgentGet: marks runs in CI", () => {
 });
 
 test("runSimulation: sends the sim User-Agent on run create", async () => {
-  const seen: { method?: string; url?: string; userAgent?: string } = {};
+  const seen: {
+    method?: string;
+    url?: string;
+    userAgent?: string;
+    vapiClient?: string | string[];
+  } = {};
   const server = createServer((req, res) => {
     seen.method = req.method;
     seen.url = req.url;
     seen.userAgent = req.headers["user-agent"];
+    seen.vapiClient = req.headers["x-vapi-client"];
     res.writeHead(201, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ id: "run-1", status: "queued" }));
   });
@@ -119,4 +125,38 @@ test("runSimulation: sends the sim User-Agent on run create", async () => {
   assert.equal(seen.method, "POST");
   assert.equal(seen.url, "/eval/simulation/run");
   assert.equal(seen.userAgent, userAgentGet("sim"));
+  assert.equal(seen.vapiClient, vapiClientGet("sim"));
+});
+
+// x-vapi-client is the shape the platform parses for every first-party client
+// (`<client>/<version>; command=…; run=…[; ci]`), so its format is pinned too.
+const RUN_ID = "3f2b6c1e-9d4a-4c7e-8a1b-0e5f6a7b8c9d";
+
+test("vapiClientGet: names the command, run and CI flag", () => {
+  assert.deepEqual(
+    [
+      vapiClientGet(undefined, {
+        env: { npm_lifecycle_event: "apply", [RUN_ID_ENV]: RUN_ID },
+        scriptPath: "/repo/src/push.ts",
+      }),
+      vapiClientGet("sim", {
+        env: { [RUN_ID_ENV]: RUN_ID, GITHUB_ACTIONS: "true" },
+      }),
+    ],
+    [
+      `gitops/${packageVersion}; command=apply; run=${RUN_ID}`,
+      `gitops/${packageVersion}; command=sim; run=${RUN_ID}; ci`,
+    ],
+  );
+});
+
+test("vapiClientGet: leaves out a run id the platform would reject", () => {
+  assert.equal(
+    vapiClientGet("check", { env: { [RUN_ID_ENV]: "bad id; ci" } }),
+    `gitops/${packageVersion}; command=check`,
+  );
+});
+
+test("user-agent.ts pins one valid run id for the process", () => {
+  assert.match(process.env[RUN_ID_ENV] ?? "", /^[0-9a-f-]{36}$/);
 });
