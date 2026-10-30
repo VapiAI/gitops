@@ -12,7 +12,7 @@ import { FOLDER_MAP } from "./resource-parse.ts";
 import { slugify } from "./slug-utils.ts";
 import { loadState } from "./state.ts";
 import type { ResourceType } from "./types.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dangerous Sync - Delete everything NOT in state file
@@ -35,6 +35,7 @@ async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
     headers: {
       Authorization: `Bearer ${VAPI_TOKEN}`,
       "User-Agent": userAgentGet(),
+      "x-vapi-client": vapiClientGet(),
     },
   });
   if (!response.ok) {
@@ -77,6 +78,7 @@ async function vapiDelete(endpoint: string): Promise<void> {
     headers: {
       Authorization: `Bearer ${VAPI_TOKEN}`,
       "User-Agent": userAgentGet(),
+      "x-vapi-client": vapiClientGet(),
     },
   });
   if (!response.ok && response.status !== 404) {

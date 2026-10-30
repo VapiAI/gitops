@@ -8,7 +8,7 @@ import {
 } from "./config.ts";
 import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
 import type { VapiResponse } from "./types.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   INITIAL_DELAY_MS,
   MAX_RETRIES,
@@ -48,6 +48,7 @@ export function orgPinGuard(): Promise<void> {
           token: VAPI_TOKEN ?? "",
           baseUrl: VAPI_BASE_URL,
           userAgent: userAgentGet(),
+          vapiClient: vapiClientGet(),
         },
         keySource: VAPI_TOKEN_SOURCE,
       });
@@ -149,6 +150,7 @@ export async function vapiRequest<T = VapiResponse>(
         "Content-Type": "application/json",
         Authorization: `Bearer ${VAPI_TOKEN}`,
         "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
       body: JSON.stringify(body),
     });
@@ -194,6 +196,7 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,
         "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
     });
 
@@ -244,6 +247,7 @@ export async function vapiDelete(endpoint: string): Promise<void> {
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,
         "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
     });
 

@@ -10,7 +10,7 @@ import type { CheckOutcome, CheckTargetResult } from "./check-run.ts";
 import { checkRunAll, MAX_CONCURRENT, MIN_START_MS } from "./check-run.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import type { PromotionConfig } from "./promotion.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 export interface PromotionGateResult {
   outcome: CheckOutcome;
@@ -155,6 +155,7 @@ export async function promotionGateRun(
         baseUrl: connection.baseUrl ?? DEFAULT_BASE_URL,
         // Gate runs are counted apart from PR check runs.
         userAgent: userAgentGet("promote"),
+        vapiClient: vapiClientGet("promote"),
       }),
       deadline: gateDeadline(check, Date.now()),
       signal: controller.signal,

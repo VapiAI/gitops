@@ -15,9 +15,19 @@
 // prefixes, so keep those prefixes stable; the version and the ` (ci)` suffix
 // may vary.
 //
+// Every Vapi request also sends `x-vapi-client`, built by `vapiClientGet`:
+//
+//   gitops/<package version>; command=<command>; run=<run id>[; ci]
+//
+// It carries the same command, version and CI flag in the shape the platform
+// parses for every first-party client, plus a run id shared by every request
+// of one gitops run, so the platform can group them. The run id is pinned in
+// VAPI_GITOPS_RUN_ID exactly as the command is pinned in VAPI_GITOPS_COMMAND.
+//
 // Config-free on purpose (like api-key.ts): importing config.ts would parse
 // argv and exit, which breaks importing this from sim.ts and tests.
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,4 +140,29 @@ export function userAgentGet(
   const command = product ?? commandNameGet(context);
   const ci = ciRun(context.env) ? " (ci)" : "";
   return `vapi-gitops-${command}/${PACKAGE_VERSION}${ci}`;
+}
+
+export const RUN_ID_ENV = "VAPI_GITOPS_RUN_ID";
+
+// What the platform accepts as a run id; a UUID fits. An inherited value that
+// doesn't match is replaced, so a stray variable can't drop the run id.
+const RUN_ID_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
+
+// Pin one run id for this process and every process it spawns.
+if (!RUN_ID_PATTERN.test(process.env[RUN_ID_ENV] ?? "")) {
+  process.env[RUN_ID_ENV] = randomUUID();
+}
+
+export function vapiClientGet(
+  product?: "sim" | "check" | "promote",
+  context: UserAgentContext = {
+    env: process.env,
+    scriptPath: process.argv[1],
+  },
+): string {
+  const command = product ?? commandNameGet(context);
+  const runId = context.env[RUN_ID_ENV];
+  const run = runId && RUN_ID_PATTERN.test(runId) ? `; run=${runId}` : "";
+  const ci = ciRun(context.env) ? "; ci" : "";
+  return `gitops/${PACKAGE_VERSION}; command=${command}${run}${ci}`;
 }

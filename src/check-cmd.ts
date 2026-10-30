@@ -32,7 +32,7 @@ import {
 } from "./check-status.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
-import { userAgentGet } from "./user-agent.ts";
+import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import type { VapiConnection } from "./vapi-client.ts";
 
 const USAGE = [
@@ -290,9 +290,10 @@ async function liveRun(
   process.once("SIGINT", abort);
   process.once("SIGTERM", abort);
   const userAgent = userAgentGet("check");
+  const vapiClient = vapiClientGet("check");
   const vapi = (job: CheckJob): VapiConnection => {
     const connection = connections.get(job.check.runOrg)!;
-    return { token: connection.token, baseUrl: connection.baseUrl!, userAgent };
+    return { token: connection.token, baseUrl: connection.baseUrl!, userAgent, vapiClient };
   };
   const post = async (status: CommitStatus) => {
     if (statusEnv) await commitStatusPost(statusEnv, status);

@@ -359,7 +359,7 @@ test("simRunItemsFetch: pages until totalItems and dedupes overlapping pages", a
     ],
     async (baseUrl) => {
       const items = await simRunItemsFetch(
-        { token: "t", baseUrl, userAgent: "test" },
+        { token: "t", baseUrl, userAgent: "test", vapiClient: "test" },
         "run-1",
       );
       assert.equal(items.length, 1002);

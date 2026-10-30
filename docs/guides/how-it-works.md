@@ -153,7 +153,14 @@ command you ran (`apply`, `push`, `pull`, …; `cli` if it can't be told). It
 adds ` (ci)` when `GITHUB_ACTIONS=true` or `CI` is set to anything other than
 `false` or `0`. For example, `npm run apply` in a GitHub workflow sends
 `vapi-gitops-apply/1.0.0 (ci)`. Your own npm script names are never sent.
-Vapi uses it to count how the tool is used. Nothing else is sent beyond the
+
+Each request also sends an `x-vapi-client` header with the same details plus a
+run id: `gitops/<version>; command=<command>; run=<run id>[; ci]`. The run id is
+a random UUID made once per command you run and shared by every process it
+starts, so Vapi can group one run's requests. It identifies nothing about you
+or your machine.
+
+Vapi uses these headers to count how the tool is used. Nothing else is sent beyond the
 requests themselves; there is no separate telemetry.
 
 ## Where things live
