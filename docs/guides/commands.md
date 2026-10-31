@@ -20,6 +20,7 @@ The other commands are direct only.
 | `npm run call` | `npm run call -- <org> -a <assistant>` or `-s <squad>` | Talk to an assistant or squad from your terminal. |
 | `npm run sim` | `npm run sim -- <org> --suite <name> --target <name>` | Run a simulation suite against deployed resources. Exits 0 passed, 1 failed, 3 incomplete. |
 | `npm run check` | `npm run check -- <check>` or `--all`, `[--dry-run]` | Run [PR checks](pr-checks.md) against local files, nothing deployed. Exits 0 passed, 1 failed, 2 config or build error, 3 incomplete. |
+| `npm run rollout` | `npm run rollout -- advance\|abort\|status [--org <org>] [--assistant <id>]` | Move [gradual rollouts](promotion.md#gradual-rollout-optional) a step, abort one (needs `--org`), or list them. The rollout workflow runs `advance` every 15 minutes. |
 | `npm run promote` | `npm run promote -- --pipeline <p> --from <org> --to <org> [--apply] [--no-rollout \| --rollout-override]` | Plan, or apply, a [promotion](promotion.md) between orgs. Into an org with a [gradual rollout](promotion.md#gradual-rollout-optional), `--no-rollout` publishes at once and `--rollout-override` pins over a split set outside gitops. |
 | `npm run build` | `npm run build` | Type-check the code and tests. |
 | `npm test` | `npm test` | Run the test suite. |

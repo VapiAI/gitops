@@ -185,9 +185,11 @@ The rollout workflow then moves the ramp one step at a time (see below).
 Every write carries a `gitops-rollout …` note in the allocation's
 description, which is the ramp's only state; the traffic tab shows it.
 
-Not everything is split. A new assistant goes live when it's created; squads,
-tools and structured outputs aren't versioned per call, so a change to them
-reaches 100% of calls on apply. The plan output lists each of these.
+Not everything is split. A new assistant goes live when it's created. Only
+calls placed directly to an assistant follow its split; calls through a squad
+don't. Tools, structured outputs and squads aren't versioned per call, so a
+change to them reaches 100% of calls on apply. The plan output lists each of
+these.
 
 The promotion refuses, before the gate and with nothing written, when an
 assistant has a split someone set by hand (a manual split wins) or is managed
@@ -199,6 +201,45 @@ the version with the most traffic, never the canary.
 for a revert: it also releases an assistant gitops was holding, so the
 reverted version takes every call. An assistant whose files didn't change,
 or a split set by hand, is left as it is.
+
+### The rollout workflow
+
+`.github/workflows/rollout.yml` runs `npm run rollout -- advance` every 15
+minutes. For each assistant in a rollout org, it reads the newest traffic
+allocation and, once `intervalMinutes` have passed since it was written,
+moves to the next step. The last step is an explicit 100% on the new version;
+the tick after that hands the assistant back to the default (every call to
+the newest version). If someone published a newer version during the ramp,
+that hand-back would send it every call un-ramped, so the ramp holds on the
+ramped version instead and says so; promote again to ramp the newer one.
+
+To turn the schedule on, set the repository variable
+`VAPI_ROLLOUT_ENABLED=true`. It uses the same `VAPI_PROMOTION_TOKENS` secret
+and commits nothing. Run it by hand from the Actions tab:
+
+| `action` | What it does |
+| --- | --- |
+| `advance` | One step for every ramp whose interval has passed |
+| `abort` | Puts the ramp back on its old version at 100% (needs `org`; `assistant` narrows it). Runs even with the schedule off, and never waits behind a tick |
+| `status` | Lists ramps and anything waiting for a human, writes nothing |
+
+An aborted assistant stays on its old version, and later publishes land at
+0%, until the next promotion (which ramps again) or a `no-rollout` one.
+
+The ramp stops, and `status` flags it, when the split changes under it (a
+dashboard edit, say): it never overwrites someone else's change. A pin left
+by a promotion that was killed mid-run is picked up after 6 hours: carried on
+from step 1 if the run had published, released if it had replaced the
+default, otherwise left for you. The 6 hours assume the promotion step's
+330-minute limit in CI; a promotion run on your machine must finish within
+them.
+
+Keep in mind:
+
+- GitHub runs scheduled workflows from the default branch only, may start
+  them minutes late, and disables them after 60 days without activity in a
+  public repository. Intervals are minimums.
+- Each tick makes about two API reads per assistant in each rollout org.
 
 ## Rolling Back a Promotion
 

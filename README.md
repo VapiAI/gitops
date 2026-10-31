@@ -217,6 +217,7 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | `npm run sim -- <org>` | Run a simulation suite against deployed resources |
 | `npm run check` | Run PR simulation checks against local files |
 | `npm run promote` | Promote resources from one org to the next |
+| `npm run rollout -- advance\|abort\|status` | Step, abort or list gradual rollouts |
 
 `setup`, `apply`, `pull`, `push`, `cleanup` and `call` prompt interactively
 when run without arguments. Full flags and examples:

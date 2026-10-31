@@ -1,0 +1,69 @@
+name: Advance gradual rollouts
+
+# Moves each gradual rollout (orgs with rollout: in promotion.yml) one step
+# once its interval has passed. The ramp's state lives in each assistant's
+# traffic allocation, so this job commits nothing. See
+# docs/guides/promotion.md#gradual-rollout-optional.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: advance, abort or status
+        required: false
+        default: advance
+        type: choice
+        options: [advance, abort, status]
+      org:
+        description: Only this org (required for abort)
+        required: false
+        type: string
+      assistant:
+        description: Only this assistant ID (e.g. support-agent)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# Its own group, never vapi-promotion: GitHub keeps one pending run per
+# group, so a tick queued there would cancel a waiting promotion. An abort
+# gets a group to itself, so it is never queued behind a tick.
+concurrency:
+  group: ${{ inputs.action == 'abort' && format('vapi-rollout-abort-{0}', github.run_id) || 'vapi-rollout' }}
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    # Scheduled ticks need the opt-in variable; a manual run (an abort, most
+    # of all) always works.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      vars.VAPI_ROLLOUT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VAPI_PROMOTION_TOKENS: ${{ secrets.VAPI_PROMOTION_TOKENS }}
+      ACTION: ${{ inputs.action }}
+      ORG: ${{ inputs.org }}
+      ASSISTANT: ${{ inputs.assistant }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run the rollout
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=("${ACTION:-advance}")
+          if [[ -n "${ORG:-}" ]]; then args+=(--org "$ORG"); fi
+          if [[ -n "${ASSISTANT:-}" ]]; then args+=(--assistant "$ASSISTANT"); fi
+          npm run rollout -- "${args[@]}"

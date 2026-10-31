@@ -22,6 +22,7 @@
     "check": "tsx src/check-cmd.ts",
     "rollback": "tsx src/rollback-cmd.ts",
     "promote": "tsx src/promote-cmd.ts",
+    "rollout": "tsx src/rollout-cmd.ts",
     "build": "tsc --noEmit",
     "test": "node --import tsx --import ./tests/no-vapi-api.ts --test tests/*.test.ts"
   },
