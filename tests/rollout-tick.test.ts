@@ -176,3 +176,59 @@ for (const description of [
     assert.equal(rolloutAbortWrite("asst", allocation(description, 5)), null);
   });
 }
+
+const GATED = {
+  ...ROLLOUT,
+  healthGate: { minCalls: 20, maxErrorRateDelta: 2 },
+};
+
+function decideGated(health: RolloutTickInput["health"]) {
+  return rolloutTickDecide({
+    assistantId: "asst",
+    allocation: allocation(STEP_1, 31),
+    latestVersion: "v2",
+    rollout: GATED,
+    now: NOW,
+    health,
+  });
+}
+
+test("health gate: waits until the new version has taken enough calls", () => {
+  assert.deepEqual(
+    decideGated([
+      { version: "v1", calls: 900, errors: 0 },
+      { version: "v2", calls: 12, errors: 0 },
+    ]),
+    { note: "step 1 at v2: 12 of 20 calls before the next step" },
+  );
+});
+
+test("health gate: moves on when the new version's error rate is within the margin", () => {
+  assert.equal(
+    writeOf(
+      decideGated([
+        { version: "v1", calls: 1000, errors: 10 },
+        { version: "v2", calls: 100, errors: 2 },
+      ]),
+    ),
+    "rollout-step step v1:95,v2:5",
+  );
+});
+
+test("health gate: aborts when the new version errors well above the old", () => {
+  const decision = decideGated([
+    { version: "v1", calls: 1000, errors: 10 },
+    { version: "v2", calls: 100, errors: 5 },
+  ]);
+  assert.equal(writeOf(decision), "rollout-abort abort v1:100");
+  assert.equal(
+    rolloutMarkerParse(decision.write?.write.description)?.reason,
+    "error-rate+4.0pp",
+  );
+});
+
+test("health gate: no calls at all waits rather than aborting", () => {
+  assert.deepEqual(decideGated([]), {
+    note: "step 1 at v2: 0 of 20 calls before the next step",
+  });
+});

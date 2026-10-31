@@ -234,6 +234,23 @@ default, otherwise left for you. The 6 hours assume the promotion step's
 330-minute limit in CI; a promotion run on your machine must finish within
 them.
 
+Optionally, gate each step on the new version's calls:
+
+```yaml
+    rollout:
+      healthGate:
+        minCalls: 20           # calls on the new version before the next step
+        maxErrorRateDelta: 2   # abort if its error rate is this many points higher
+```
+
+Before each step, the ticker reads the calls each version took since the
+current step (the same metrics as the assistant's traffic tab). It waits
+until the new version has `minCalls`, then aborts the ramp, with the reason
+in the allocation's note, if the new version's share of calls that ended in
+an error is more than `maxErrorRateDelta` percentage points above the old
+version's. `healthGate: {}` takes those defaults. It runs after, never
+instead of, a `check:` gate.
+
 Keep in mind:
 
 - GitHub runs scheduled workflows from the default branch only, may start

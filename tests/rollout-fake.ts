@@ -9,6 +9,7 @@ import type {
   AllocationWrite,
   RolloutApi,
   RolloutAssistant,
+  RolloutVersionHealth,
 } from "../src/rollout-api.ts";
 import type { RolloutCommand } from "../src/user-agent.ts";
 import { VapiApiError } from "../src/vapi-client.ts";
@@ -25,6 +26,9 @@ export class RolloutFake {
   splittingEnabled = true;
   probes = 0;
   reads = 0;
+  // What healthGet answers, and the windows it was asked for.
+  health: RolloutVersionHealth[] = [];
+  healthWindows: Array<{ from: string; to: string }> = [];
   // Fails the Nth allocationCreate (1-based) with this status and body.
   failCreate?: { nth: number; status: number; error: string };
   // Runs before each allocationCreate, to simulate a concurrent writer.
@@ -124,6 +128,13 @@ export class RolloutFake {
             }),
           );
         return structuredClone(this.append(write, command));
+      },
+      healthGet: async (_id, from, to) => {
+        this.healthWindows.push({
+          from: from.toISOString(),
+          to: to.toISOString(),
+        });
+        return structuredClone(this.health);
       },
       allocationsProbe: async () => {
         this.probes++;

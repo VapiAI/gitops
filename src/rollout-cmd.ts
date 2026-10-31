@@ -11,9 +11,13 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OrgConnection } from "./org-connection.ts";
 import { connectionLoad, tokensParse } from "./org-connection.ts";
-import type { PromotionConfig } from "./promotion.ts";
+import type { PromotionConfig, PromotionRollout } from "./promotion.ts";
 import { promotionConfigParse, promotionStateParse } from "./promotion.ts";
-import type { Allocation, RolloutApi } from "./rollout-api.ts";
+import type {
+  Allocation,
+  RolloutApi,
+  RolloutVersionHealth,
+} from "./rollout-api.ts";
 import { allocationConflictGet, rolloutApiCreate } from "./rollout-api.ts";
 import { rolloutMarkerParse } from "./rollout-marker.ts";
 import type { RolloutTickWrite } from "./rollout-tick.ts";
@@ -152,13 +156,15 @@ async function orgRun(
         continue;
       }
       const assistant = await api.assistantGet(uuid);
+      const now = deps.now();
       const decision = rolloutTickDecide({
         assistantId: uuid,
         allocation,
         latestVersion: assistant?.latestVersion ?? null,
         rollout,
-        now: deps.now(),
+        now,
         runId,
+        health: await healthRead(api, rollout, allocation, now),
       });
       if (args.action === "advance" && decision.write)
         await tickWrite(api, id, decision.write);
@@ -171,6 +177,22 @@ async function orgRun(
     }
   }
   return failures;
+}
+
+// Per-version calls since the current step began, read only when a gated
+// step is due, since each read is a metrics query.
+async function healthRead(
+  api: RolloutApi,
+  rollout: PromotionRollout,
+  allocation: Allocation | null,
+  now: number,
+): Promise<RolloutVersionHealth[] | undefined> {
+  if (!rollout.healthGate || !allocation) return undefined;
+  if (rolloutMarkerParse(allocation.description)?.kind !== "step")
+    return undefined;
+  const since = Date.parse(allocation.createdAt);
+  if (now - since < rollout.intervalMinutes * 60_000) return undefined;
+  return api.healthGet(allocation.assistantId, new Date(since), new Date(now));
 }
 
 // An abort is idempotent in intent, so a lost race is retried once against
