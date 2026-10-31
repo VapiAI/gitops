@@ -23,6 +23,9 @@
 // parses for every first-party client, plus a run id shared by every request
 // of one gitops run, so the platform can group them. The run id is pinned in
 // VAPI_GITOPS_RUN_ID exactly as the command is pinned in VAPI_GITOPS_COMMAND.
+// A gradual rollout's traffic-allocation writes override the command per
+// request (`rollout-pin`, `rollout-step`, …; see RolloutCommand), so each
+// write type is countable; the process's own reads keep its command.
 //
 // Config-free on purpose (like api-key.ts): importing config.ts would parse
 // argv and exit, which breaks importing this from sim.ts and tests.
@@ -90,6 +93,7 @@ const COMMANDS = new Set([
   "check",
   "rollback",
   "promote",
+  "rollout",
 ]);
 
 export const COMMAND_ENV = "VAPI_GITOPS_COMMAND";
@@ -153,8 +157,21 @@ if (!RUN_ID_PATTERN.test(process.env[RUN_ID_ENV] ?? "")) {
   process.env[RUN_ID_ENV] = randomUUID();
 }
 
+// The traffic-allocation writes a gradual rollout makes, one label each, so
+// analytics can tell a pin from a step, a restore or an abort by command
+// alone. A per-request label, never a process label: they are not in
+// COMMANDS, so VAPI_GITOPS_COMMAND can't name one.
+export type RolloutCommand =
+  | "rollout-pin"
+  | "rollout-step"
+  | "rollout-restore"
+  | "rollout-complete"
+  | "rollout-hold"
+  | "rollout-abort"
+  | "rollout-release";
+
 export function vapiClientGet(
-  product?: "sim" | "check" | "promote",
+  product?: "sim" | "check" | "promote" | RolloutCommand,
   context: UserAgentContext = {
     env: process.env,
     scriptPath: process.argv[1],

@@ -26,12 +26,23 @@ export interface PromotionBindings {
   phoneNumbers: PromotionBindingMap;
 }
 
+// A gradual rollout: a promotion into the org publishes changed assistants at
+// 0% and then moves their traffic to the new version step by step, one step
+// per `intervalMinutes`, instead of all at once.
+export interface PromotionRollout {
+  // Percent of calls on the new version at each step; the last is 100.
+  steps: number[];
+  // Minimum minutes between steps. The rollout workflow ticks every 15.
+  intervalMinutes: number;
+}
+
 export interface PromotionOrg {
   baseUrl?: string;
   bindings: PromotionBindings;
   // A vapi-checks.yml check that must pass in this org before anything is
   // promoted out of it.
   check?: string;
+  rollout?: PromotionRollout;
 }
 
 export interface PromotionPipeline {
@@ -145,7 +156,66 @@ export function promotionBindingsParse(value: unknown): PromotionBindings {
   };
 }
 
-const PROMOTION_ORG_KEYS = ["baseUrl", "bindings", "check"];
+const PROMOTION_ORG_KEYS = ["baseUrl", "bindings", "check", "rollout"];
+
+export const ROLLOUT_STEPS_DEFAULT = [1, 5, 10, 25, 50, 100];
+export const ROLLOUT_INTERVAL_MINUTES_DEFAULT = 30;
+// The rollout workflow's cron period; a shorter interval could not be honored.
+export const ROLLOUT_INTERVAL_MINUTES_MIN = 15;
+const ROLLOUT_KEYS = ["steps", "intervalMinutes"];
+
+// The API stores shares as integer thousandths of a percent.
+export function millipercentage(percent: number): number {
+  return Math.round(percent * 1000);
+}
+
+export function promotionRolloutParse(
+  value: unknown,
+  slug: string,
+): PromotionRollout {
+  const raw = object(value ?? {}, `org ${slug}.rollout`);
+  for (const key of Object.keys(raw))
+    if (!ROLLOUT_KEYS.includes(key))
+      throw new Error(
+        `org ${slug}.rollout has unknown key "${key}" (allowed: ${ROLLOUT_KEYS.join(", ")})`,
+      );
+  const steps = raw.steps ?? ROLLOUT_STEPS_DEFAULT;
+  if (
+    !Array.isArray(steps) ||
+    steps.length === 0 ||
+    !steps.every((step) => typeof step === "number" && Number.isFinite(step))
+  )
+    throw new Error(`org ${slug}.rollout.steps must be a list of percentages`);
+  for (const [index, step] of steps.entries()) {
+    if (
+      step < 0.001 ||
+      step > 100 ||
+      // 1.005 * 1000 is 1004.9999999999999 in floating point, so compare
+      // with a tolerance rather than exactly.
+      Math.abs(step * 1000 - millipercentage(step)) > 1e-6
+    )
+      throw new Error(
+        `org ${slug}.rollout.steps: ${step} must be between 0.001 and 100, with at most three decimal places`,
+      );
+    if (index > 0 && step <= steps[index - 1]!)
+      throw new Error(
+        `org ${slug}.rollout.steps must increase: ${step} follows ${steps[index - 1]}`,
+      );
+  }
+  if (steps[steps.length - 1] !== 100)
+    throw new Error(`org ${slug}.rollout.steps must end at 100`);
+  const intervalMinutes =
+    raw.intervalMinutes ?? ROLLOUT_INTERVAL_MINUTES_DEFAULT;
+  if (
+    typeof intervalMinutes !== "number" ||
+    !Number.isInteger(intervalMinutes) ||
+    intervalMinutes < ROLLOUT_INTERVAL_MINUTES_MIN
+  )
+    throw new Error(
+      `org ${slug}.rollout.intervalMinutes must be a whole number of at least ${ROLLOUT_INTERVAL_MINUTES_MIN}`,
+    );
+  return { steps: [...steps], intervalMinutes };
+}
 
 export function promotionConfigParse(content: string): PromotionConfig {
   const raw = object(parseYaml(content), "promotion.yml");
@@ -174,6 +244,9 @@ export function promotionConfigParse(content: string): PromotionConfig {
       baseUrl: typeof org.baseUrl === "string" ? org.baseUrl : undefined,
       bindings: promotionBindingsParse(org.bindings),
       ...(typeof org.check === "string" ? { check: org.check } : {}),
+      ...("rollout" in org
+        ? { rollout: promotionRolloutParse(org.rollout, slug) }
+        : {}),
     };
   }
   const pipelinesRaw = object(raw.pipelines, "promotion.yml pipelines");

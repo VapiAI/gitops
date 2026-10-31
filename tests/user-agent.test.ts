@@ -150,6 +150,13 @@ test("vapiClientGet: names the command, run and CI flag", () => {
   );
 });
 
+test("vapiClientGet: labels a rollout write by its own command", () => {
+  assert.equal(
+    vapiClientGet("rollout-pin", { env: { [RUN_ID_ENV]: RUN_ID } }),
+    `gitops/${packageVersion}; command=rollout-pin; run=${RUN_ID}`,
+  );
+});
+
 test("vapiClientGet: leaves out a run id the platform would reject", () => {
   assert.equal(
     vapiClientGet("check", { env: { [RUN_ID_ENV]: "bad id; ci" } }),

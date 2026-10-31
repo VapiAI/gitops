@@ -11,6 +11,7 @@ import { checkRunAll, MAX_CONCURRENT, MIN_START_MS } from "./check-run.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import type { PromotionConfig } from "./promotion.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { DEFAULT_BASE_URL } from "./vapi-client.ts";
 
 export interface PromotionGateResult {
   outcome: CheckOutcome;
@@ -18,7 +19,6 @@ export interface PromotionGateResult {
   url?: string;
 }
 
-const DEFAULT_BASE_URL = "https://api.vapi.ai";
 // Gate checks must fit well inside the promotion step's timeout, so a check
 // that can't finish is rejected when the config loads, not killed mid-run.
 export const GATE_BUDGET_MINUTES = 300;

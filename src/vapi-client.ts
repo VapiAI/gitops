@@ -6,6 +6,11 @@
 // runner) uses this client instead. api.ts imports the error class and retry
 // policy from here, so both clients fail and retry the same way.
 
+// The API host when neither promotion.yml nor `.env.<org>` names one. The
+// engine's child processes fall back to the same host (config.ts), so a
+// parent that talks to the API directly must too.
+export const DEFAULT_BASE_URL = "https://api.vapi.ai";
+
 export interface VapiConnection {
   token: string;
   baseUrl: string;

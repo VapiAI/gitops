@@ -12,6 +12,8 @@ import {
   promotionGatePlanLine,
   promotionGateRun,
 } from "./promotion-gate.ts";
+import type { RolloutApi } from "./rollout-api.ts";
+import { rolloutApiCreate } from "./rollout-api.ts";
 import {
   promotionConfigParse,
   promotionPlanApply,
@@ -53,6 +55,8 @@ export interface PromotionDeps {
     check: CheckDefinition,
     connection: OrgConnection,
   ) => Promise<PromotionGateResult>;
+  // The traffic-allocation client for an org with a gradual rollout.
+  rolloutApi: (connection: OrgConnection) => RolloutApi;
 }
 
 // Gated orgs' checks, and the orgs whose check already passed in this run.
@@ -146,6 +150,29 @@ function orgConnection(
     tokensEnvName: TOKENS_ENV,
     baseUrl: config.orgs[org]?.baseUrl,
   });
+}
+
+// Every org a transition here would roll out into must have traffic
+// splitting, a beta the API gates per org. Checked once, before anything is
+// promoted, so a missing flag stops the run instead of one transition in.
+async function rolloutOrgsProbe(
+  config: PromotionConfig,
+  transitions: PromotionTransition[],
+  tokens: Map<string, string>,
+  deps: PromotionDeps,
+): Promise<void> {
+  const orgs = new Set(
+    transitions
+      .map((transition) => transition.target)
+      .filter((target) => config.orgs[target]?.rollout),
+  );
+  for (const org of orgs) {
+    const api = deps.rolloutApi(orgConnection(config, org, tokens));
+    if (!(await api.allocationsProbe()))
+      throw new Error(
+        `Traffic splitting is not enabled for ${org}, so its rollout: setting in promotion.yml can't run. Ask Vapi to enable traffic splitting for the org, or remove rollout: from ${org}.`,
+      );
+  }
 }
 
 function orgScriptRun(
@@ -308,6 +335,7 @@ export async function promotionCommandRun(
     childRun: orgScriptRun,
     checkRun: (check, connection) =>
       promotionGateRun(ROOT_DIR, check, connection),
+    rolloutApi: rolloutApiCreate,
     ...overrides,
   };
   const parsed = argumentsParse(args);
@@ -331,7 +359,9 @@ export async function promotionCommandRun(
   // Applying a deletion removes the intermediate org's state entry. Carry the
   // reviewed authorization forward so the same deletion can reach later orgs.
   const deletionAuthorizedSources = new Set<string>();
-  for (const transition of transitionsBuild(config, parsed)) {
+  const transitions = transitionsBuild(config, parsed);
+  if (parsed.apply) await rolloutOrgsProbe(config, transitions, tokens, deps);
+  for (const transition of transitions) {
     const sourceKey = `${transition.pipeline}:${transition.source}`;
     const deleted = await transitionRun(
       config,
