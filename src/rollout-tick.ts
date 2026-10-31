@@ -20,6 +20,11 @@ import type { RolloutCommand } from "./user-agent.ts";
 // local promote has no cap.
 export const ROLLOUT_ORPHAN_AGE_MINUTES = 360;
 
+// A step still waiting this many intervals after it was written is overdue,
+// and fails the advance run. One interval is the normal wait; two more cover
+// cron jitter and a skipped tick, so a failure means the ramp is stuck.
+export const ROLLOUT_OVERDUE_INTERVALS = 3;
+
 export interface RolloutTickInput {
   assistantId: string;
   allocation: Allocation | null;
@@ -44,6 +49,18 @@ export interface RolloutTickDecision {
   note?: string;
   // A ramp a human should look at.
   stale?: boolean;
+  // The ramp should have moved and has not; fails the advance run. Holds and
+  // aborts are deliberate, so they are stale but never overdue.
+  overdue?: boolean;
+  // What the health gate read, for the run summary.
+  gate?: string;
+}
+
+interface HealthGateResult {
+  // Set when the gate holds the step back or aborts it.
+  decision?: RolloutTickDecision;
+  // What it read; set whenever the gate ran.
+  gate?: string;
 }
 
 function ageMinutes(allocation: Allocation, now: number): number {
@@ -84,18 +101,27 @@ function stepNext(
   const allocation = input.allocation!;
   const { steps, intervalMinutes } = input.rollout;
   if (!marker.from || !marker.to || marker.step === undefined)
-    return { note: "step without from/to; left alone", stale: true };
+    return {
+      note: "step without from/to; left alone",
+      stale: true,
+      overdue: true,
+    };
   const age = ageMinutes(allocation, input.now);
   if (age < intervalMinutes)
     return {
       note: `step ${marker.step}/${steps.length} at ${marker.to}; next in ${Math.ceil(intervalMinutes - age)} min`,
     };
-  const gated = healthGateCheck(input, marker);
-  if (gated) return gated;
+  const { decision, gate } = healthGateCheck(input, marker, age);
+  if (decision) return decision;
+  const read = gate ? { gate } : {};
   // The last step (100%) is written as `complete`, not as a 0/100 split.
   if (marker.step + 1 < steps.length)
-    return { write: stepWrite(input, marker.from, marker.to, marker.step + 1) };
+    return {
+      write: stepWrite(input, marker.from, marker.to, marker.step + 1),
+      ...read,
+    };
   return {
+    ...read,
     write: {
       command: "rollout-complete",
       write: {
@@ -180,6 +206,7 @@ function pinNext(
   return {
     note: `pinned on ${marker.from} by a promotion that stopped before publishing; promote again, or abort`,
     stale: true,
+    overdue: true,
   };
 }
 
@@ -188,24 +215,43 @@ function errorRate(health: RolloutVersionHealth | undefined): number {
   return (health.errors / health.calls) * 100;
 }
 
+function healthFormat(
+  label: string | undefined,
+  health: RolloutVersionHealth | undefined,
+): string {
+  if (!health) return `${label}: 0 calls`;
+  return `${label}: ${health.calls} calls, ${errorRate(health).toFixed(1)}% errors`;
+}
+
 // Before a step moves on: wait for enough calls on the new version, then
-// abort if its error rate is too far above the old version's.
+// abort if its error rate is too far above the old version's. A gate abort
+// is labelled rollout-health-abort so it is countable apart from a human's.
 function healthGateCheck(
   input: RolloutTickInput,
   marker: RolloutMarker,
-): RolloutTickDecision | null {
+  age: number,
+): HealthGateResult {
   const gate = input.rollout.healthGate;
-  if (!gate) return null;
+  if (!gate) return {};
   const health = input.health ?? [];
   const to = health.find((version) => version.version === marker.to);
   const from = health.find((version) => version.version === marker.from);
+  const read = `${healthFormat(marker.to, to)}; ${healthFormat(marker.from, from)}`;
   const calls = to?.calls ?? 0;
-  if (calls < gate.minCalls)
+  if (calls < gate.minCalls) {
+    const overdue =
+      age >= input.rollout.intervalMinutes * ROLLOUT_OVERDUE_INTERVALS;
     return {
-      note: `step ${marker.step} at ${marker.to}: ${calls} of ${gate.minCalls} calls before the next step`,
+      gate: read,
+      decision: {
+        note: `step ${marker.step} at ${marker.to}: ${calls} of ${gate.minCalls} calls before the next step${overdue ? "; overdue, so lower minCalls or abort" : ""}`,
+        gate: read,
+        ...(overdue ? { overdue } : {}),
+      },
     };
+  }
   const delta = errorRate(to) - errorRate(from);
-  if (delta <= gate.maxErrorRateDelta) return null;
+  if (delta <= gate.maxErrorRateDelta) return { gate: read };
   const reason = `error-rate+${delta.toFixed(1)}pp`;
   const abort = rolloutAbortWrite(
     input.assistantId,
@@ -213,11 +259,16 @@ function healthGateCheck(
     input.runId,
     reason,
   );
-  if (!abort) return null;
+  if (!abort) return { gate: read };
   return {
-    write: {
-      ...abort,
-      summary: `aborted by the health gate: ${marker.to}'s error rate is ${delta.toFixed(1)} points above ${marker.from}'s`,
+    gate: read,
+    decision: {
+      gate: read,
+      write: {
+        ...abort,
+        command: "rollout-health-abort",
+        summary: `aborted by the health gate: ${marker.to}'s error rate is ${delta.toFixed(1)} points above ${marker.from}'s`,
+      },
     },
   };
 }

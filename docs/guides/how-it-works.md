@@ -162,8 +162,9 @@ or your machine.
 
 A [gradual rollout](promotion.md#gradual-rollout-optional)'s traffic-allocation
 writes each name their own command (`rollout-pin`, `rollout-step`,
-`rollout-complete`, `rollout-hold`, `rollout-abort`, `rollout-release`,
-`rollout-restore`), so Vapi can count ramps by step, completion and abort.
+`rollout-complete`, `rollout-hold`, `rollout-abort`, `rollout-health-abort`,
+`rollout-release`, `rollout-restore`), so Vapi can count ramps by step,
+completion and abort, and tell a health-gate abort from one someone ran.
 
 Vapi uses these headers to count how the tool is used. Nothing else is sent beyond the
 requests themselves; there is no separate telemetry.
