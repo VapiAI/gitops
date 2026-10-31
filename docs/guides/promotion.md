@@ -170,6 +170,36 @@ The org needs traffic splitting, which Vapi enables per org during its beta.
 An `--apply` run checks every rollout org first and stops, with nothing
 promoted, if one doesn't have it.
 
+### What a promotion into a rollout org does
+
+For each changed assistant that already exists in the org:
+
+1. **Pin.** Before publishing, it writes a traffic allocation holding the
+   version that serves calls now at 100%. Without it, the publish would move
+   every call at once.
+2. **Publish.** The apply publishes the new version, which lands at 0%.
+3. **Step 1.** It moves the first step's share (1% by default) to the new
+   version. If nothing was published (the files matched), it undoes the pin.
+
+The rollout workflow then moves the ramp one step at a time (see below).
+Every write carries a `gitops-rollout …` note in the allocation's
+description, which is the ramp's only state; the traffic tab shows it.
+
+Not everything is split. A new assistant goes live when it's created; squads,
+tools and structured outputs aren't versioned per call, so a change to them
+reaches 100% of calls on apply. The plan output lists each of these.
+
+The promotion refuses, before the gate and with nothing written, when an
+assistant has a split someone set by hand (a manual split wins) or is managed
+by Vapi for CX. To pin over a manual split on purpose, promote that one
+transition with `--rollout-override` (the `override` dispatch input): it pins
+the version with the most traffic, never the canary.
+
+`--no-rollout` (the `no-rollout` dispatch input) publishes at once. Use it
+for a revert: it also releases an assistant gitops was holding, so the
+reverted version takes every call. An assistant whose files didn't change,
+or a split set by hand, is left as it is.
+
 ## Rolling Back a Promotion
 
 Treat a promotion rollback as a new, auditable Git change: revert the source
@@ -179,6 +209,10 @@ configuration commit, then run the same forward promotion again.
 git revert <promotion-commit>
 npm run promote -- --pipeline release --from dev --to staging --apply
 ```
+
+Into an org with a gradual rollout, add `--no-rollout` so the revert goes
+live at once instead of ramping. To stop a ramp in progress without a new
+promotion, abort it (see the rollout workflow below).
 
 This is distinct from `npm run rollback`, which restores a single org from a
 local pre-deploy snapshot. Because promotion uses the pipeline's scoped mirror
