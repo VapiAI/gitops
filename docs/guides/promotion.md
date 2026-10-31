@@ -226,13 +226,27 @@ and commits nothing. Run it by hand from the Actions tab:
 An aborted assistant stays on its old version, and later publishes land at
 0%, until the next promotion (which ramps again) or a `no-rollout` one.
 
-The ramp stops, and `status` flags it, when the split changes under it (a
-dashboard edit, say): it never overwrites someone else's change. A pin left
+The ramp stops when the split changes under it (a dashboard edit, say): it
+never overwrites someone else's change. A pin left
 by a promotion that was killed mid-run is picked up after 6 hours: carried on
 from step 1 if the run had published, released if it had replaced the
 default, otherwise left for you. The 6 hours assume the promotion step's
 330-minute limit in CI; a promotion run on your machine must finish within
 them.
+
+Each `advance` and `status` run writes every ramp's state, and what the health
+gate read, to the run's summary page. An `advance` run fails, so GitHub's
+failure notification reaches someone, when a ramp is overdue:
+
+- a step is still waiting three intervals after it was written (the health
+  gate has not seen `minCalls`; lower it, or abort);
+- a pin from a killed promotion was left for you after 6 hours;
+- the split changed under a step. Only the run that finds it fails, since the
+  next tick no longer sees a ramp there.
+
+Holds and aborts are deliberate, so they never fail a run. GitHub sends a
+scheduled run's failure notification to whoever last changed its `cron` line,
+so make sure that is someone who watches it.
 
 Optionally, gate each step on the new version's calls:
 
@@ -245,8 +259,9 @@ Optionally, gate each step on the new version's calls:
 
 Before each step, the ticker reads the calls each version took since the
 current step (the same metrics as the assistant's traffic tab). It waits
-until the new version has `minCalls`, then aborts the ramp, with the reason
-in the allocation's note, if the new version's share of calls that ended in
+until the new version has `minCalls`, then aborts the ramp (labelled
+`rollout-health-abort`, so it is counted apart from an abort someone ran),
+with the reason in the allocation's note, if the new version's share of calls that ended in
 an error is more than `maxErrorRateDelta` percentage points above the old
 version's. `healthGate: {}` takes those defaults. It runs after, never
 instead of, a `check:` gate.

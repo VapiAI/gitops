@@ -5,6 +5,7 @@ import { rolloutMarkerParse } from "../src/rollout-marker.ts";
 import type { RolloutTickInput } from "../src/rollout-tick.ts";
 import {
   ROLLOUT_ORPHAN_AGE_MINUTES,
+  ROLLOUT_OVERDUE_INTERVALS,
   rolloutAbortWrite,
   rolloutTickDecide,
 } from "../src/rollout-tick.ts";
@@ -155,8 +156,27 @@ for (const [label, prev, latest, current] of [
     );
     assert.equal(decision.write, undefined);
     assert.equal(decision.stale, true);
+    assert.equal(decision.overdue, true);
   });
 }
+
+test("tick: a hold is deliberate, so it is flagged but never overdue", () => {
+  const decision = decide(
+    allocation("gitops-rollout hold from=v1 to=v2 hold=v3", 600),
+    "v3",
+  );
+  assert.equal(decision.overdue, undefined);
+});
+
+test("tick: an abort is deliberate, so it is never overdue", () => {
+  const decision = decide(allocation("gitops-rollout abort from=v1 to=v2", 600));
+  assert.equal(decision.overdue, undefined);
+});
+
+test("tick: a step with no from/to is overdue", () => {
+  const decision = decide(allocation("gitops-rollout step step=1/6", 31));
+  assert.equal(decision.overdue, true);
+});
 
 test("abort: an active step goes back to its old version", () => {
   const tick = rolloutAbortWrite("asst", allocation("gitops-rollout step from=v1 to=v2 step=3/6", 5));
@@ -182,10 +202,10 @@ const GATED = {
   healthGate: { minCalls: 20, maxErrorRateDelta: 2 },
 };
 
-function decideGated(health: RolloutTickInput["health"]) {
+function decideGated(health: RolloutTickInput["health"], minutesAgo = 31) {
   return rolloutTickDecide({
     assistantId: "asst",
-    allocation: allocation(STEP_1, 31),
+    allocation: allocation(STEP_1, minutesAgo),
     latestVersion: "v2",
     rollout: GATED,
     now: NOW,
@@ -199,8 +219,31 @@ test("health gate: waits until the new version has taken enough calls", () => {
       { version: "v1", calls: 900, errors: 0 },
       { version: "v2", calls: 12, errors: 0 },
     ]),
-    { note: "step 1 at v2: 12 of 20 calls before the next step" },
+    {
+      note: "step 1 at v2: 12 of 20 calls before the next step",
+      gate: "v2: 12 calls, 0.0% errors; v1: 900 calls, 0.0% errors",
+    },
   );
+});
+
+test("health gate: a step still short of calls after three intervals is overdue", () => {
+  const decision = decideGated(
+    [{ version: "v2", calls: 12, errors: 0 }],
+    ROLLOUT.intervalMinutes * ROLLOUT_OVERDUE_INTERVALS,
+  );
+  assert.deepEqual(decision, {
+    note: "step 1 at v2: 12 of 20 calls before the next step; overdue, so lower minCalls or abort",
+    gate: "v2: 12 calls, 0.0% errors; v1: 0 calls",
+    overdue: true,
+  });
+});
+
+test("health gate: a step that passes reports what the gate read", () => {
+  const decision = decideGated([
+    { version: "v1", calls: 1000, errors: 10 },
+    { version: "v2", calls: 100, errors: 2 },
+  ]);
+  assert.equal(decision.gate, "v2: 100 calls, 2.0% errors; v1: 1000 calls, 1.0% errors");
 });
 
 test("health gate: moves on when the new version's error rate is within the margin", () => {
@@ -220,7 +263,8 @@ test("health gate: aborts when the new version errors well above the old", () =>
     { version: "v1", calls: 1000, errors: 10 },
     { version: "v2", calls: 100, errors: 5 },
   ]);
-  assert.equal(writeOf(decision), "rollout-abort abort v1:100");
+  // Its own label, so gate aborts are countable apart from a human's.
+  assert.equal(writeOf(decision), "rollout-health-abort abort v1:100");
   assert.equal(
     rolloutMarkerParse(decision.write?.write.description)?.reason,
     "error-rate+4.0pp",
@@ -230,5 +274,6 @@ test("health gate: aborts when the new version errors well above the old", () =>
 test("health gate: no calls at all waits rather than aborting", () => {
   assert.deepEqual(decideGated([]), {
     note: "step 1 at v2: 0 of 20 calls before the next step",
+    gate: "v2: 0 calls; v1: 0 calls",
   });
 });

@@ -6,7 +6,7 @@
 // `status` lists ramps. Each assistant's newest traffic allocation is the
 // ramp's whole state, so this commits nothing.
 
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { OrgConnection } from "./org-connection.ts";
@@ -20,6 +20,11 @@ import type {
 } from "./rollout-api.ts";
 import { allocationConflictGet, rolloutApiCreate } from "./rollout-api.ts";
 import { rolloutMarkerParse } from "./rollout-marker.ts";
+import type { RolloutSummaryRow } from "./rollout-summary.ts";
+import {
+  rolloutOverdueMessage,
+  rolloutSummaryMarkdown,
+} from "./rollout-summary.ts";
 import type { RolloutTickWrite } from "./rollout-tick.ts";
 import { rolloutAbortWrite, rolloutTickDecide } from "./rollout-tick.ts";
 import { RUN_ID_ENV } from "./user-agent.ts";
@@ -30,6 +35,11 @@ interface RolloutArguments {
   action: RolloutAction;
   org?: string;
   assistant?: string;
+}
+
+interface RolloutOrgResult {
+  failures: string[];
+  rows: RolloutSummaryRow[];
 }
 
 export interface RolloutDeps {
@@ -97,25 +107,28 @@ function sameWrite(allocation: Allocation | null, tick: RolloutTickWrite): boole
 
 // Writes with compare-and-set. A 409 that turns out to be this same write
 // (a retried request that had committed) is success; any other means someone
-// changed the split meanwhile, so the ramp stops for a human to look.
+// changed the split meanwhile, so the ramp stops for a human to look. Returns
+// the stop as a reason; the next tick no longer sees a ramp, so this is the
+// one run that can report it.
 async function tickWrite(
   api: RolloutApi,
   label: string,
   tick: RolloutTickWrite,
-): Promise<void> {
+): Promise<string | null> {
   try {
     await api.allocationCreate(tick.write, tick.command);
     console.log(`  ${label}: ${tick.summary}`);
+    return null;
   } catch (error) {
     if (allocationConflictGet(error) !== "stale_allocation") throw error;
     const newest = await api.allocationLatestGet(tick.write.assistantId);
     if (sameWrite(newest, tick)) {
       console.log(`  ${label}: ${tick.summary}`);
-      return;
+      return null;
     }
-    console.log(
-      `  ${label}: the split changed meanwhile (${newest?.description ?? newest?.allocationIntent ?? "none"}); left for a human`,
-    );
+    const stopped = `the split changed meanwhile (${newest?.description ?? newest?.allocationIntent ?? "none"}); left for a human`;
+    console.log(`  ${label}: ${stopped}`);
+    return stopped;
   }
 }
 
@@ -125,9 +138,10 @@ async function orgRun(
   args: RolloutArguments,
   deps: RolloutDeps,
   tokens: Map<string, string>,
-): Promise<string[]> {
+): Promise<RolloutOrgResult> {
+  const result: RolloutOrgResult = { failures: [], rows: [] };
   const rollout = config.orgs[org]?.rollout;
-  if (!rollout) return [];
+  if (!rollout) return result;
   const api = deps.rolloutApi(
     connectionLoad({
       rootDir: ROOT_DIR,
@@ -140,9 +154,8 @@ async function orgRun(
   console.log(`\n${org}`);
   if (!(await api.allocationsProbe())) {
     console.log("  skipped: traffic splitting is not enabled for this org");
-    return [];
+    return result;
   }
-  const failures: string[] = [];
   const runId = process.env[RUN_ID_ENV];
   for (const { id, uuid } of assistantsLoad(org)) {
     if (args.assistant && args.assistant !== id) continue;
@@ -166,17 +179,27 @@ async function orgRun(
         runId,
         health: await healthRead(api, rollout, allocation, now),
       });
-      if (args.action === "advance" && decision.write)
-        await tickWrite(api, id, decision.write);
+      const stopped =
+        args.action === "advance" && decision.write
+          ? await tickWrite(api, id, decision.write)
+          : null;
       if (args.action === "status" || !decision.write)
         console.log(
           `  ${id}: ${decision.note ?? decision.write?.summary ?? "no ramp"}${decision.stale ? "  ⚠️" : ""}`,
         );
+      result.rows.push({
+        org,
+        assistant: id,
+        state:
+          stopped ?? decision.note ?? decision.write?.summary ?? "no ramp",
+        overdue: stopped !== null || decision.overdue === true,
+        ...(decision.gate ? { gate: decision.gate } : {}),
+      });
     } catch (error) {
-      failures.push(`${org}/${id}: ${messageOf(error)}`);
+      result.failures.push(`${org}/${id}: ${messageOf(error)}`);
     }
   }
-  return failures;
+  return result;
 }
 
 // Per-version calls since the current step began, read only when a gated
@@ -248,12 +271,31 @@ export async function rolloutCommandRun(
   const tokens = tokensParse(TOKENS_ENV);
   delete process.env[TOKENS_ENV];
   const failures: string[] = [];
-  for (const org of orgs)
-    failures.push(...(await orgRun(config, org, parsed, deps, tokens)));
-  if (failures.length > 0)
-    throw new Error(
-      `Rollout ${parsed.action} failed for:\n${failures.map((failure) => `  - ${failure}`).join("\n")}`,
-    );
+  const rows: RolloutSummaryRow[] = [];
+  for (const org of orgs) {
+    const result = await orgRun(config, org, parsed, deps, tokens);
+    failures.push(...result.failures);
+    rows.push(...result.rows);
+  }
+  if (parsed.action !== "abort") summaryWrite(parsed.action, rows);
+  // Only advance fails on an overdue ramp: it is the scheduled run, whose
+  // failure notification is the alert; status is read by a person already.
+  const overdue =
+    parsed.action === "advance" ? rolloutOverdueMessage(rows) : null;
+  const problems = [
+    ...(failures.length > 0
+      ? [
+          `Rollout ${parsed.action} failed for:\n${failures.map((failure) => `  - ${failure}`).join("\n")}`,
+        ]
+      : []),
+    ...(overdue ? [overdue] : []),
+  ];
+  if (problems.length > 0) throw new Error(problems.join("\n"));
+}
+
+function summaryWrite(action: string, rows: RolloutSummaryRow[]): void {
+  const path = process.env.GITHUB_STEP_SUMMARY;
+  if (path) appendFileSync(path, rolloutSummaryMarkdown(action, rows));
 }
 
 const isMainModule =

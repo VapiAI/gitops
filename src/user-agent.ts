@@ -168,6 +168,7 @@ export type RolloutCommand =
   | "rollout-complete"
   | "rollout-hold"
   | "rollout-abort"
+  | "rollout-health-abort"
   | "rollout-release";
 
 export function vapiClientGet(
