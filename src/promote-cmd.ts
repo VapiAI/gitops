@@ -14,12 +14,28 @@ import {
 } from "./promotion-gate.ts";
 import type { RolloutApi } from "./rollout-api.ts";
 import { rolloutApiCreate } from "./rollout-api.ts";
+import type {
+  RolloutAssistantRef,
+  RolloutPin,
+  RolloutRead,
+} from "./rollout-promote.ts";
+import {
+  rolloutFinish,
+  rolloutPinAll,
+  rolloutPreflight,
+  rolloutRelease,
+  rolloutReleaseBaseline,
+  rolloutSnapshot,
+  rolloutUnpinnedReport,
+} from "./rollout-promote.ts";
+import type { PromotionChange } from "./promotion.ts";
 import {
   promotionConfigParse,
   promotionPlanApply,
   promotionPlanBuild,
   promotionStateParse,
   promotionTransitionValidate,
+  resourceType,
 } from "./promotion.ts";
 
 interface PromotionArguments {
@@ -28,6 +44,10 @@ interface PromotionArguments {
   target?: string;
   all: boolean;
   apply: boolean;
+  // Skip the gradual rollout: publish at once, as a revert should.
+  noRollout: boolean;
+  // Pin over a split set outside gitops instead of refusing.
+  rolloutOverride: boolean;
 }
 
 interface PromotionTransition {
@@ -67,7 +87,12 @@ interface PromotionGates {
 }
 
 function argumentsParse(args: string[]): PromotionArguments {
-  const parsed: PromotionArguments = { all: false, apply: false };
+  const parsed: PromotionArguments = {
+    all: false,
+    apply: false,
+    noRollout: false,
+    rolloutOverride: false,
+  };
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
     if (argument === "--all") {
@@ -76,6 +101,14 @@ function argumentsParse(args: string[]): PromotionArguments {
     }
     if (argument === "--apply") {
       parsed.apply = true;
+      continue;
+    }
+    if (argument === "--no-rollout") {
+      parsed.noRollout = true;
+      continue;
+    }
+    if (argument === "--rollout-override") {
+      parsed.rolloutOverride = true;
       continue;
     }
     if (argument === "--pipeline" && args[index + 1]) {
@@ -98,7 +131,15 @@ function argumentsParse(args: string[]): PromotionArguments {
     );
   if (!parsed.all && (!parsed.pipeline || !parsed.source || !parsed.target))
     throw new Error(
-      "Usage: npm run promote -- --pipeline <name> --from <org> --to <org> [--apply]",
+      "Usage: npm run promote -- --pipeline <name> --from <org> --to <org> [--apply] [--no-rollout | --rollout-override]",
+    );
+  if (parsed.noRollout && parsed.rolloutOverride)
+    throw new Error("--no-rollout cannot be combined with --rollout-override");
+  // Overriding a manual split is a decision about one transition, never a
+  // blanket one across every org.
+  if (parsed.rolloutOverride && parsed.all)
+    throw new Error(
+      "--rollout-override needs --pipeline, --from and --to; it cannot be combined with --all",
     );
   return parsed;
 }
@@ -254,6 +295,49 @@ function stateLoad(org: string) {
   return promotionStateParse(readFileSync(path, "utf8"));
 }
 
+// The changed assistants a rollout can ramp: creates and updates with a UUID
+// in the target's state. Deletes have nothing to ramp, and an assistant with
+// no UUID is created by the apply, so it goes live on creation.
+function rolloutRefsGet(
+  target: string,
+  changes: PromotionChange[],
+): RolloutAssistantRef[] {
+  const assistants = stateLoad(target).assistants;
+  const refs: RolloutAssistantRef[] = [];
+  for (const change of changes) {
+    if (change.kind === "delete") continue;
+    const resource = resourceType(change.path);
+    if (resource?.type !== "assistants") continue;
+    const uuid = assistants[resource.id]?.uuid;
+    if (!uuid) {
+      console.log(`  rollout ${resource.id}: new in ${target}, live on create`);
+      continue;
+    }
+    refs.push({ id: resource.id, uuid });
+  }
+  return refs;
+}
+
+// What a promotion publishes at 100% even under a rollout: only direct
+// assistant calls are split, and tools and structured outputs aren't
+// versioned.
+function rolloutUnsplitPrint(changes: PromotionChange[]): void {
+  for (const change of changes) {
+    const type = resourceType(change.path)?.type;
+    if (type && type !== "assistants")
+      console.log(`  rollout ${change.path}: not split, live at 100% on apply`);
+  }
+}
+
+// The target's other assistants, whose versions the unpinned-publish report
+// compares across the apply.
+function othersGet(target: string, pins: RolloutPin[]): RolloutAssistantRef[] {
+  const pinned = new Set(pins.map((pin) => pin.read.ref.uuid));
+  return Object.entries(stateLoad(target).assistants)
+    .filter(([, entry]) => entry?.uuid && !pinned.has(entry.uuid))
+    .map(([id, entry]) => ({ id, uuid: entry.uuid }));
+}
+
 async function transitionRun(
   config: PromotionConfig,
   transition: PromotionTransition,
@@ -262,6 +346,7 @@ async function transitionRun(
   allowEmptySourceDeletion: boolean,
   deps: PromotionDeps,
   gates: PromotionGates,
+  args: PromotionArguments,
 ): Promise<boolean> {
   const run = deps.childRun;
   if (apply) {
@@ -299,6 +384,24 @@ async function transitionRun(
   if (check && !apply)
     console.log(await promotionGatePlanLine(ROOT_DIR, check));
   if (!apply) return false;
+  const rollout = config.orgs[transition.target]?.rollout;
+  const api = rollout
+    ? deps.rolloutApi(orgConnection(config, transition.target, tokens))
+    : undefined;
+  const refs = rollout ? rolloutRefsGet(transition.target, plan.changes) : [];
+  const ramp = api && rollout && !args.noRollout ? { api, rollout } : undefined;
+  if (ramp) rolloutUnsplitPrint(plan.changes);
+  // A fast refusal before the gate's simulations, which cost minutes.
+  let reads: RolloutRead[] = ramp
+    ? await rolloutPreflight(
+        ramp.api,
+        transition.target,
+        refs,
+        args.rolloutOverride,
+      )
+    : [];
+  // Decided before the gate block, which marks the source passed.
+  const gateRuns = Boolean(check && !gates.passed.has(transition.source));
   if (check && !gates.passed.has(transition.source)) {
     console.log(`  check  running ${check.name} in ${transition.source}…`);
     const result = await deps.checkRun(
@@ -311,19 +414,85 @@ async function transitionRun(
       );
     gates.passed.add(transition.source);
   }
+  // The gate can run for hours while the ticker or an abort writes, so read
+  // again: pins and undos must start from what is current now.
+  if (ramp && gateRuns)
+    reads = await rolloutPreflight(
+      ramp.api,
+      transition.target,
+      refs,
+      args.rolloutOverride,
+    );
   await promotionPlanApply(plan);
   const changedPaths = plan.changes.map(
     (change) => `resources/${transition.target}/${change.path}`,
   );
-  run(
-    "src/apply.ts",
-    transition.target,
-    orgConnection(config, transition.target, tokens),
-    ["--force", "--allow-new-files", "--resolve=ours", ...changedPaths],
-  );
-  appliedPathsRecord(transition.target);
-  // The target's files just changed, so an earlier pass no longer covers it.
-  gates.passed.delete(transition.target);
+  const releaseBaseline =
+    api && rollout && args.noRollout
+      ? await rolloutReleaseBaseline(api, refs)
+      : undefined;
+  const pins: RolloutPin[] = ramp
+    ? await rolloutPinAll(
+        ramp.api,
+        transition.target,
+        reads,
+        args.rolloutOverride,
+      )
+    : [];
+  const others = ramp ? othersGet(transition.target, pins) : [];
+  let childError: unknown;
+  const failures: string[] = [];
+  try {
+    const before = ramp ? await rolloutSnapshot(ramp.api, others) : undefined;
+    try {
+      run(
+        "src/apply.ts",
+        transition.target,
+        orgConnection(config, transition.target, tokens),
+        ["--force", "--allow-new-files", "--resolve=ours", ...changedPaths],
+      );
+    } catch (error) {
+      childError = error;
+    }
+    if (ramp && before) await rolloutUnpinnedReport(ramp.api, others, before);
+    if (api && releaseBaseline)
+      failures.push(...(await rolloutRelease(api, refs, releaseBaseline)));
+  } finally {
+    if (ramp)
+      failures.push(
+        ...(await rolloutFinish({
+          api: ramp.api,
+          pins,
+          steps: ramp.rollout.steps,
+          childFailed: childError !== undefined,
+        })),
+      );
+  }
+  if (childError === undefined) {
+    // Recorded before any rollout failure is thrown: the org has the changes,
+    // so the committed state must have its files. With no rollout failure to
+    // report alongside it, a recording failure throws as it is.
+    if (failures.length === 0) appliedPathsRecord(transition.target);
+    else
+      try {
+        appliedPathsRecord(transition.target);
+      } catch (error) {
+        failures.unshift(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    // The target's files just changed, so an earlier pass no longer covers it.
+    gates.passed.delete(transition.target);
+  }
+  if (childError !== undefined && failures.length === 0) throw childError;
+  if (failures.length > 0)
+    throw new Error(
+      [
+        ...(childError instanceof Error ? [childError.message] : []),
+        `Gradual rollout into ${transition.target}:`,
+        ...failures.map((failure) => `  - ${failure}`),
+      ].join("\n"),
+    );
   return plan.changes.some((change) => change.kind === "delete");
 }
 
@@ -360,7 +529,8 @@ export async function promotionCommandRun(
   // reviewed authorization forward so the same deletion can reach later orgs.
   const deletionAuthorizedSources = new Set<string>();
   const transitions = transitionsBuild(config, parsed);
-  if (parsed.apply) await rolloutOrgsProbe(config, transitions, tokens, deps);
+  if (parsed.apply && !parsed.noRollout)
+    await rolloutOrgsProbe(config, transitions, tokens, deps);
   for (const transition of transitions) {
     const sourceKey = `${transition.pipeline}:${transition.source}`;
     const deleted = await transitionRun(
@@ -371,6 +541,7 @@ export async function promotionCommandRun(
       deletionAuthorizedSources.has(sourceKey),
       deps,
       gates,
+      parsed,
     );
     if (deleted)
       deletionAuthorizedSources.add(

@@ -354,7 +354,7 @@ function ignored(path: string, patterns: string[]): boolean {
   return patterns.some((pattern) => glob(pattern, stem));
 }
 
-function resourceType(path: string): { type: ResourceType; id: string } | null {
+export function resourceType(path: string): { type: ResourceType; id: string } | null {
   for (const [type, folder] of Object.entries(FOLDER_MAP)) {
     if (!path.startsWith(`${folder}/`)) continue;
     const id = path.slice(folder.length + 1).replace(/\.(yml|yaml|md|ts)$/, "");
