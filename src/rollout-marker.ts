@@ -4,7 +4,8 @@
 // nothing about a ramp is committed to git.
 //
 //   gitops-rollout <kind> [from=vN] [to=vM] [step=i/K] [latest=vX]
-//                         [prev=follow-latest|marked|manual] [hold=vK] [run=<id>]
+//                         [prev=follow-latest|marked|manual] [hold=vK]
+//                         [reason=<token>] [run=<id>]
 
 export type RolloutMarkerKind =
   | "pin"
@@ -33,6 +34,8 @@ export interface RolloutMarker {
   prev?: RolloutPrevious;
   // A newer, un-ramped version that kept a complete ramp from releasing.
   hold?: string;
+  // Why the health gate aborted, as one token (e.g. error-rate+4.1pp).
+  reason?: string;
   run?: string;
 }
 
@@ -56,6 +59,7 @@ export function rolloutMarkerFormat(marker: RolloutMarker): string {
   if (marker.latest) fields.push(`latest=${marker.latest}`);
   if (marker.prev) fields.push(`prev=${marker.prev}`);
   if (marker.hold) fields.push(`hold=${marker.hold}`);
+  if (marker.reason) fields.push(`reason=${marker.reason}`);
   if (marker.run) fields.push(`run=${marker.run}`);
   return fields.join(" ");
 }
@@ -77,6 +81,7 @@ export function rolloutMarkerParse(
     if (key === "to") marker.to = value;
     if (key === "latest") marker.latest = value;
     if (key === "hold") marker.hold = value;
+    if (key === "reason") marker.reason = value;
     if (key === "run") marker.run = value;
     if (key === "prev" && PREVIOUS.includes(value as RolloutPrevious))
       marker.prev = value as RolloutPrevious;

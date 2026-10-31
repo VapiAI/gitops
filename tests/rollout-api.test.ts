@@ -173,3 +173,39 @@ for (const [label, status, body, expected] of [
     assert.equal(allocationConflictGet(error), expected);
   });
 }
+
+test("rolloutApi: health counts error ended reasons per version over an hourly window", async () => {
+  await withServer(
+    200,
+    {
+      versions: [
+        {
+          assistantVersionLabel: "v2",
+          calls: 10,
+          endedReasons: [
+            { reason: "customer-ended-call", count: 7 },
+            { reason: "pipeline-error-openai-llm-failed", count: 2 },
+            { reason: "call.in-progress.error-sip-outbound", count: 1 },
+          ],
+        },
+        { assistantVersionLabel: null, calls: 3 },
+      ],
+    },
+    async (baseUrl, seen) => {
+      const api = rolloutApiCreate({ token: "t", baseUrl });
+      const health = await api.healthGet(
+        ASSISTANT,
+        new Date("2026-10-30T12:00:00Z"),
+        new Date("2026-10-30T12:31:00Z"),
+      );
+      assert.deepEqual(health, [
+        { version: "v2", calls: 10, errors: 3 },
+        { version: null, calls: 3, errors: 0 },
+      ]);
+      assert.equal(
+        seen.url,
+        `/traffic-allocations/metrics?assistantId=${ASSISTANT}&from=2026-10-30T12%3A00%3A00.000Z&to=2026-10-30T12%3A31%3A00.000Z&bucket=hour`,
+      );
+    },
+  );
+});

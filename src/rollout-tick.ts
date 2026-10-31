@@ -3,7 +3,11 @@
 // is tested without an API.
 
 import type { PromotionRollout } from "./promotion.ts";
-import type { Allocation, AllocationWrite } from "./rollout-api.ts";
+import type {
+  Allocation,
+  AllocationWrite,
+  RolloutVersionHealth,
+} from "./rollout-api.ts";
 import type { RolloutMarker } from "./rollout-marker.ts";
 import { rolloutMarkerFormat, rolloutMarkerParse } from "./rollout-marker.ts";
 import { rolloutStepTargets } from "./rollout-promote.ts";
@@ -23,6 +27,8 @@ export interface RolloutTickInput {
   rollout: PromotionRollout;
   now: number;
   runId?: string;
+  // Calls since the current step, per version; only with a health gate.
+  health?: RolloutVersionHealth[];
 }
 
 export interface RolloutTickWrite {
@@ -84,6 +90,8 @@ function stepNext(
     return {
       note: `step ${marker.step}/${steps.length} at ${marker.to}; next in ${Math.ceil(intervalMinutes - age)} min`,
     };
+  const gated = healthGateCheck(input, marker);
+  if (gated) return gated;
   // The last step (100%) is written as `complete`, not as a 0/100 split.
   if (marker.step + 1 < steps.length)
     return { write: stepWrite(input, marker.from, marker.to, marker.step + 1) };
@@ -175,6 +183,45 @@ function pinNext(
   };
 }
 
+function errorRate(health: RolloutVersionHealth | undefined): number {
+  if (!health || health.calls === 0) return 0;
+  return (health.errors / health.calls) * 100;
+}
+
+// Before a step moves on: wait for enough calls on the new version, then
+// abort if its error rate is too far above the old version's.
+function healthGateCheck(
+  input: RolloutTickInput,
+  marker: RolloutMarker,
+): RolloutTickDecision | null {
+  const gate = input.rollout.healthGate;
+  if (!gate) return null;
+  const health = input.health ?? [];
+  const to = health.find((version) => version.version === marker.to);
+  const from = health.find((version) => version.version === marker.from);
+  const calls = to?.calls ?? 0;
+  if (calls < gate.minCalls)
+    return {
+      note: `step ${marker.step} at ${marker.to}: ${calls} of ${gate.minCalls} calls before the next step`,
+    };
+  const delta = errorRate(to) - errorRate(from);
+  if (delta <= gate.maxErrorRateDelta) return null;
+  const reason = `error-rate+${delta.toFixed(1)}pp`;
+  const abort = rolloutAbortWrite(
+    input.assistantId,
+    input.allocation,
+    input.runId,
+    reason,
+  );
+  if (!abort) return null;
+  return {
+    write: {
+      ...abort,
+      summary: `aborted by the health gate: ${marker.to}'s error rate is ${delta.toFixed(1)} points above ${marker.from}'s`,
+    },
+  };
+}
+
 export function rolloutTickDecide(input: RolloutTickInput): RolloutTickDecision {
   const marker = rolloutMarkerParse(input.allocation?.description);
   if (!input.allocation || !marker) return {};
@@ -198,6 +245,7 @@ export function rolloutAbortWrite(
   assistantId: string,
   allocation: Allocation | null,
   runId?: string,
+  reason?: string,
 ): RolloutTickWrite | null {
   const marker = rolloutMarkerParse(allocation?.description);
   if (!allocation || !marker) return null;
@@ -219,6 +267,7 @@ export function rolloutAbortWrite(
         to: marker.to,
         step: marker.step,
         steps: marker.steps,
+        reason,
         run: runId,
       }),
       expectedCurrentAllocationId: allocation.id,

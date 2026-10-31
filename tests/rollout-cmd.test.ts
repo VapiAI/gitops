@@ -175,3 +175,18 @@ test("status: lists a ramp without writing", async () => {
 });
 
 test.after(() => rmSync(ROOT, { recursive: true, force: true }));
+
+test("advance: a gated step reads its window's health once it is due", async () => {
+  fixtureReset("{steps: [10, 100], intervalMinutes: 30, healthGate: {minCalls: 5}}");
+  const fake = stepFake();
+  fake.health = [
+    { version: "v1", calls: 90, errors: 0 },
+    { version: "v2", calls: 10, errors: 9 },
+  ];
+  const run = await rollout(["advance"], fake);
+  assert.equal(run.error, undefined);
+  assert.equal(rolloutMarkerParse(fake.latest("intake-prod")?.description)?.kind, "abort");
+  assert.deepEqual(fake.healthWindows, [
+    { from: "2026-10-30T12:00:00.000Z", to: "2026-10-30T12:31:00.000Z" },
+  ]);
+});

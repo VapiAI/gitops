@@ -42,6 +42,15 @@ export interface AllocationWrite {
   expectedCurrentAllocationId?: string;
 }
 
+// One version's calls in a metrics window, as the health gate reads them.
+export interface RolloutVersionHealth {
+  // The version label; null for calls with no version.
+  version: string | null;
+  calls: number;
+  // Calls whose ended reason is an error.
+  errors: number;
+}
+
 export interface RolloutAssistant {
   // The newest published version label; null when versioning is off.
   latestVersion: string | null;
@@ -66,7 +75,17 @@ export interface RolloutApi {
   ): Promise<Allocation>;
   // false when traffic splitting is not enabled for the org (a beta flag).
   allocationsProbe(): Promise<boolean>;
+  // Per-version calls and errors between `from` and `to`.
+  healthGet(
+    assistantId: string,
+    from: Date,
+    to: Date,
+  ): Promise<RolloutVersionHealth[]>;
 }
+
+// GET /traffic-allocations/metrics allows at most 2000 timeseries buckets;
+// hourly buckets make that 83 days, far longer than any step.
+export const METRICS_WINDOW_MAX_MS = 2000 * 3_600_000;
 
 // The platform's test for an assistant managed by Vapi for CX: a UUID in
 // metadata.vapiAgentId. Anything else there isn't a lock.
@@ -80,6 +99,19 @@ interface AssistantResponse {
 
 interface AllocationLatestResponse {
   allocation?: Allocation;
+}
+
+interface MetricsResponse {
+  versions?: Array<{
+    assistantVersionLabel: string | null;
+    calls: number;
+    endedReasons?: Array<{ reason: string; count: number }>;
+  }>;
+}
+
+// The dashboard's rule for an error ended reason: the reason names one.
+function endedReasonIsError(reason: string): boolean {
+  return reason.includes("error");
 }
 
 function notFound(error: unknown): boolean {
@@ -151,6 +183,29 @@ export function rolloutApiCreate(connection: OrgConnection): RolloutApi {
         write,
         { retry: "rate-limit-only" },
       );
+    },
+    async healthGet(assistantId, from, to) {
+      const start = new Date(
+        Math.max(from.getTime(), to.getTime() - METRICS_WINDOW_MAX_MS),
+      );
+      const query = new URLSearchParams({
+        assistantId,
+        from: start.toISOString(),
+        to: to.toISOString(),
+        bucket: "hour",
+      });
+      const metrics = await vapiFetchJson<MetricsResponse>(
+        reads,
+        "GET",
+        `/traffic-allocations/metrics?${query}`,
+      );
+      return (metrics.versions ?? []).map((version) => ({
+        version: version.assistantVersionLabel,
+        calls: version.calls,
+        errors: (version.endedReasons ?? [])
+          .filter((ended) => endedReasonIsError(ended.reason))
+          .reduce((sum, ended) => sum + ended.count, 0),
+      }));
     },
     async allocationsProbe() {
       try {

@@ -62,3 +62,24 @@ for (const [label, rollout, message] of [
     );
   });
 }
+
+test("rollout: healthGate: {} takes the default call floor and margin", () => {
+  assert.deepEqual(
+    promotionConfigParse(configWithRollout("{healthGate: {}}")).orgs.prod?.rollout
+      ?.healthGate,
+    { minCalls: 20, maxErrorRateDelta: 2 },
+  );
+});
+
+for (const [label, gate, message] of [
+  ["zero calls", "{minCalls: 0}", /minCalls must be a whole number/],
+  ["a negative margin", "{maxErrorRateDelta: -1}", /between 0 and 100/],
+  ["a misspelled key", "{minCall: 5}", /unknown key "minCall"/],
+] as const) {
+  test(`rollout: healthGate rejects ${label}`, () => {
+    assert.throws(
+      () => promotionConfigParse(configWithRollout(`{healthGate: ${gate}}`)),
+      message,
+    );
+  });
+}

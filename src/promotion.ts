@@ -34,6 +34,15 @@ export interface PromotionRollout {
   steps: number[];
   // Minimum minutes between steps. The rollout workflow ticks every 15.
   intervalMinutes: number;
+  healthGate?: PromotionRolloutHealthGate;
+}
+
+// Checked before each step: the ramp waits until the new version has taken
+// `minCalls` calls since the last step, and aborts if its error rate is more
+// than `maxErrorRateDelta` percentage points above the old version's.
+export interface PromotionRolloutHealthGate {
+  minCalls: number;
+  maxErrorRateDelta: number;
 }
 
 export interface PromotionOrg {
@@ -162,7 +171,37 @@ export const ROLLOUT_STEPS_DEFAULT = [1, 5, 10, 25, 50, 100];
 export const ROLLOUT_INTERVAL_MINUTES_DEFAULT = 30;
 // The rollout workflow's cron period; a shorter interval could not be honored.
 export const ROLLOUT_INTERVAL_MINUTES_MIN = 15;
-const ROLLOUT_KEYS = ["steps", "intervalMinutes"];
+const ROLLOUT_KEYS = ["steps", "intervalMinutes", "healthGate"];
+const HEALTH_GATE_KEYS = ["minCalls", "maxErrorRateDelta"];
+export const HEALTH_GATE_MIN_CALLS_DEFAULT = 20;
+export const HEALTH_GATE_MAX_ERROR_RATE_DELTA_DEFAULT = 2;
+
+function healthGateParse(
+  value: unknown,
+  slug: string,
+): PromotionRolloutHealthGate {
+  const raw = object(value ?? {}, `org ${slug}.rollout.healthGate`);
+  for (const key of Object.keys(raw))
+    if (!HEALTH_GATE_KEYS.includes(key))
+      throw new Error(
+        `org ${slug}.rollout.healthGate has unknown key "${key}" (allowed: ${HEALTH_GATE_KEYS.join(", ")})`,
+      );
+  const minCalls = raw.minCalls ?? HEALTH_GATE_MIN_CALLS_DEFAULT;
+  if (typeof minCalls !== "number" || !Number.isInteger(minCalls) || minCalls < 1)
+    throw new Error(`org ${slug}.rollout.healthGate.minCalls must be a whole number of at least 1`);
+  const maxErrorRateDelta =
+    raw.maxErrorRateDelta ?? HEALTH_GATE_MAX_ERROR_RATE_DELTA_DEFAULT;
+  if (
+    typeof maxErrorRateDelta !== "number" ||
+    !Number.isFinite(maxErrorRateDelta) ||
+    maxErrorRateDelta < 0 ||
+    maxErrorRateDelta > 100
+  )
+    throw new Error(
+      `org ${slug}.rollout.healthGate.maxErrorRateDelta must be percentage points between 0 and 100`,
+    );
+  return { minCalls, maxErrorRateDelta };
+}
 
 // The API stores shares as integer thousandths of a percent.
 export function millipercentage(percent: number): number {
@@ -214,7 +253,13 @@ export function promotionRolloutParse(
     throw new Error(
       `org ${slug}.rollout.intervalMinutes must be a whole number of at least ${ROLLOUT_INTERVAL_MINUTES_MIN}`,
     );
-  return { steps: [...steps], intervalMinutes };
+  return {
+    steps: [...steps],
+    intervalMinutes,
+    ...("healthGate" in raw
+      ? { healthGate: healthGateParse(raw.healthGate, slug) }
+      : {}),
+  };
 }
 
 export function promotionConfigParse(content: string): PromotionConfig {
