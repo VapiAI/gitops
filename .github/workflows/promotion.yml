@@ -20,6 +20,15 @@ on:
         description: Destination org (requires a source org)
         required: false
         type: string
+      rollout:
+        description: >-
+          Gradual rollout orgs: default ramps; no-rollout publishes at once
+          (reverts); override pins over a split set outside gitops (needs
+          pipeline, from and to)
+        required: false
+        default: default
+        type: choice
+        options: [default, no-rollout, override]
 
 permissions:
   contents: write
@@ -40,6 +49,7 @@ jobs:
       PIPELINE: ${{ inputs.pipeline }}
       SOURCE_ORG: ${{ inputs.from }}
       TARGET_ORG: ${{ inputs.to }}
+      ROLLOUT: ${{ inputs.rollout }}
 
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +94,21 @@ jobs:
               exit 1
             }
             args=(--apply)
+            case "${ROLLOUT:-default}" in
+              default) ;;
+              no-rollout) args+=(--no-rollout) ;;
+              override)
+                [[ "$supplied" == 3 ]] || {
+                  echo "rollout: override needs pipeline, from and to."
+                  exit 1
+                }
+                args+=(--rollout-override)
+                ;;
+              *)
+                echo "Unknown rollout input: $ROLLOUT"
+                exit 1
+                ;;
+            esac
             if [[ "$supplied" == 3 ]]; then
               args+=(--pipeline "$PIPELINE")
               args+=(--from "$SOURCE_ORG" --to "$TARGET_ORG")
