@@ -149,6 +149,27 @@ dependency is missing from source". Use personality files under
 `simulations/personalities/` in any org you promote out of, gated or not
 (`improvements.md` #38).
 
+## Gradual rollout (optional)
+
+Promote into an org one traffic step at a time instead of all at once. Add
+`rollout:` to the destination org:
+
+```yaml
+# promotion.yml
+orgs:
+  example-production:
+    rollout:
+      steps: [1, 5, 10, 25, 50, 100]   # percent of calls on the new version
+      intervalMinutes: 30              # at least this long between steps
+```
+
+`rollout: {}` takes those defaults. Steps must increase, end at 100 and have
+at most three decimal places; `intervalMinutes` is at least 15.
+
+The org needs traffic splitting, which Vapi enables per org during its beta.
+An `--apply` run checks every rollout org first and stops, with nothing
+promoted, if one doesn't have it.
+
 ## Rolling Back a Promotion
 
 Treat a promotion rollback as a new, auditable Git change: revert the source

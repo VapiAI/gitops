@@ -320,7 +320,7 @@ test("a typo'd org key is rejected, so a misspelled check: can't silently drop t
     errors,
     ["checks", "Check", "gate"].map(
       (key) =>
-        `org a has unknown key "${key}" (allowed: baseUrl, bindings, check)`,
+        `org a has unknown key "${key}" (allowed: baseUrl, bindings, check, rollout)`,
     ),
   );
 });

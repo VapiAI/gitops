@@ -21,6 +21,13 @@ orgs:
         support-line: bind
   example-production:
     baseUrl: https://api.vapi.ai
+    # Optional gradual rollout: a promotion into this org publishes each
+    # changed assistant at 0%, then moves its calls to the new version in
+    # these steps (percent), at most one step per intervalMinutes. Needs
+    # traffic splitting enabled for the org. See docs/guides/promotion.md.
+    # rollout:
+    #   steps: [1, 5, 10, 25, 50, 100]
+    #   intervalMinutes: 30
     bindings:
       credentials:
         default: bind

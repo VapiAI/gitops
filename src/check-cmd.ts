@@ -34,6 +34,7 @@ import type { OrgConnection } from "./org-connection.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import type { VapiConnection } from "./vapi-client.ts";
+import { DEFAULT_BASE_URL } from "./vapi-client.ts";
 
 const USAGE = [
   "Usage:",
@@ -58,7 +59,6 @@ const USAGE = [
 
 const DEFAULT_PAYLOAD_DIR = "tmp/check-payloads";
 const DEFAULT_BUDGET_MINUTES = 60;
-const DEFAULT_BASE_URL = "https://api.vapi.ai";
 const TOKENS_ENV = "VAPI_CHECK_TOKENS";
 
 interface CheckArgs {
