@@ -22,8 +22,9 @@ import type { ValidationFinding } from "./validate.ts";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Push never resolves references inside these objects, so a name there
-// reaches the API as-is.
+// Push never resolves tool references inside these objects, so a tool name
+// there reaches the API as-is. (A squad's membersOverrides.artifactPlan
+// structuredOutputIds is the one override field push does resolve.)
 const OVERRIDE_KEYS = new Set([
   "assistantOverrides",
   "membersOverrides",

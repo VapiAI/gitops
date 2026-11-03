@@ -1680,9 +1680,11 @@ open:
   state entry before the apply pass, and the reference then hits the
   resolver's silent drop.
 - Names push never resolves still go unchecked: `hooks[].do[].toolId` and
-  `artifactPlan.structuredOutputIds` inside overrides, `model.toolRefs` at any
-  depth, and `toolIds` in a squad's inline `members[].assistant`. Only
-  `toolIds` inside overrides are checked.
+  `artifactPlan.structuredOutputIds` inside overrides (except a squad's
+  `membersOverrides.artifactPlan`, which push resolves and validate checks
+  like any other reference, #8), `model.toolRefs` at any depth, and `toolIds`
+  in a squad's inline `members[].assistant`. Only `toolIds` inside overrides
+  are checked.
 - Annotations carry a file but no line, so GitHub shows them at the top of
   the file, and it keeps at most 10 per type per step.
 
