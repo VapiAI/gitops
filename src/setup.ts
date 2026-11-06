@@ -12,6 +12,7 @@ import {
   resolveOrgApiKey,
 } from "./api-key.ts";
 import { updateEnvConnection } from "./bindings.ts";
+import { typeArgFor } from "./resource-type-args.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import {
   type DirectSetupOptions,
@@ -348,7 +349,9 @@ function invokePull(
       "--force",
       "--skip-bindings",
       "--type",
-      typeKey,
+      // Not typeKey itself: "simulations" is also the group alias for all
+      // four simulation types, which a pull by --id refuses.
+      typeArgFor(typeKey),
       ...idArgs,
     ].join(" ");
     execSync(cmd, { cwd: BASE_DIR, stdio: "inherit", env });
