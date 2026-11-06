@@ -7,7 +7,7 @@ import {
   ignorePatternsRead,
   matchesIgnore as matchesIgnorePatterns,
 } from "./resource-parse.ts";
-import { VALID_RESOURCE_TYPES } from "./types.ts";
+import { resolveResourceTypes, VALID_TYPE_ARGS } from "./resource-type-args.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
@@ -19,23 +19,8 @@ export interface ApplyFilter {
   resourceIds?: string[]; // Pull only specific remote resource IDs
 }
 
-// Group aliases: expand a shorthand into multiple resource types
-const RESOURCE_GROUP_MAP: Record<string, ResourceType[]> = {
-  simulations: [
-    "personalities",
-    "scenarios",
-    "simulations",
-    "simulationSuites",
-  ],
-};
-
-// Path-based aliases: folder paths to resource types
-const RESOURCE_PATH_MAP: Record<string, ResourceType> = {
-  "simulations/personalities": "personalities",
-  "simulations/scenarios": "scenarios",
-  "simulations/tests": "simulations",
-  "simulations/suites": "simulationSuites",
-};
+// The --type aliases (groups like "simulations", paths like
+// "simulations/tests") live in resource-type-args.ts.
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -67,28 +52,6 @@ function parseEnvironment(): Environment {
   return envArg;
 }
 
-// Resolve a type argument into resource types (handles groups, paths, and direct types)
-function resolveResourceTypes(arg: string): ResourceType[] | null {
-  // Check group aliases first (e.g., "simulations" → all 4 simulation types)
-  if (RESOURCE_GROUP_MAP[arg]) {
-    return RESOURCE_GROUP_MAP[arg];
-  }
-  // Check path-based aliases (e.g., "simulations/personalities" → ["personalities"])
-  if (RESOURCE_PATH_MAP[arg]) {
-    return [RESOURCE_PATH_MAP[arg]];
-  }
-  // Check direct resource type
-  if (VALID_RESOURCE_TYPES.includes(arg as ResourceType)) {
-    return [arg as ResourceType];
-  }
-  return null;
-}
-
-const VALID_TYPE_ARGS = [
-  ...VALID_RESOURCE_TYPES,
-  ...Object.keys(RESOURCE_GROUP_MAP),
-  ...Object.keys(RESOURCE_PATH_MAP),
-];
 
 function parseFlags(): {
   forceDelete: boolean;
