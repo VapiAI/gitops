@@ -103,7 +103,10 @@ function formatBodyPreview(body: Record<string, unknown>): string {
 // existing importers and `instanceof` checks see one class.
 export { VapiApiError };
 
-const REQUEST_DELAY_MS = 700; // Delay between requests to avoid rate limits
+// Minimum gap between writes, to stay under rate limits. Reads skip it: a pull
+// is a handful of list requests, and a 700ms gap before each one was most of a
+// pull's run time. A 429 on a read is still retried with backoff.
+const REQUEST_DELAY_MS = 700;
 
 let lastRequestTime = 0;
 
@@ -190,7 +193,6 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    await throttle();
     const response = await fetch(url, {
       method: "GET",
       headers: {
