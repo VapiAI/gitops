@@ -175,6 +175,18 @@ export function resolveSimulationIds(
     .filter((id): id is string => id !== null);
 }
 
+// A squad's `membersOverrides.artifactPlan`, or undefined when absent. It
+// names structured outputs the same way an assistant's `artifactPlan` does.
+export function membersOverridesArtifactPlan(
+  data: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const overrides = data.membersOverrides;
+  if (!overrides || typeof overrides !== "object") return undefined;
+  const artifactPlan = (overrides as Record<string, unknown>).artifactPlan;
+  if (!artifactPlan || typeof artifactPlan !== "object") return undefined;
+  return artifactPlan as Record<string, unknown>;
+}
+
 export function resolveReferences(
   data: Record<string, unknown>,
   state: StateFile,
@@ -205,6 +217,18 @@ export function resolveReferences(
     const artifactPlan = resolved.artifactPlan as Record<string, unknown>;
     artifactPlan.structuredOutputIds = resolveStructuredOutputIds(
       artifactPlan.structuredOutputIds as string[],
+      state,
+    );
+  }
+
+  // Resolve structuredOutputIds in a squad's membersOverrides.artifactPlan
+  const membersArtifactPlan = membersOverridesArtifactPlan(resolved);
+  if (
+    membersArtifactPlan &&
+    Array.isArray(membersArtifactPlan.structuredOutputIds)
+  ) {
+    membersArtifactPlan.structuredOutputIds = resolveStructuredOutputIds(
+      membersArtifactPlan.structuredOutputIds as string[],
       state,
     );
   }
@@ -384,6 +408,17 @@ export function extractReferencedIds(
         ...(artifactPlan.structuredOutputIds as string[]).map(cleanId),
       );
     }
+  }
+
+  // Check membersOverrides.artifactPlan.structuredOutputIds in squads
+  const membersArtifactPlan = membersOverridesArtifactPlan(data);
+  if (
+    membersArtifactPlan &&
+    Array.isArray(membersArtifactPlan.structuredOutputIds)
+  ) {
+    structuredOutputs.push(
+      ...(membersArtifactPlan.structuredOutputIds as string[]).map(cleanId),
+    );
   }
 
   // Check assistant_ids in structured outputs

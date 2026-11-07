@@ -2058,12 +2058,16 @@ async function main(): Promise<void> {
     if (squads.length > 0) {
       console.log("\n👥 Applying squads...\n");
       // Auto-resolve missing assistant dependencies (recursively resolves tools/SOs)
+      // and structured outputs named in membersOverrides.artifactPlan
       for (const squad of squads) {
         const refs = extractReferencedIds(
           squad.data as Record<string, unknown>,
         );
         for (const assistantId of refs.assistants) {
           await ensureAssistantExists(assistantId, depCtx);
+        }
+        for (const outputId of refs.structuredOutputs) {
+          await ensureStructuredOutputExists(outputId, depCtx);
         }
       }
       for (const squad of squads) {

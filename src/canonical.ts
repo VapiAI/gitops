@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { replaceCredentialRefs } from "./credentials.ts";
+import { membersOverridesArtifactPlan } from "./resolver.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 
 export interface VapiResource {
@@ -106,6 +107,23 @@ export function resolveReferencesToResourceIds(
       );
     }
     resolved.artifactPlan = artifactPlan;
+  }
+
+  // Resolve structuredOutputIds in a squad's membersOverrides.artifactPlan
+  const membersArtifactPlan = membersOverridesArtifactPlan(resolved);
+  if (
+    membersArtifactPlan &&
+    Array.isArray(membersArtifactPlan.structuredOutputIds)
+  ) {
+    resolved.membersOverrides = {
+      ...(resolved.membersOverrides as Record<string, unknown>),
+      artifactPlan: {
+        ...membersArtifactPlan,
+        structuredOutputIds: membersArtifactPlan.structuredOutputIds.map(
+          (uuid: string) => structuredOutputsMap.get(uuid) ?? uuid,
+        ),
+      },
+    };
   }
 
   // Resolve assistantIds in structured outputs (API returns camelCase)
