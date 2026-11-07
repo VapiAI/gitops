@@ -304,15 +304,17 @@ async function deleteExistingOrg(slug: string): Promise<void> {
 // Pull integration
 // ─────────────────────────────────────────────────────────────────────────────
 
+// "all" downloads everything with one full pull rather than one pull per type,
+// each of which starts a process and re-fetches credentials and its list.
 function invokePull(
   slug: string,
-  selectedIds: Set<string>,
+  selectedIds: Set<string> | "all",
   token: string,
   baseUrl: string,
 ): void {
   // Group selected resources by type so we can pass --id per invocation
   const byType = new Map<string, string[]>();
-  for (const id of selectedIds) {
+  for (const id of selectedIds === "all" ? [] : selectedIds) {
     const sep = id.indexOf("::");
     const typeKey = id.substring(0, sep);
     const uuid = id.substring(sep + 2);
@@ -332,6 +334,7 @@ function invokePull(
     VAPI_PRIVATE_API_KEY: token,
     VAPI_TOKEN: token,
     VAPI_BASE_URL: baseUrl,
+    VAPI_GITOPS_FORCE_PAUSE: "off",
   };
 
   execSync(`tsx src/pull.ts ${slug} --bootstrap --bindings-only`, {
@@ -339,6 +342,15 @@ function invokePull(
     stdio: "inherit",
     env,
   });
+
+  if (selectedIds === "all") {
+    execSync(`tsx src/pull.ts ${slug} --force --skip-bindings`, {
+      cwd: BASE_DIR,
+      stdio: "inherit",
+      env,
+    });
+    return;
+  }
 
   for (const [typeKey, uuids] of byType) {
     const idArgs = uuids.flatMap((id) => ["--id", id]);
@@ -704,6 +716,7 @@ async function main(): Promise<void> {
 
   // selectedIds: "typeKey::resourceUUID"
   let selectedIds: Set<string>;
+  let downloadAll = false;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -738,6 +751,7 @@ async function main(): Promise<void> {
 
       selectedIds = new Set(picked);
     } else {
+      downloadAll = true;
       selectedIds = new Set(
         nonEmpty.flatMap((snap) =>
           snap.resources.map((r) => `${snap.key}::${r.id as string}`),
@@ -796,10 +810,18 @@ async function main(): Promise<void> {
 
   await writeEnvFile(slug, trimmedKey, vapiBaseUrl);
   console.log(c.green(`  ✓ Created .env.${slug}\n`));
+  // Before the first pull, as non-interactive setup does: the org pin
+  // (.vapi-org.json) is only written into a folder that already exists.
+  await mkdir(resourceDir, { recursive: true });
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(slug, selectedIds, trimmedKey, vapiBaseUrl);
+  invokePull(
+    slug,
+    downloadAll ? "all" : selectedIds,
+    trimmedKey,
+    vapiBaseUrl,
+  );
 
   // ── Done ──────────────────────────────────────────────────────────────
 

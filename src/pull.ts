@@ -1291,7 +1291,13 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
   const bothDivergedResources: BothDivergedResource[] = [];
   let idsByType: Map<ResourceType, string[]> | undefined;
 
-  if (force && process.env.CI !== "true") {
+  // setup turns the pause off for the pulls it runs itself: the warning is for
+  // someone typing --force, and the wizard can run one --force pull per type.
+  if (
+    force &&
+    process.env.CI !== "true" &&
+    process.env.VAPI_GITOPS_FORCE_PAUSE !== "off"
+  ) {
     console.warn(
       "\n⚠️  --force will overwrite local files without showing you direction labels or surfacing 3-way conflicts.",
     );
