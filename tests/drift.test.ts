@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { dirname } from "node:path";
 import test from "node:test";
 import {
   checkPronunciationDictDrop,
@@ -112,7 +113,11 @@ function driftState(
 // no real checkout uses, and remove the whole folder when the file finishes.
 const HASH_STORE_TEST_ENV = `drift-test-${process.pid}`;
 after(() => {
-  rmSync(hashStoreDir(HASH_STORE_TEST_ENV), { recursive: true, force: true });
+  // state/<org>/local/baselines → state/<org>
+  rmSync(dirname(dirname(hashStoreDir(HASH_STORE_TEST_ENV))), {
+    recursive: true,
+    force: true,
+  });
 });
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {

@@ -397,7 +397,7 @@ test("two state files that disagree stop the command with both intact", () => {
 
 // ── npm run migrate and the legacy-format guard ──────────────────────────
 
-const FAT_STATE = `${JSON.stringify({ assistants: { intake: { uuid: UUID, lastPulledHash: "h" } } })}\n`;
+const FAT_STATE = `${JSON.stringify({ assistants: { intake: { uuid: UUID, lastPulledAt: "2026-01-01T00:00:00Z" } } })}\n`;
 
 test("the legacy-format guard reads the state file in either place", () => {
   const root = mkdtempSync(join(tmpdir(), "state-layout-"));
