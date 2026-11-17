@@ -2186,7 +2186,7 @@ run's hand-off to the workflow, and an older workflow reads it there.
 
 ## 40. Nothing checked a `credentialIds` list against the keys an org has saved
 
-**[RESOLVED 2026-11-17] (#PR_NUMBER)**
+**[RESOLVED 2026-11-17] (#96)**
 
 **Discovered:** 2026-11-17, while planning one squad per site in an org that
 holds an Azure OpenAI key per site.
