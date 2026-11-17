@@ -270,7 +270,9 @@ async function transitionRun(
     `\n${transition.pipeline}: ${transition.source} → ${transition.target}`,
   );
   for (const change of plan.changes)
-    console.log(`  ${change.kind.padEnd(6)} ${change.path}`);
+    console.log(
+      `  ${change.kind.padEnd(6)} ${change.path}${change.blocks ? ` (block changed: ${change.blocks.join(", ")})` : ""}`,
+    );
   for (const warning of plan.warnings) console.warn(`  ⚠️  ${warning}`);
   if (plan.changes.length === 0) console.log("  no changes");
   if (plan.changes.length === 0) return false;
