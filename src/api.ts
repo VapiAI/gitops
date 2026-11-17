@@ -75,6 +75,7 @@ export function orgPinGuard(): Promise<void> {
   return orgPinChecked;
 }
 
+
 export function getDryRunCounts(): {
   POST: number;
   PATCH: number;
@@ -150,20 +151,17 @@ export async function vapiRequest<T = VapiResponse>(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();
-    const response = await limitedVapiFetch(
-      orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
-      url,
-      {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${VAPI_TOKEN}`,
-          "User-Agent": userAgentGet(),
-          "x-vapi-client": vapiClientGet(),
-        },
-        body: JSON.stringify(body),
+    const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+    const response = await limitedVapiFetch(limiter, url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
-    );
+      body: JSON.stringify(body),
+    });
 
     if (response.ok) {
       return response.json() as Promise<T>;
@@ -200,18 +198,15 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await limitedVapiFetch(
-      orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
-      url,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${VAPI_TOKEN}`,
-          "User-Agent": userAgentGet(),
-          "x-vapi-client": vapiClientGet(),
-        },
+    const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+    const response = await limitedVapiFetch(limiter, url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
-    );
+    });
 
     if (response.ok) {
       return response.json() as Promise<T>;
@@ -255,18 +250,15 @@ export async function vapiDelete(endpoint: string): Promise<void> {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();
-    const response = await limitedVapiFetch(
-      orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
-      url,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${VAPI_TOKEN}`,
-          "User-Agent": userAgentGet(),
-          "x-vapi-client": vapiClientGet(),
-        },
+    const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+    const response = await limitedVapiFetch(limiter, url, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
-    );
+    });
 
     if (response.ok) {
       return;

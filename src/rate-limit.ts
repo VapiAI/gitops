@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { orgEnvFilesRead, shellEnvironment } from "./env-file.ts";
 
 export const DEFAULT_MAX_GITOPS_RPM = 100;
 
@@ -22,7 +23,7 @@ function positive(value: unknown, source: string): number {
 export function maxGitopsRpmRead(
   rootDir: string,
   org: string,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = shellEnvironment,
 ): number {
   const pin = join(rootDir, "resources", org, ".vapi-org.json");
   let value = DEFAULT_MAX_GITOPS_RPM;
@@ -43,18 +44,13 @@ export function maxGitopsRpmRead(
       );
   }
   let fileValue: number | undefined;
-  for (const name of [`.env.${org}`, `.env.${org}.local`, ".env.local"]) {
-    const path = join(rootDir, name);
-    if (!existsSync(path)) continue;
-    for (const line of readFileSync(path, "utf8").split("\n")) {
-      const match = /^\s*VAPI_MAX_GITOPS_RPM\s*=\s*(.*?)\s*$/.exec(line);
-      if (match) {
-        const number = positive(
-          match[1]!.replace(/^(["'])(.*)\1$/, "$2"),
-          `${name} VAPI_MAX_GITOPS_RPM`,
-        );
-        fileValue ??= number;
-      }
+  for (const { name, values } of orgEnvFilesRead(rootDir, org)) {
+    if (values.VAPI_MAX_GITOPS_RPM !== undefined) {
+      const number = positive(
+        values.VAPI_MAX_GITOPS_RPM,
+        `${name} VAPI_MAX_GITOPS_RPM`,
+      );
+      fileValue ??= number;
     }
   }
   return env.VAPI_MAX_GITOPS_RPM === undefined
@@ -72,6 +68,7 @@ export class TokenBucket {
     private now = () => performance.now(),
     private sleep = (ms: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    readonly org = "unknown",
   ) {
     positive(rpm, "token bucket");
     this.capacity = Math.max(1, Math.ceil(rpm / 60));
@@ -118,7 +115,7 @@ export function orgLimiter(
   const key = `${resolve(rootDir)}\0${org}`;
   let limiter = buckets.get(key);
   if (!limiter) {
-    limiter = new TokenBucket(rpm);
+    limiter = new TokenBucket(rpm, undefined, undefined, org);
     buckets.set(key, limiter);
   }
   return limiter;

@@ -1,6 +1,3 @@
-import { orgLimiterOrExit } from "./rate-limit.ts";
-import { limitedVapiFetch } from "./vapi-fetch.ts";
-
 // CLI entry: `npm run rollback -- <org> --to <ISO-timestamp>` |
 //             `npm run rollback -- <org> --list`
 //
@@ -11,13 +8,15 @@ import { limitedVapiFetch } from "./vapi-fetch.ts";
 // Self-contained (does not import config.ts) so it can run in isolation
 // without triggering the global CLI parser.
 
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -214,20 +213,18 @@ async function main(): Promise<void> {
     process.stdout.write(
       `   🔁 ${entry.resourceType}/${entry.resourceId} ... `,
     );
-    const response = await limitedVapiFetch(
-      orgLimiterOrExit(BASE_DIR, cfg.env),
-      `${cfg.baseUrl}${endpoint}/${uuid}`,
-      {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          "Content-Type": "application/json",
-          "User-Agent": userAgentGet(),
-          "x-vapi-client": vapiClientGet(),
-        },
-        body: JSON.stringify(entry.payload.platform),
+    const limiter = orgLimiterOrExit(BASE_DIR, cfg.env);
+    const url = `${cfg.baseUrl}${endpoint}/${uuid}`;
+    const response = await limitedVapiFetch(limiter, url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        "Content-Type": "application/json",
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
       },
-    );
+      body: JSON.stringify(entry.payload.platform),
+    });
     if (!response.ok) {
       const text = await response.text();
       console.log(`❌ ${response.status}`);

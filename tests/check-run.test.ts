@@ -2,26 +2,19 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { TokenBucket } from "../src/rate-limit.ts";
 import type { CheckJob } from "../src/check-build.ts";
 import { checksConfigParse } from "../src/check-config.ts";
 import { MOCK_MARKER } from "../src/check-mocks.ts";
 import type { CheckRunBody } from "../src/check-payload.ts";
 import type { CheckRunArgs, CheckTargetResult } from "../src/check-run.ts";
 import { checkRunAll, MIN_START_MS } from "../src/check-run.ts";
-import { TokenBucket } from "../src/rate-limit.ts";
 
 // checkRunAll against a stateful stub of the simulations API. The target
 // assistant's name picks the stub's behaviour for that run.
 
 type Behaviour =
-  | "pass"
-  | "fail"
-  | "skipped"
-  | "hang"
-  | "slow"
-  | "unmocked"
-  | "402"
-  | "502";
+  "pass" | "fail" | "skipped" | "hang" | "slow" | "unmocked" | "402" | "502";
 
 interface StubRun {
   id: string;

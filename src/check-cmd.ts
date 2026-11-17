@@ -1,4 +1,3 @@
-import { orgLimiterOrExit } from "./rate-limit.ts";
 // CLI entry: `npm run check -- <check>|--all [options]`
 //
 // Builds each check target's inline simulation-run payload from the files
@@ -22,7 +21,7 @@ import type { CheckReportSkipped } from "./check-report.ts";
 import { checkReportJson, checkReportMarkdown } from "./check-report.ts";
 import type { CheckTargetResult } from "./check-run.ts";
 import { checkRunAll, outcomeState } from "./check-run.ts";
-import { changedFilesRead, checkAffectedBy } from "./check-select.ts";
+import { checkAffectedBy, changedFilesRead } from "./check-select.ts";
 import type { CommitStatus, GitHubStatusEnv } from "./check-status.ts";
 import {
   AGGREGATE_CONTEXT,
@@ -33,6 +32,7 @@ import {
 } from "./check-status.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import type { VapiConnection } from "./vapi-client.ts";
 

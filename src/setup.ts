@@ -40,7 +40,12 @@ const VAPI_REGIONS: Record<string, string> = {
   eu: "https://api.eu.vapi.ai",
 };
 let requestOrg: string | undefined;
-const validationLimiter = new TokenBucket(DEFAULT_MAX_GITOPS_RPM);
+const validationLimiter = new TokenBucket(
+  DEFAULT_MAX_GITOPS_RPM,
+  undefined,
+  undefined,
+  "setup (folder not selected)",
+);
 let vapiBaseUrl = VAPI_REGIONS.us!;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -102,18 +107,17 @@ const c = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function apiGet(token: string, endpoint: string): Promise<unknown> {
-  const response = await limitedVapiFetch(
-    requestOrg ? orgLimiterOrExit(BASE_DIR, requestOrg) : validationLimiter,
-    `${vapiBaseUrl}${endpoint}`,
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "User-Agent": userAgentGet(),
-        "x-vapi-client": vapiClientGet(),
-      },
+  const limiter = requestOrg
+    ? orgLimiterOrExit(BASE_DIR, requestOrg)
+    : validationLimiter;
+  const response = await limitedVapiFetch(limiter, `${vapiBaseUrl}${endpoint}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": userAgentGet(),
+      "x-vapi-client": vapiClientGet(),
     },
-  );
+  });
 
   if (!response.ok) {
     const text = await response.text();
@@ -428,9 +432,7 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const resourceDir = join(BASE_DIR, "resources", slug);
   const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
 
-  console.log(
-    c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`),
-  );
+  console.log(c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`));
 
   // Never clobber an org that already has local state. Re-running setup is
   // a destructive operation in the wizard (it deletes and re-pulls), and an
@@ -463,9 +465,7 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   // Setup writes the key into .env.<org> and downloads that org, so a key
   // that may belong to another org is a hard stop here, not a warning.
   if (resolved.warning) {
-    fail(
-      `${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`,
-    );
+    fail(`${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`);
   }
   const otherOrg = orgWithKey(slug, resolved.token);
   if (otherOrg) {
@@ -585,9 +585,7 @@ async function main(): Promise<void> {
   // so explain the non-interactive path instead.
   if (!process.stdin.isTTY) {
     console.error(
-      c.red(
-        "\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n",
-      ),
+      c.red("\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n"),
     );
     console.error(SETUP_USAGE);
     process.exit(1);
@@ -675,15 +673,18 @@ async function main(): Promise<void> {
     message: "Folder name for this org (e.g. my-org, my-org-prod)",
     validate: (value) => {
       const slug = slugify(value);
-      return slug && SLUG_RE.test(slug)
-        ? true
-        : "Must be lowercase alphanumeric with hyphens (e.g. my-org-name)";
+      if (!slug || !SLUG_RE.test(slug)) {
+        return "Must be lowercase alphanumeric with hyphens (e.g. my-org-name)";
+      }
+      return true;
     },
     transformer: (value) => {
       const slug = slugify(value);
-      return slug && slug !== value ? `${value} → ${c.dim(slug)}` : value;
+      if (slug && slug !== value) return `${value} → ${c.dim(slug)}`;
+      return value;
     },
   });
+
   const slug = slugify(rawSlug);
   requestOrg = slug;
   orgLimiterOrExit(BASE_DIR, slug);
@@ -835,7 +836,12 @@ async function main(): Promise<void> {
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(slug, downloadAll ? "all" : selectedIds, trimmedKey, vapiBaseUrl);
+  invokePull(
+    slug,
+    downloadAll ? "all" : selectedIds,
+    trimmedKey,
+    vapiBaseUrl,
+  );
 
   // ── Done ──────────────────────────────────────────────────────────────
 

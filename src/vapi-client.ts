@@ -1,5 +1,3 @@
-import type { TokenBucket } from "./rate-limit.ts";
-import { limitedVapiFetch } from "./vapi-fetch.ts";
 // Config-free HTTP client for the Vapi API.
 //
 // api.ts is the engine's client, but it imports config.ts, which parses
@@ -7,6 +5,9 @@ import { limitedVapiFetch } from "./vapi-fetch.ts";
 // for several orgs, without a token, or from tests (sim.ts, the check
 // runner) uses this client instead. api.ts imports the error class and retry
 // policy from here, so both clients fail and retry the same way.
+
+import type { TokenBucket } from "./rate-limit.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 export interface VapiConnection {
   limiter: TokenBucket;
@@ -86,20 +87,17 @@ export async function vapiFetchJson<T>(
   const sleep = options.sleep ?? sleepDefault;
 
   for (let attempt = 0; ; attempt++) {
-    const response = await limitedVapiFetch(
-      connection.limiter,
-      `${connection.baseUrl}${endpoint}`,
-      {
-        method,
-        headers: {
-          Authorization: `Bearer ${connection.token}`,
-          "Content-Type": "application/json",
-          "User-Agent": connection.userAgent,
-          "x-vapi-client": connection.vapiClient,
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    const url = `${connection.baseUrl}${endpoint}`;
+    const response = await limitedVapiFetch(connection.limiter, url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${connection.token}`,
+        "Content-Type": "application/json",
+        "User-Agent": connection.userAgent,
+        "x-vapi-client": connection.vapiClient,
       },
-    );
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
     if (response.ok) {
       const text = await response.text();
       return (text ? JSON.parse(text) : null) as T;

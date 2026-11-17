@@ -26,7 +26,7 @@ export async function limitedVapiFetch(
   if (response.status === 429 && !warned.has(limiter)) {
     warned.add(limiter);
     console.warn(
-      `⚠️  max GitOps RPM (maxGitopsRpm / VAPI_MAX_GITOPS_RPM) may be configured too high. This is a GitOps client limit, not a Vapi org limit. Compare it with your org-level API rate limit in requests per minute (200 by default): ${orgSettingsUrl(url)}`,
+      `⚠️  Vapi returned 429 (rate limited) for org ${limiter.org}. maxGitopsRpm is ${limiter.rpm} requests per minute, which may be higher than your org's API rate limit (200 RPM by default). Check it at ${orgSettingsUrl(url)}, then lower maxGitopsRpm in resources/${limiter.org}/.vapi-org.json or set VAPI_MAX_GITOPS_RPM. This is a GitOps client limit, not a Vapi org limit.`,
     );
   }
   return response;

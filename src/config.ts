@@ -1,14 +1,14 @@
-import { existsSync, readFileSync } from "fs";
-import { basename, dirname, join, relative, resolve } from "path";
-import { fileURLToPath } from "url";
 import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { dirname, join, relative, resolve } from "path";
+import { fileURLToPath } from "url";
+import type { Environment, ResourceType } from "./types.ts";
+import { orgEnvFilesRead, shellEnvironment } from "./env-file.ts";
 import { maxGitopsRpmRead } from "./rate-limit.ts";
 import {
   ignorePatternsRead,
   matchesIgnore as matchesIgnorePatterns,
 } from "./resource-parse.ts";
 import { resolveResourceTypes, VALID_TYPE_ARGS } from "./resource-type-args.ts";
-import type { Environment, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
@@ -52,6 +52,7 @@ function parseEnvironment(): Environment {
 
   return envArg;
 }
+
 
 function parseFlags(): {
   forceDelete: boolean;
@@ -182,41 +183,13 @@ function parseFlags(): {
 // a key from .env.<org> apart from one that was exported in the shell.
 function loadEnvFile(env: string, baseDir: string): Record<string, string> {
   const fileVars: Record<string, string> = {};
-  const envFiles = [
-    join(baseDir, `.env.${env}`), // e.g. .env.my-org
-    join(baseDir, `.env.${env}.local`), // e.g. .env.my-org.local (local overrides)
-    join(baseDir, ".env.local"), // .env.local (always loaded last)
-  ];
-
-  for (const envFile of envFiles) {
-    if (existsSync(envFile)) {
-      const content = readFileSync(envFile, "utf-8");
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-
-        const eqIndex = trimmed.indexOf("=");
-        if (eqIndex === -1) continue;
-
-        const key = trimmed.slice(0, eqIndex).trim();
-        let value = trimmed.slice(eqIndex + 1).trim();
-
-        // Remove quotes if present
-        if (
-          (value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))
-        ) {
-          value = value.slice(1, -1);
-        }
-
-        if (fileVars[key] === undefined) fileVars[key] = value;
-        // Only set if not already defined (env vars take precedence)
-        if (key !== "VAPI_MAX_GITOPS_RPM" && process.env[key] === undefined) {
-          process.env[key] = value;
-        }
-      }
-      console.log(`📁 Loaded env file: ${basename(envFile)}`);
+  for (const { name, values } of orgEnvFilesRead(baseDir, env)) {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) continue;
+      if (fileVars[key] === undefined) fileVars[key] = value;
+      if (process.env[key] === undefined) process.env[key] = value;
     }
+    console.log(`📁 Loaded env file: ${name}`);
   }
   return fileVars;
 }
@@ -245,7 +218,7 @@ export const {
 // merged in, so an exported key still beats a key in the .env file:
 // VAPI_PRIVATE_API_KEY_<ORG>, then VAPI_PRIVATE_API_KEY / VAPI_TOKEN, then
 // .env.<org>. See resolveOrgApiKey.
-const SHELL_ENV = { ...process.env };
+const SHELL_ENV = shellEnvironment;
 
 export const MAX_GITOPS_RPM = (() => {
   try {

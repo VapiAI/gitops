@@ -1,29 +1,28 @@
-import { orgLimiterOrExit } from "./rate-limit.ts";
-
 // Simulation runner — wraps `POST /eval/simulation/run`.
 //
 // Designed to be importable from `sim-cmd.ts` and from tests without
 // triggering the CLI argument parser in `config.ts`. Env-loading is inlined
 // here (rather than importing from `config.ts`) for the same reason.
 
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import {
+  simRunItemTerminal,
+  simRunVerdict,
   type SimRun,
   type SimRunItem,
   type SimRunItemCounts,
   type SimRunVerdict,
-  simRunItemTerminal,
-  simRunVerdict,
 } from "./sim-result.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   VapiApiError,
-  type VapiConnection,
   vapiFetchJson,
+  type VapiConnection,
 } from "./vapi-client.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

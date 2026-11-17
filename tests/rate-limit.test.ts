@@ -190,7 +190,7 @@ test("429 responses warn once per org and retries consume tokens", async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
-  const limiter = new TokenBucket(2);
+  const limiter = new TokenBucket(2, undefined, undefined, "acme");
   limiter.acquire = async () => {
     tokens++;
   };
@@ -215,9 +215,17 @@ test("429 responses warn once per org and retries consume tokens", async () => {
     assert.equal(warnings.length, 1);
     assert.match(
       warnings[0]!,
-      /max GitOps RPM.*maxGitopsRpm \/ VAPI_MAX_GITOPS_RPM.*https:\/\/dashboard.vapi.ai\/settings\/organization/,
+      /Vapi returned 429 \(rate limited\) for org acme\. maxGitopsRpm is 2 requests per minute/,
     );
-    assert.match(warnings[0]!, /requests per minute \(200 by default\)/);
+    assert.match(warnings[0]!, /200 RPM by default/);
+    assert.match(
+      warnings[0]!,
+      /https:\/\/dashboard.vapi.ai\/settings\/organization/,
+    );
+    assert.match(
+      warnings[0]!,
+      /resources\/acme\/\.vapi-org.json or set VAPI_MAX_GITOPS_RPM/,
+    );
   } finally {
     console.warn = warn;
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -278,6 +286,37 @@ test("invalid committed RPM exits config-free callers without a stack", () => {
       /❌ Invalid max GitOps RPM in resources\/acme\/\.vapi-org.json/,
     );
     assert.doesNotMatch(result.stderr, /\n\s+at |Error:|node:internal/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("shared env parsing handles exports, comments and org file precedence", () => {
+  const root = mkdtempSync(join(tmpdir(), "rpm-env-"));
+  try {
+    writeFileSync(
+      join(root, ".env.acme"),
+      'export VAPI_MAX_GITOPS_RPM = "90" # client ceiling\n',
+    );
+    writeFileSync(
+      join(root, ".env.acme.local"),
+      "VAPI_MAX_GITOPS_RPM=80 # fallback\n",
+    );
+    writeFileSync(join(root, ".env.local"), "VAPI_MAX_GITOPS_RPM=70\n");
+    assert.equal(maxGitopsRpmRead(root, "acme", {}), 90);
+    assert.equal(maxGitopsRpmRead(root, "other", {}), 70);
+    assert.equal(
+      maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "60" }),
+      60,
+    );
+    writeFileSync(
+      join(root, ".env.acme"),
+      "export VAPI_MAX_GITOPS_RPM=invalid # invalid even with an override\n",
+    );
+    assert.throws(
+      () => maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "60" }),
+      /\.env.acme VAPI_MAX_GITOPS_RPM/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
