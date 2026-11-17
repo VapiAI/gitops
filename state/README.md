@@ -6,6 +6,7 @@ The engine writes everything in this folder. Don't edit or delete these files by
 | --- | --- | --- |
 | `state/<org>/state.json` | Which Vapi resource (UUID) each file under `resources/<org>/` is. | Yes |
 | `state/<org>/org.json` | The Vapi org that `resources/<org>/` belongs to. A command run with another org's key stops before it reads or changes anything. | Yes |
+| `state/<org>/blocks.json` | The [block](../docs/guides/blocks.md) content each resource was last pushed with, so `npm run sync-blocks` and promotion can list resources that still run old block text. | Yes |
 | `state/<org>/credential-providers.json` | The provider of each saved credential, by name, with no secret. The [credential-pin check](../docs/guides/credential-pins.md) reads it. | Yes |
 | `state/<org>/local/baselines/` | The last version of each resource this machine saw on the platform, used to notice dashboard edits. | No |
 | `state/<org>/local/snapshots/` | A copy of each resource taken before a push, for `npm run rollback`. | No |
@@ -15,6 +16,7 @@ The engine writes everything in this folder. Don't edit or delete these files by
 
 - **`state.json`**: the engine no longer knows which resources already exist, so the next push creates every one of them again as a duplicate. Restore the file from git (`git checkout -- state/<org>/state.json`). Never rebuild it by hand.
 - **`org.json`**: the next command pins the folder again to whichever org its key belongs to, so the protection against a wrong key is gone until then. Restore it from git.
+- **`blocks.json`**: every resource that uses a block is listed as out of date until it is pushed once. Restore it from git.
 - **`credential-providers.json`**: `validate` can't check `credentialIds` lists and says so. The next pull writes the file again.
 - **`commit-step.json`**: nothing is lost. A CI run under that pipeline stops before it changes anything and says how to put the file back.
 - **`local/`**: nothing breaks. The next pull records new baselines. Snapshots taken so far are gone, so there is nothing to roll back to until the next push.

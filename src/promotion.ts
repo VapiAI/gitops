@@ -623,7 +623,7 @@ export async function promotionPlanBuild(
   const targetByPath = new Map(target.map((file) => [file.path, file]));
   const targetDir = join(options.rootDir, "resources", options.target);
   const targetLayers = blockLayers(targetDir);
-  const targetRecord = blocksRecordRead(targetDir);
+  const targetRecord = blocksRecordRead(options.rootDir, options.target);
   const sourcePaths = new Set([...wanted.values()].map((file) => file.path));
   const changes: PromotionChange[] = [];
   const warnings: string[] = [];

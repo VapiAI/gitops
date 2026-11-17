@@ -3,7 +3,7 @@
 // A block edit changes every resource that includes the block, in every org,
 // without changing any of their files. This command finds those resources:
 // the ones whose blocks differ from what the blocks record
-// (resources/<org>/.vapi-blocks.json) says they were last pushed with.
+// (state/<org>/blocks.json) says they were last pushed with.
 //
 // Without --apply it only lists them, reading files and nothing else. With
 // --apply it runs `apply` for each org, scoped to those files, so the usual
@@ -50,8 +50,7 @@ export async function blocksStaleRead(
   rootDir: string,
   org: string,
 ): Promise<BlocksStaleResource[]> {
-  const resourcesDir = join(rootDir, "resources", org);
-  const record = blocksRecordRead(resourcesDir);
+  const record = blocksRecordRead(rootDir, org);
   const stale: BlocksStaleResource[] = [];
   for (const resource of (await orgResourcesRead(rootDir, org)).values()) {
     if (Object.keys(resource.blocks).length === 0) continue;

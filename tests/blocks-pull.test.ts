@@ -38,7 +38,7 @@ function repo(): string {
     "templates/blocks/red-flags.md": `${BLOCK}\n`,
     [`${ASSISTANTS}/triage.md`]: TRIAGE_FILE,
     [`${ASSISTANTS}/plain.md`]: PLAIN_FILE,
-    [`.vapi-state.${ORG}.json`]: stateFile({ triage: TRIAGE, plain: PLAIN }),
+    [`state/${ORG}/state.json`]: stateFile({ triage: TRIAGE, plain: PLAIN }),
   });
 }
 
@@ -72,7 +72,7 @@ function read(root: string, path: string): string {
 }
 
 function baseline(root: string, uuid: string): string | undefined {
-  const path = join(root, ".vapi-state-hash", ORG, uuid);
+  const path = join(root, "state", ORG, "local", "baselines", uuid);
   return existsSync(path) ? readFileSync(path, "utf8") : undefined;
 }
 
