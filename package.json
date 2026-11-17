@@ -22,6 +22,7 @@
     "check": "tsx src/check-cmd.ts",
     "rollback": "tsx src/rollback-cmd.ts",
     "promote": "tsx src/promote-cmd.ts",
+    "sync-blocks": "tsx src/sync-blocks-cmd.ts",
     "build": "tsc --noEmit",
     "test": "node --import tsx --import ./tests/no-vapi-api.ts --test tests/*.test.ts",
     "test:repository": "node --import tsx --import ./tests/no-vapi-api.ts --test --test-concurrency=1 tests/repository/*.test.ts"

@@ -12,6 +12,9 @@ const ENGINE_PATTERNS = [
   CHECKS_CONFIG_FILE,
   "promotion.yml",
   "src/**",
+  // Shared blocks are expanded into any org's resources. An org's own blocks
+  // sit under resources/<org>/, which each check already watches.
+  "templates/**",
   "package.json",
   "package-lock.json",
 ];

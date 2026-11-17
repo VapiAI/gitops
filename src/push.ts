@@ -2,6 +2,7 @@ import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
+import { type BlockUsage, blocksRecordUpdate } from "./blocks.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
   ALLOW_NEW_FILES,
@@ -223,6 +224,15 @@ async function writeAssistantVersionMetadata(options: {
   }
 }
 
+// Every resource this run created or updated on the platform, as
+// "<type folder>/<id>". The blocks record marks a resource as in sync with
+// its blocks only when it is in here: a skipped or refused push is not.
+const pushedResources = new Set<string>();
+
+function pushedRecord(type: ResourceType | undefined, resourceId: string) {
+  if (type) pushedResources.add(`${FOLDER_MAP[type]}/${resourceId}`);
+}
+
 async function upsertResourceWithStateRecovery(options: {
   resourceLabel: string;
   resourceId: string;
@@ -262,6 +272,7 @@ async function upsertResourceWithStateRecovery(options: {
         after: result,
       });
     }
+    pushedRecord(RESOURCE_LABEL_TO_TYPE[resourceLabel], resourceId);
     return result.id;
   }
 
@@ -416,6 +427,7 @@ async function upsertResourceWithStateRecovery(options: {
         after: result,
       });
     }
+    pushedRecord(RESOURCE_LABEL_TO_TYPE[resourceLabel], resourceId);
     return existingUuid;
   } catch (error) {
     if (!(error instanceof VapiApiError) || error.statusCode !== 404) {
@@ -1033,11 +1045,13 @@ export async function applyEval(
       updatePayload,
     );
     await writeBaselineFromResponse(existingUuid, result, state);
+    pushedRecord("evals", resourceId);
     return existingUuid;
   } else {
     console.log(`  ✨ Creating eval: ${resourceId}`);
     const result = await vapiRequest("POST", "/eval", payload);
     await writeBaselineFromResponse(result.id, result, state);
+    pushedRecord("evals", resourceId);
     return result.id;
   }
 }
@@ -1630,6 +1644,11 @@ async function main(): Promise<void> {
   // merge into existing on-disk state instead of rewriting wholesale.
   const touched: TouchedSets = emptyTouchedSets();
 
+  // The blocks every local resource uses, keyed "<type folder>/<id>". Set
+  // once the files have loaded, so a run that fails before then leaves the
+  // blocks record alone.
+  let blocksUsed: Map<string, BlockUsage> | undefined;
+
   // Track what was applied for summary
   const applied: Record<ResourceType, number> = {
     tools: 0,
@@ -1715,6 +1734,14 @@ async function main(): Promise<void> {
       simulationSuites: allSimulationSuitesRaw,
       evals: allEvalsRaw,
     };
+    blocksUsed = new Map(
+      (Object.keys(loadedResources) as ResourceType[]).flatMap((type) =>
+        loadedResources[type].map((file) => [
+          `${FOLDER_MAP[type]}/${file.resourceId}`,
+          file.blocks ?? {},
+        ]),
+      ),
+    );
 
     state = await maybeBootstrapState(loadedResources, state);
 
@@ -2311,6 +2338,18 @@ async function main(): Promise<void> {
         );
         console.error(
           `   Local state may be out of sync with platform. Run \`npm run pull -- ${VAPI_ENV} --bootstrap\` to recover.`,
+        );
+      }
+      // Record the block content each pushed resource went up with, so
+      // sync-blocks and promotion can tell which resources a later block
+      // edit has not reached yet.
+      try {
+        if (blocksUsed)
+          blocksRecordUpdate(RESOURCES_DIR, blocksUsed, pushedResources);
+      } catch (recordError) {
+        console.error(
+          "\n⚠️  Failed to update the blocks record after apply:",
+          recordError instanceof Error ? recordError.message : recordError,
         );
       }
     }

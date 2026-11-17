@@ -6,6 +6,8 @@ on:
     paths:
       - promotion.yml
       - resources/**
+      # Shared blocks: an edit changes resources without changing their files.
+      - templates/**
   workflow_dispatch:
     inputs:
       pipeline:
