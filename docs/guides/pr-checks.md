@@ -151,7 +151,7 @@ promoted out of it: set `orgs.<org>.check: <name>` in `promotion.yml` (see
 2. Create the credentials your agents need there, with the same names as
    production.
 3. `npm run pull -- my-ci-org --bootstrap --bindings-only`, then commit
-   `.vapi-state.my-ci-org.json` so the state knows those credentials. The PR
+   `state/my-ci-org/state.json` so the state knows those credentials. The PR
    workflow refreshes bindings on every live run.
 4. Add `runOrg: my-ci-org` (and `baseUrl` for EU) to the check, and
    optionally `bindings:` (same shape as `promotion.yml`). Phone numbers are

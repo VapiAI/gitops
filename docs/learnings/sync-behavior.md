@@ -15,8 +15,8 @@ function of which of them exist and whether their contents agree.
 | Artifact | Where | Committed? | Meaning |
 |---|---|---|---|
 | **Local file** (`L`) | `resources/<org>/<type>/<name>.md\|yml` | yes | The declarative source of truth you edit |
-| **State entry** (`S`) | `.vapi-state.<org>.json` → `{ "<name>": { "uuid": … } }` | yes | The ONLY thing state stores: which platform UUID a local name is bound to |
-| **Baseline** (`B`) | `.vapi-state-hash/<org>/<uuid>` | **no** (per-developer, gitignored) | sha256 of the last platform content *you* saw (last pull or push) |
+| **State entry** (`S`) | `state/<org>/state.json` → `{ "<name>": { "uuid": … } }` | yes | The ONLY thing state stores: which platform UUID a local name is bound to |
+| **Baseline** (`B`) | `state/<org>/local/baselines/<uuid>` | **no** (per-developer, gitignored) | sha256 of the last platform content *you* saw (last pull or push) |
 | **Dashboard resource** (`D`) | Vapi platform | n/a | What's live |
 
 **One letter per artifact — the same letter for the thing and for its hash.**
@@ -202,8 +202,8 @@ sweep, which consume the resources today without consuming the verdict.
 
 `pull`, `push`, and `apply` all **hard-refuse** with
 `Run \`npm run migrate\` first.` The migration (no org argument, no token
-needed) slims every `.vapi-state.<org>.json` to `name → { uuid }` and seeds
-each org's `.vapi-state-hash/` from the legacy hashes. Idempotent.
+needed) slims every `state/<org>/state.json` to `name → { uuid }` and seeds
+each org's `state/<org>/local/baselines/` from the legacy hashes. Idempotent.
 
 ### G. Local file renamed
 
@@ -232,7 +232,7 @@ does not deploy the source org itself. A safe deletion therefore has two
 separate lifecycles:
 
 1. Delete the source resource file in a reviewed Git change, but retain its
-   `.vapi-state.<source>.json` entry. The entry is the deletion tombstone.
+   `state/<source>/state.json` entry. The entry is the deletion tombstone.
 2. Review `npm run promote` and merge or apply it. Only matching destination
    paths are removed, in reverse dependency order.
 3. An automatic `--all --apply` run carries that authorization through every

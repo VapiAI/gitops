@@ -11,8 +11,8 @@ left alone.
 1. Configure every org with `npm run setup`, using one stable slug per org
    (for example `acme-dev`, `acme-staging`, and `acme-prod`).
 2. Run `npm run pull -- <org> --bootstrap` for every org. Commit each
-   `.vapi-state.<org>.json`; never commit `.env.<org>` or
-   `.vapi-state-hash/`.
+   `state/<org>/` folder; never commit `.env.<org>` (`state/<org>/local/`
+   is gitignored already).
 3. Copy `promotion.example.yml` to `promotion.yml`. List orgs in forward-only
    release order and set the correct `baseUrl` for each region.
 4. Give each pipeline the narrowest resource globs it owns. A pattern is both
@@ -35,7 +35,7 @@ npm run promote -- --pipeline release --from dev --to staging --apply
 Promotion copies logical references, not physical UUIDs. Dependencies such as
 tools and structured outputs are included before assistants, and the normal
 destination push resolves every logical name through
-`.vapi-state.<destination>.json`. Existing credentials and phone numbers use
+`state/<destination>/state.json`. Existing credentials and phone numbers use
 the destination org's binding; their secret material is never copied or
 provisioned.
 

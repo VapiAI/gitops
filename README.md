@@ -137,11 +137,11 @@ org can keep using `VAPI_PRIVATE_API_KEY`.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--region us\|eu` | `VAPI_BASE_URL` if set, else auto-detect (US, then EU) | Which Vapi API to use |
-| `--resources all\|none` | `all` | `all` downloads every resource into `resources/<org>/`; `none` only seeds `.vapi-state.<org>.json` (use when you'll author from scratch) |
+| `--resources all\|none` | `all` | `all` downloads every resource into `resources/<org>/`; `none` only seeds `state/<org>/state.json` (use when you'll author from scratch) |
 
 The private API key is never accepted as a command-line flag (it would leak into shell history and
 agent transcripts). Non-interactive setup also refuses to run if `resources/<org>/` or
-`.vapi-state.<org>.json` already exists — use `npm run pull -- <org>` to refresh an existing org.
+`state/<org>/state.json` already exists — use `npm run pull -- <org>` to refresh an existing org.
 
 ### 4. Make a change and deploy
 
@@ -153,7 +153,7 @@ npm run validate -- my-org   # schema check, no network
 npm run apply -- my-org      # pull the latest, merge, push
 ```
 
-Commit the changed files and `.vapi-state.my-org.json` so your team shares the
+Commit the changed files and `state/my-org/state.json` so your team shares the
 same name → UUID mappings. Every pull request runs the same validator for
 every org in CI (the **Validate resources** check), so a config `apply` would
 refuse fails before it merges.
@@ -176,7 +176,7 @@ To test every pull request automatically, set up [PR checks](docs/guides/pr-chec
 - **Resources refer to each other by ID.** A resource's ID is its path under
   the type folder, without the extension: `tools/lookup-patient.yml` is
   `lookup-patient`. Never paste UUIDs into resource files.
-- **The state file maps IDs to UUIDs.** `.vapi-state.<org>.json` records which
+- **The state file maps IDs to UUIDs.** `state/<org>/state.json` records which
   platform resource each file is, per org. It is committed and holds no
   secrets.
 - **Secrets stay out of git.** API keys live in `.env.<org>` (gitignored) or
@@ -194,7 +194,7 @@ To test every pull request automatically, set up [PR checks](docs/guides/pr-chec
   resource; an unlinked file otherwise creates a new one. `apply` uses the same
   folder behavior in its push phase.
 - **Each folder is pinned to its org.** The first command that can see which
-  org a key belongs to records it in `resources/<org>/.vapi-org.json`. After
+  org a key belongs to records it in `state/<org>/org.json`. After
   that, every command checks the key against it before any request, and stops
   if the key belongs to a different org, so a wrong key can't pull another
   org's resources into the folder or push the folder into another org.
@@ -204,11 +204,15 @@ To test every pull request automatically, set up [PR checks](docs/guides/pr-chec
 
 | Path | Committed? | What it is |
 | --- | --- | --- |
-| `resources/<org>/` | Yes | Your resources, and `.vapi-org.json`, the org the folder belongs to |
-| `.vapi-state.<org>.json` | Yes | Name → UUID mappings for the org |
+| `resources/<org>/` | Yes | Your resources. Hand-written: this is what you edit |
+| `state/<org>/state.json` | Yes | Name → UUID mappings for the org |
+| `state/<org>/org.json` | Yes | The Vapi org the folder belongs to |
+| `state/<org>/local/` | No | This machine's baselines for detecting dashboard edits, and pre-deploy snapshots for `npm run rollback` |
 | `.env.<org>` | **No** | API key and generated binding IDs |
-| `.vapi-state-hash/` | No | Your local baseline for detecting dashboard edits |
-| `.vapi-state.<org>.snapshots/` | No | Pre-deploy snapshots for `npm run rollback` |
+
+Everything under `state/` is written by the engine. Don't edit or delete it by
+hand: without `state.json` the next push creates every resource again as a
+duplicate. [state/README.md](state/README.md) says what each file is.
 
 More detail: [How the engine works](docs/guides/how-it-works.md).
 
@@ -286,7 +290,7 @@ object. API references: [Assistants](https://docs.vapi.ai/api-reference/assistan
 ## Staying up to date
 
 The engine (`src/`, `tests/`, `.github/workflows/`, `package*.json`) comes from
-upstream. Your configuration (`resources/`, `.vapi-state.*.json`,
+upstream. Your configuration (`resources/`, `state/`,
 `promotion.yml`, `vapi-checks.yml`) is yours; upstream only ships `*.example`
 files there. Avoid editing engine files, so updates merge cleanly.
 
@@ -299,6 +303,9 @@ npm ci && npm run build && npm test
 If you started from **Use this template**, add the remote first with
 `git remote add upstream https://github.com/VapiAI/gitops.git`; the first merge
 also needs `--allow-unrelated-histories`, and you'll resolve conflicts once.
+
+If your repository still has `.vapi-state.<org>.json` files at its root, see
+[Upgrading from an older version](docs/guides/commands.md#upgrading-from-an-older-version).
 
 ## Security
 

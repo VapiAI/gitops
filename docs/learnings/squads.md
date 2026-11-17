@@ -234,7 +234,7 @@ See also [structured-outputs.md → Squad `membersOverrides` vs standalone struc
 
 `assistantOverrides.model.toolIds` in squad members must use **Vapi platform UUIDs**, not local filenames. The gitops engine resolves filenames to UUIDs for base assistant `model.toolIds`, but it does **not** resolve them inside squad `assistantOverrides`. If you use a local filename, the push will fail with `each value in toolIds must be a UUID`.
 
-**Workaround:** Look up the tool's UUID from `.vapi-state.<env>.json` and use it directly.
+**Workaround:** Look up the tool's UUID from `state/<org>/state.json` and use it directly.
 
 ```yaml
 # WRONG — filename, will fail in assistantOverrides
