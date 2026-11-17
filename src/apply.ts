@@ -2,6 +2,7 @@ import { execSync } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
+import { stateFileRead, stateLayoutPrepare } from "./state-paths.ts";
 // Pins this command's User-Agent label for the pull and push it spawns.
 import "./user-agent.ts";
 
@@ -32,10 +33,12 @@ export async function runApply(): Promise<void> {
   const allArgs = process.argv.slice(3);
   const hasForce = allArgs.includes("--force");
 
-  // Fail fast with one clear message if this org's state file is still legacy,
-  // rather than letting the spawned pull/push subprocess surface it later.
+  // Move an old-layout state file into state/<org>/ once, here, and fail fast
+  // with one clear message if it is still in the legacy format, rather than
+  // letting the spawned pull/push subprocess surface either later.
   if (env && SLUG_RE.test(env)) {
-    assertStateMigrated(join(BASE_DIR, `.vapi-state.${env}.json`));
+    for (const line of stateLayoutPrepare(BASE_DIR, env)) console.log(line);
+    assertStateMigrated(stateFileRead(BASE_DIR, env));
   }
 
   // Default drift resolution is "defer": pull preserves the local file AND

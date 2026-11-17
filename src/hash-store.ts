@@ -1,7 +1,7 @@
 // Per-developer drift baseline store.
 //
 // The "last known platform state" content hash for each resource lives here,
-// in `.vapi-state-hash/<org>/<uuid>` — one file per resource, filename is the
+// in `state/<org>/local/baselines/<uuid>` — one file per resource, filename is the
 // platform UUID, contents are the sha256 baseline hash. This is the hash a
 // push compares against the live dashboard to decide whether someone changed
 // the resource out of band since I last pulled or pushed it.
@@ -21,14 +21,13 @@ import { existsSync, mkdirSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { baselinesDir, baselinesLegacyDir } from "./state-paths.ts";
 
 // Same expression as config.ts: the repo root is one level up from src/.
 const BASE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Top-level store directory. Per-org subfolders live beneath it. Exported so
-// the migration can locate every org's baselines and so `.gitignore` reasoning
-// stays in one place.
-export const HASH_STORE_ROOT = join(BASE_DIR, ".vapi-state-hash");
+// Exported so the migration works on the same repository root.
+export const HASH_STORE_BASE_DIR = BASE_DIR;
 
 // Guard against a UUID that would escape its org folder. Platform UUIDs never
 // contain these, but reading them straight into a path warrants a check.
@@ -39,7 +38,7 @@ function assertSafeUuid(uuid: string): void {
 }
 
 export function hashStoreDir(org: string): string {
-  return join(HASH_STORE_ROOT, org);
+  return baselinesDir(BASE_DIR, org);
 }
 
 function baselinePath(org: string, uuid: string): string {
@@ -47,12 +46,23 @@ function baselinePath(org: string, uuid: string): string {
   return join(hashStoreDir(org), uuid);
 }
 
+function baselineLegacyPath(org: string, uuid: string): string {
+  assertSafeUuid(uuid);
+  return join(baselinesLegacyDir(BASE_DIR, org), uuid);
+}
+
 // Read the baseline hash for a resource, or undefined if none has been
 // recorded yet (fresh clone, never pulled/pushed). Undefined maps to the
 // `no-baseline` drift direction — the caller proceeds without blocking.
+//
+// A baseline written before state/ existed sits in .vapi-state-hash/<org>/
+// until the next pull, push or apply moves the folder. Read it from there
+// meanwhile, so a read-only command sees the same drift as before.
 export function readBaseline(org: string, uuid: string): string | undefined {
-  const path = baselinePath(org, uuid);
-  if (!existsSync(path)) return undefined;
+  const path = [baselinePath(org, uuid), baselineLegacyPath(org, uuid)].find(
+    (candidate) => existsSync(candidate),
+  );
+  if (!path) return undefined;
   const contents = readFileSync(path, "utf-8").trim();
   return contents.length > 0 ? contents : undefined;
 }
@@ -77,8 +87,7 @@ export async function writeBaseline(
 // no longer exists on the platform), mirroring the existing
 // `delete stateSection[resourceId]` recovery. Missing file is a no-op.
 export async function deleteBaseline(org: string, uuid: string): Promise<void> {
-  const path = baselinePath(org, uuid);
-  if (!existsSync(path)) return;
   const { rm } = await import("fs/promises");
-  await rm(path, { force: true });
+  await rm(baselinePath(org, uuid), { force: true });
+  await rm(baselineLegacyPath(org, uuid), { force: true });
 }

@@ -410,12 +410,12 @@ test("promote CLI dry run uses the reviewed config without writing target files"
     await put(fx.root, "promotion.yml", configText);
     await put(
       fx.root,
-      ".vapi-state.source.json",
+      "state/source/state.json",
       `${JSON.stringify(state(), null, 2)}\n`,
     );
     await put(
       fx.root,
-      ".vapi-state.target.json",
+      "state/target/state.json",
       `${JSON.stringify(state(), null, 2)}\n`,
     );
     await put(fx.root, "resources/source/tools/t.yml", "type: function\n");

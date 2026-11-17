@@ -1,8 +1,8 @@
 // CLI entry: `npm run migrate`
 //
-// One-time migration of every `.vapi-state.<org>.json` in the repo from the
-// legacy fat state file to the slim `name → { uuid }` form + the
-// `.vapi-state-hash/<org>/<uuid>` baseline store. Takes NO org argument and
+// One-time migration of every org's state: from the legacy fat state file to
+// the slim `name → { uuid }` form + the per-machine baseline store, and
+// from the old root-level files into `state/<org>/`. Takes NO org argument and
 // needs NO VAPI_TOKEN — it's a pure local file operation, so it deliberately
 // does not import `config.ts` (which would force an org + token at load).
 //
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   console.log(
     "═══════════════════════════════════════════════════════════════",
   );
-  console.log("🧬 Vapi GitOps Migrate — state file → hash store");
+  console.log("🧬 Vapi GitOps Migrate — state files → state/<org>/");
   console.log(
     "═══════════════════════════════════════════════════════════════\n",
   );
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   const result = await migrateAll();
 
   if (result.orgs.length === 0) {
-    console.log("   No .vapi-state.<org>.json files found — nothing to migrate.");
+    console.log("   No state files found — nothing to migrate.");
     return;
   }
 
@@ -39,12 +39,12 @@ async function main(): Promise<void> {
         `${status} — seeded ${org.seeded} baseline(s)` +
         (org.skipped > 0 ? `, ${org.skipped} already present` : ""),
     );
+    for (const notice of org.notices) console.log(`      ${notice}`);
   }
 
   console.log(
     `\n✅ Migration complete: ${result.orgs.length} org(s), ` +
-      `${totalSlimmed} state file(s) slimmed, ${totalSeeded} baseline(s) seeded ` +
-      `into .vapi-state-hash/.`,
+      `${totalSlimmed} state file(s) slimmed, ${totalSeeded} baseline(s) seeded.`,
   );
 }
 

@@ -5,6 +5,7 @@ import { createRequire } from "module";
 import { dirname, join, resolve } from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "url";
+import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { Environment, StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
@@ -268,10 +269,10 @@ function askUserConfirmation(question: string): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function loadState(env: Environment): StateFile {
-  const stateFilePath = join(BASE_DIR, `.vapi-state.${env}.json`);
+  const stateFilePath = stateFileRead(BASE_DIR, env);
 
   if (!existsSync(stateFilePath)) {
-    console.error(`❌ State file not found: .vapi-state.${env}.json`);
+    console.error(`❌ State file not found: ${stateFileLabel(BASE_DIR, env)}`);
     console.error(
       "   Run 'npm run apply -- " + env + "' first to create resources",
     );

@@ -4,26 +4,27 @@
 // command reads and writes. A key for the wrong org (an exported variable, a
 // copied .env file, a mislabelled CI secret) would pull another org's
 // resources into the folder, or push this folder into another org. The first
-// command that can see the key's org records it in resources/<org>/.vapi-org.json,
-// which is committed with the folder. Every later command checks the key
-// against it and refuses a mismatch before any request.
+// command that can see the key's org records it in state/<org>/org.json,
+// which is committed. Every later command checks the key against it and
+// refuses a mismatch before any request. A pin written before state/ existed
+// sits in resources/<org>/.vapi-org.json and is read from there until the
+// next pull, push or apply moves it (state-paths.ts).
 //
 // A private key can't ask which org it belongs to (/org and /org/me reject
 // private keys), so the org ID comes from the first resource the key can
-// list. Promotion skips dotfiles, so the pin never travels to another org.
+// list. The pin lives outside resources/, so it never travels to another org.
 //
 // Config-free so rollback and tests can check any org.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { orgApiKeyVar } from "./api-key.ts";
+import { orgPinFileRead, orgPinFileWrite } from "./state-paths.ts";
 import {
   type VapiConnection,
   VapiApiError,
   vapiFetchJson,
 } from "./vapi-client.ts";
-
-export const ORG_PIN_FILE = ".vapi-org.json";
 
 // Cheap one-item list calls, most likely non-empty first. Every item carries
 // the orgId it belongs to.
@@ -70,13 +71,14 @@ const probeFetchDefault: OrgProbeFetch = (connection, endpoint) =>
     maxRetries: 2,
   });
 
-export function orgPinPath(rootDir: string, org: string): string {
-  return join(rootDir, "resources", org, ORG_PIN_FILE);
+/** The pin file as a person names it: its path from the repository root. */
+export function orgPinLabel(rootDir: string, org: string): string {
+  return relative(rootDir, orgPinFileRead(rootDir, org)).replaceAll("\\", "/");
 }
 
 /** The org ID this folder is pinned to, if any. A corrupt pin file throws. */
 export function orgPinRead(rootDir: string, org: string): string | undefined {
-  const path = orgPinPath(rootDir, org);
+  const path = orgPinFileRead(rootDir, org);
   if (!existsSync(path)) return undefined;
   let parsed: unknown;
   try {
@@ -84,7 +86,7 @@ export function orgPinRead(rootDir: string, org: string): string | undefined {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Can't read resources/${org}/${ORG_PIN_FILE}: ${reason}. Restore it from git.`,
+      `Can't read ${orgPinLabel(rootDir, org)}: ${reason}. Restore it from git.`,
     );
   }
   const orgId = (parsed as { orgId?: unknown } | null)?.orgId;
@@ -133,7 +135,7 @@ export interface OrgPinCheckArgs {
 }
 
 /**
- * Check the key against resources/<org>/.vapi-org.json. Pins an unpinned
+ * Check the key against state/<org>/org.json. Pins an unpinned
  * folder to the key's org on first sight. Throws OrgPinMismatchError when the
  * key belongs to another org, or to an empty org while the folder is pinned
  * to one that had resources.
@@ -149,21 +151,24 @@ export async function orgPinCheck(args: OrgPinCheckArgs): Promise<OrgPinOutcome>
   if (!pinned && !folderExists) return { kind: "unpinned" };
   const keyOrg = await keyOrgFetch(connection, args.probeFetch);
   const folder = `resources/${org}/`;
+  const pinLabel = orgPinLabel(rootDir, org);
   const fix =
     `   Use ${org}'s own key, for example by exporting ${orgApiKeyVar(org)}.\n` +
-    `   If this folder really moved to another org, delete ${folder}${ORG_PIN_FILE}\n` +
+    `   If this folder really moved to another org, delete ${pinLabel}\n` +
     `   in a reviewed commit and run the command again.`;
 
   if (keyOrg.kind === "found") {
     if (pinned === keyOrg.orgId) return { kind: "match" };
     if (pinned)
       throw new OrgPinMismatchError(
-        `The API key from ${keySource} belongs to Vapi org ${keyOrg.orgId}, but ${folder} is pinned to org ${pinned} (${ORG_PIN_FILE}).\n` +
+        `The API key from ${keySource} belongs to Vapi org ${keyOrg.orgId}, but ${folder} is pinned to org ${pinned} (${pinLabel}).\n` +
           `   Stopped before reading or changing anything.\n${fix}`,
       );
     if (!folderExists) return { kind: "unpinned" };
+    const pinPath = orgPinFileWrite(rootDir, org);
+    mkdirSync(dirname(pinPath), { recursive: true });
     writeFileSync(
-      orgPinPath(rootDir, org),
+      pinPath,
       `${JSON.stringify({ orgId: keyOrg.orgId }, null, 2)}\n`,
     );
     return { kind: "pinned", orgId: keyOrg.orgId };
@@ -175,7 +180,7 @@ export async function orgPinCheck(args: OrgPinCheckArgs): Promise<OrgPinOutcome>
   // emptied out, and pushing would fill it with this folder's resources.
   if (keyOrg.kind === "empty")
     throw new OrgPinMismatchError(
-      `The API key from ${keySource} belongs to an org with no resources, but ${folder} is pinned to org ${pinned} (${ORG_PIN_FILE}).\n` +
+      `The API key from ${keySource} belongs to an org with no resources, but ${folder} is pinned to org ${pinned} (${pinLabel}).\n` +
         `   Stopped before reading or changing anything.\n${fix}`,
     );
   return { kind: "unverified" };

@@ -126,7 +126,7 @@ export async function checkDriftForUpdate(options: {
       reason: "no-baseline",
       message:
         `   ⚠️  drift check skipped for ${resourceLabel} ${resourceId}: ` +
-        `no baseline in .vapi-state-hash. Run \`npm run pull\` to establish one.`,
+        `no baseline on this machine. Run \`npm run pull\` to establish one.`,
     };
   }
 

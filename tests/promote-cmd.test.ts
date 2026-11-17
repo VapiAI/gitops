@@ -40,7 +40,7 @@ function fixtureReset(): void {
     "version: 1\norgs:\n  a: {}\n  b: {}\n  c: {}\npipelines:\n  release:\n    orgs: [a, b, c]\n    resources: ['**/*']\n",
   );
   write("resources/a/assistants/intake.yml", "name: Intake\n");
-  for (const org of ["a", "b", "c"]) write(`.vapi-state.${org}.json`, "{}\n");
+  for (const org of ["a", "b", "c"]) write(`state/${org}/state.json`, "{}\n");
   write(".gitignore", "tmp/\n.env.*\n");
   git("init", "-q", "-b", "main");
   git("add", "-A");

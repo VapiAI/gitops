@@ -1,3 +1,4 @@
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -436,7 +437,7 @@ function setupFixture(init: FixtureInit = {}): Fixture {
     init.state === null ? null : (init.state ?? defaultState);
   if (stateToWrite !== null) {
     writeFileSync(
-      join(dir, `.vapi-state.${env}.json`),
+      stateFixturePath(dir, env),
       JSON.stringify(stateToWrite, null, 2),
     );
   }

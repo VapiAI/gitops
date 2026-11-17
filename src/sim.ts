@@ -16,6 +16,7 @@ import {
   type SimRunItemCounts,
   type SimRunVerdict,
 } from "./sim-result.ts";
+import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
@@ -113,10 +114,10 @@ export function loadEnvFile(env: string): SimEnv {
 }
 
 export function loadStateFile(env: string): StateFile {
-  const stateFile = join(BASE_DIR, `.vapi-state.${env}.json`);
+  const stateFile = stateFileRead(BASE_DIR, env);
   if (!existsSync(stateFile)) {
     throw new Error(
-      `State file not found: .vapi-state.${env}.json. Run 'npm run pull -- ${env} --bootstrap' first.`,
+      `State file not found: ${stateFileLabel(BASE_DIR, env)}. Run 'npm run pull -- ${env} --bootstrap' first.`,
     );
   }
   const state = JSON.parse(readFileSync(stateFile, "utf-8")) as StateFile;

@@ -8,14 +8,10 @@
 import { existsSync } from "fs";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import {
-  BASE_DIR,
-  loadIgnorePatterns,
-  STATE_FILE_PATH,
-  VAPI_ENV,
-} from "./config.ts";
+import { BASE_DIR, loadIgnorePatterns, VAPI_ENV } from "./config.ts";
 import { loadResources } from "./resources.ts";
 import { createEmptyState, loadState } from "./state.ts";
+import { stateFileRead } from "./state-paths.ts";
 import type { LoadedResources, ResourceType } from "./types.ts";
 import {
   findingAnnotation,
@@ -53,7 +49,7 @@ async function main(): Promise<void> {
   };
 
   // References resolve through the committed state file, as they do on push.
-  const stateExists = existsSync(STATE_FILE_PATH);
+  const stateExists = existsSync(stateFileRead(BASE_DIR, VAPI_ENV));
   if (!stateExists)
     console.log("📄 No state file yet: references must name local files.");
   const state = stateExists ? loadState() : createEmptyState();

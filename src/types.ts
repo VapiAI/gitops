@@ -8,7 +8,7 @@
 //
 // The "last known platform state" content hash that drives drift detection
 // lives OUTSIDE this file, in the gitignored per-developer hash store at
-// `.vapi-state-hash/<org>/<uuid>` (see `hash-store.ts`). Keeping hashes out
+// `state/<org>/local/baselines/<uuid>` (see `hash-store.ts`). Keeping hashes out
 // of the committed state file means the state diff is purely semantic
 // (added/removed/re-bound resources) and the drift baseline is local to each
 // developer's working copy.
@@ -22,7 +22,7 @@ export interface ResourceState {
   uuid: string;
 }
 
-// `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. Each section
+// `StateFile` is the on-disk shape of `state/<org>/state.json`. Each section
 // carries `Record<string, ResourceState>` instead of bare strings.
 // `loadState()` migrates legacy data automatically.
 export interface StateFile {

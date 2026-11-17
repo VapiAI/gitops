@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CheckDefinition } from "./check-config.ts";
 import type { OrgConnection } from "./org-connection.ts";
+import { stateFileRead } from "./state-paths.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
 import type { PromotionGateResult } from "./promotion-gate.ts";
@@ -219,7 +220,7 @@ function appliedPathsRecord(org: string): void {
 }
 
 function stateLoad(org: string) {
-  const path = resolve(ROOT_DIR, `.vapi-state.${org}.json`);
+  const path = stateFileRead(ROOT_DIR, org);
   if (!existsSync(path))
     throw new Error(
       `Missing state for ${org}; run promotion with --apply to bootstrap bindings first`,

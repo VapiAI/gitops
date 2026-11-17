@@ -22,7 +22,6 @@ import {
   loadIgnorePatterns,
   matchesIgnore,
   RESOURCES_DIR,
-  STATE_FILE_PATH,
   VAPI_BASE_URL,
   VAPI_ENV,
   VAPI_TOKEN,
@@ -34,7 +33,6 @@ import {
   formatDriftLabel,
 } from "./drift.ts";
 import { readBaseline, writeBaseline } from "./hash-store.ts";
-import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
@@ -46,7 +44,14 @@ import {
   resolvePullScopeFromFilePaths,
 } from "./resources.ts";
 import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
-import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
+import {
+  hashPayload,
+  loadState,
+  saveState,
+  stateWritePrepare,
+  upsertState,
+} from "./state.ts";
+import { stateFileRead } from "./state-paths.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
 // Map resource types to their API endpoints
@@ -921,7 +926,7 @@ export async function pullResourceType(
           // The drift baseline now lives in the hash store, NOT in the state
           // section that gets wholesale-replaced at end-of-loop. So the
           // preserve branches just write the `{ uuid }` mapping and leave the
-          // `.vapi-state-hash/<org>/<uuid>` file untouched — the baseline
+          // `state/<org>/local/baselines/<uuid>` file untouched — the baseline
           // survives by construction, no carry-forward needed.
           if (direction === "both-diverged") {
             bothDiverged?.push({
@@ -1023,7 +1028,7 @@ export async function pullResourceType(
         join(dir, `${resourceId}.yaml`),
       ].find((p) => existsSync(p));
       if (localFile) {
-        const stateFilePath = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
+        const stateFilePath = stateFileRead(BASE_DIR, VAPI_ENV);
         if (existsSync(stateFilePath)) {
           const localMtime = statSync(localFile).mtimeMs;
           const stateMtime = statSync(stateFilePath).mtimeMs;
@@ -1276,7 +1281,7 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function runPull(options: PullOptions = {}): Promise<PullResult> {
-  assertStateMigrated(STATE_FILE_PATH);
+  stateWritePrepare();
   const force = options.force ?? process.argv.includes("--force");
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
   const bindingsOnly =

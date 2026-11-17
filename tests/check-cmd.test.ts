@@ -130,12 +130,12 @@ test("usage, config and selection errors exit 2", async () => {
 test("a missing state file is a warning, not an error", async () => {
   const root = parityCopy();
   try {
-    rmSync(join(root, ".vapi-state.parity.json"));
+    rmSync(join(root, "state/parity/state.json"));
     const result = await run(["core", "--dry-run"], root);
     assert.deepEqual(
       [
         result.code,
-        result.out.includes("⚠️  no .vapi-state.parity.json"),
+        result.out.includes("⚠️  no state/parity/state.json"),
         existsSync(join(root, "tmp")),
       ],
       [0, true, false],
