@@ -7,6 +7,12 @@
 
 The other commands are direct only.
 
+Every command that contacts Vapi observes the per-org
+[max GitOps RPM](configuration.md#max-gitops-rpm) client ceiling (default 100).
+Set committed `maxGitopsRpm` or override with `VAPI_MAX_GITOPS_RPM`; this does
+not change the Vapi org API rate limit. Setup asks for the org folder before
+validating the key so its client ceiling applies to validation too.
+
 | Command | Usage | What it does |
 | --- | --- | --- |
 | `npm run setup` | `npm run setup [-- <org>]` | Connect an org: creates `.env.<org>` and `resources/<org>/`. |

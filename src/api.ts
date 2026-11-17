@@ -1,4 +1,7 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import {
+  MAX_GITOPS_RPM,
   BASE_DIR,
   DRY_RUN,
   VAPI_BASE_URL,
@@ -45,6 +48,7 @@ export function orgPinGuard(): Promise<void> {
         rootDir: BASE_DIR,
         org: VAPI_ENV,
         connection: {
+          limiter: orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
           token: VAPI_TOKEN ?? "",
           baseUrl: VAPI_BASE_URL,
           userAgent: userAgentGet(),
@@ -147,7 +151,7 @@ export async function vapiRequest<T = VapiResponse>(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();
-    const response = await fetch(url, {
+    const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), url, {
       method,
       headers: {
         "Content-Type": "application/json",
@@ -193,7 +197,7 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(url, {
+    const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), url, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,
@@ -244,7 +248,7 @@ export async function vapiDelete(endpoint: string): Promise<void> {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     await throttle();
-    const response = await fetch(url, {
+    const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), url, {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,

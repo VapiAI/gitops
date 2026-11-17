@@ -1,3 +1,4 @@
+import { TokenBucket } from "../src/rate-limit.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -229,7 +230,7 @@ function runArgs(
       token: "t",
       baseUrl: stub.baseUrl,
       userAgent: "vapi-gitops-check/test",
-      vapiClient: "gitops/test; command=check",
+      limiter: new TokenBucket(100), vapiClient: "gitops/test; command=check",
     }),
     deadline: DEADLINE_FAR(),
     pollIntervalMs: 1,

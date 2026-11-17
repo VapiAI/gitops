@@ -2076,3 +2076,12 @@ dependency check, as `check-payload.ts` already does.
   `AGENTS.md`. Don't conflate that with drift detection.
 - **Renaming `npm run eval` to disambiguate from `npm run sim`.**
   Backwards-incompatible script change; raise as a separate issue.
+
+## 2026-11-17 — Per-org max GitOps RPM
+
+- **Problem:** Independent request paths could burst without a shared client ceiling.
+- **Current behavior:** [rate-limit.ts](src/rate-limit.ts) shares a token bucket per org; [vapi-fetch.ts](src/vapi-fetch.ts) routes every Vapi fetch through it, including retries.
+- **Risk:** Multiple processes or other clients may still exhaust the platform quota.
+- **Current mitigation:** Committed `maxGitopsRpm` (default 100), overridden by `VAPI_MAX_GITOPS_RPM`; invalid settings stop requests. A 429 warns with the org's region-specific dashboard link.
+- **Possible fix:** Coordinate budgets across processes if deployments need a global client ceiling.
+- **Status:** Implemented; existing backoff and write gaps retained. This is a GitOps client limit, not a Vapi org limit.

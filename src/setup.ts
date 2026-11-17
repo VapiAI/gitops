@@ -1,3 +1,5 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
@@ -33,6 +35,7 @@ const VAPI_REGIONS: Record<string, string> = {
   us: "https://api.vapi.ai",
   eu: "https://api.eu.vapi.ai",
 };
+let requestOrg = "setup";
 let vapiBaseUrl = VAPI_REGIONS.us!;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -94,7 +97,7 @@ const c = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function apiGet(token: string, endpoint: string): Promise<unknown> {
-  const response = await fetch(`${vapiBaseUrl}${endpoint}`, {
+  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, requestOrg), `${vapiBaseUrl}${endpoint}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -410,6 +413,8 @@ function fail(message: string): never {
 
 async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const { slug, region, resources } = options;
+  requestOrg = slug;
+  orgLimiter(BASE_DIR, slug);
   const envPath = join(BASE_DIR, `.env.${slug}`);
   const resourceDir = join(BASE_DIR, "resources", slug);
   const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
@@ -583,8 +588,22 @@ async function main(): Promise<void> {
   );
   console.log("");
 
-  // ── Step 1: API key + region ────────────────────────────────────────
+  // ── Step 1: Folder slug, API key + region ────────────────────────────────────────
 
+  const rawSlug = await input({
+    message: "Folder name for this org (e.g. my-org, my-org-prod)",
+    validate: (value) => {
+      const slug = slugify(value);
+      return slug && SLUG_RE.test(slug) ? true : "Must be lowercase alphanumeric with hyphens (e.g. my-org-name)";
+    },
+    transformer: (value) => {
+      const slug = slugify(value);
+      return slug && slug !== value ? `${value} → ${c.dim(slug)}` : value;
+    },
+  });
+  const slug = slugify(rawSlug);
+  requestOrg = slug;
+  orgLimiter(BASE_DIR, slug);
   let trimmedKey = "";
 
   // eslint-disable-next-line no-constant-condition
@@ -648,26 +667,6 @@ async function main(): Promise<void> {
 
     // "retry" or failed switch → loop back to password prompt
   }
-
-  // ── Step 2: Folder slug ───────────────────────────────────────────────
-
-  const rawSlug = await input({
-    message: "Folder name for this org (e.g. my-org, my-org-prod)",
-    validate: (value) => {
-      const slug = slugify(value);
-      if (!slug || !SLUG_RE.test(slug)) {
-        return "Must be lowercase alphanumeric with hyphens (e.g. my-org-name)";
-      }
-      return true;
-    },
-    transformer: (value) => {
-      const slug = slugify(value);
-      if (slug && slug !== value) return `${value} → ${c.dim(slug)}`;
-      return value;
-    },
-  });
-
-  const slug = slugify(rawSlug);
 
   // Check if org already exists locally
   const resourceDir = join(BASE_DIR, "resources", slug);

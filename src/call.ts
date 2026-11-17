@@ -1,3 +1,5 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
@@ -360,7 +362,7 @@ async function createCall(
 
   console.log(`📞 Creating call...`);
 
-  const response = await fetch(url, {
+  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, config.env), url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -1,3 +1,4 @@
+import { orgLimiter } from "./rate-limit.ts";
 // Simulation runner — wraps `POST /eval/simulation/run`.
 //
 // Designed to be importable from `sim-cmd.ts` and from tests without
@@ -237,6 +238,7 @@ const ITEM_PAGE_SIZE = 1000;
 
 function connectionFor(cfg: SimEnv): VapiConnection {
   return {
+    limiter: orgLimiter(BASE_DIR, cfg.env),
     token: cfg.token,
     baseUrl: cfg.baseUrl,
     userAgent: userAgentGet("sim"),

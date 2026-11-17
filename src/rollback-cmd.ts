@@ -1,3 +1,5 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 // CLI entry: `npm run rollback -- <org> --to <ISO-timestamp>` |
 //             `npm run rollback -- <org> --list`
 //
@@ -147,7 +149,7 @@ async function main(): Promise<void> {
     const outcome = await orgPinCheck({
       rootDir: BASE_DIR,
       org: args.env,
-      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
+      connection: { limiter: orgLimiter(BASE_DIR, cfg.env), token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
       keySource: cfg.source,
     });
     if (outcome.kind === "unverified")
@@ -205,7 +207,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       `   🔁 ${entry.resourceType}/${entry.resourceId} ... `,
     );
-    const response = await fetch(`${cfg.baseUrl}${endpoint}/${uuid}`, {
+    const response = await limitedVapiFetch(orgLimiter(BASE_DIR, cfg.env), `${cfg.baseUrl}${endpoint}/${uuid}`, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${cfg.token}`,

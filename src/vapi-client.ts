@@ -1,3 +1,5 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import type { TokenBucket } from "./rate-limit.ts";
 // Config-free HTTP client for the Vapi API.
 //
 // api.ts is the engine's client, but it imports config.ts, which parses
@@ -7,6 +9,7 @@
 // policy from here, so both clients fail and retry the same way.
 
 export interface VapiConnection {
+  limiter: TokenBucket;
   token: string;
   baseUrl: string;
   userAgent: string;
@@ -83,7 +86,7 @@ export async function vapiFetchJson<T>(
   const sleep = options.sleep ?? sleepDefault;
 
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(`${connection.baseUrl}${endpoint}`, {
+    const response = await limitedVapiFetch(connection.limiter, `${connection.baseUrl}${endpoint}`, {
       method,
       headers: {
         Authorization: `Bearer ${connection.token}`,

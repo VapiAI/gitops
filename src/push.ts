@@ -1,9 +1,12 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
+  MAX_GITOPS_RPM,
   ALLOW_NEW_FILES,
   APPLY_FILTER,
   BASE_DIR,
@@ -351,7 +354,7 @@ async function upsertResourceWithStateRecovery(options: {
         const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
         if (resourceType) {
           if (platformPayloadForSnapshot === undefined) {
-            const platformResponse = await fetch(
+            const platformResponse = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
               `${VAPI_BASE_URL}${updateEndpoint}`,
               {
                 method: "GET",

@@ -1,3 +1,4 @@
+import { maxGitopsRpmRead } from "./rate-limit.ts";
 import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
@@ -211,7 +212,7 @@ function loadEnvFile(env: string, baseDir: string): Record<string, string> {
 
         if (fileVars[key] === undefined) fileVars[key] = value;
         // Only set if not already defined (env vars take precedence)
-        if (process.env[key] === undefined) {
+        if (key !== "VAPI_MAX_GITOPS_RPM" && process.env[key] === undefined) {
           process.env[key] = value;
         }
       }
@@ -246,6 +247,8 @@ export const {
 // VAPI_PRIVATE_API_KEY_<ORG>, then VAPI_PRIVATE_API_KEY / VAPI_TOKEN, then
 // .env.<org>. See resolveOrgApiKey.
 const SHELL_ENV = { ...process.env };
+
+export const MAX_GITOPS_RPM = maxGitopsRpmRead(BASE_DIR, VAPI_ENV, SHELL_ENV);
 
 const ENV_FILE_VARS = loadEnvFile(VAPI_ENV, BASE_DIR);
 const API_KEY = resolveOrgApiKey(VAPI_ENV, SHELL_ENV, ENV_FILE_VARS);

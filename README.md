@@ -203,6 +203,10 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 
 ## Commands
 
+Vapi requests use a per-org [max GitOps RPM](docs/guides/configuration.md#max-gitops-rpm)
+client ceiling (default 100), configured by `maxGitopsRpm` in the committed
+`.vapi-org.json` or overridden by `VAPI_MAX_GITOPS_RPM`. This is not a Vapi org limit.
+
 | Command | What it does |
 | --- | --- |
 | `npm run setup` | Connect an org: create `.env.<org>` and `resources/<org>/` |

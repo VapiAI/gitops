@@ -1,6 +1,10 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 import {
+  BASE_DIR,
+  MAX_GITOPS_RPM,
   loadIgnorePatterns,
   matchesIgnore,
   VAPI_BASE_URL,
@@ -31,7 +35,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
   await orgPinGuard();
   await sleep(REQUEST_DELAY_MS);
-  const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
+  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), `${VAPI_BASE_URL}${endpoint}`, {
     headers: {
       Authorization: `Bearer ${VAPI_TOKEN}`,
       "User-Agent": userAgentGet(),
@@ -73,7 +77,7 @@ async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
 async function vapiDelete(endpoint: string): Promise<void> {
   await orgPinGuard();
   await sleep(REQUEST_DELAY_MS);
-  const response = await fetch(`${VAPI_BASE_URL}${endpoint}`, {
+  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), `${VAPI_BASE_URL}${endpoint}`, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${VAPI_TOKEN}`,

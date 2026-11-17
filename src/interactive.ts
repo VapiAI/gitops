@@ -1,3 +1,5 @@
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
@@ -223,8 +225,9 @@ async function apiGet(
   token: string,
   baseUrl: string,
   endpoint: string,
+  org: string,
 ): Promise<unknown> {
-  const response = await fetch(`${baseUrl}${endpoint}`, {
+  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, org), `${baseUrl}${endpoint}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -497,7 +500,7 @@ export async function runInteractivePull(): Promise<void> {
         snapshots = await Promise.all(
           RESOURCE_TYPES.map(async (type): Promise<ResourceSnapshot> => {
             try {
-              const data = await apiGet(token, baseUrl, type.endpoint);
+              const data = await apiGet(token, baseUrl, type.endpoint, slug);
               return {
                 key: type.key,
                 label: type.label,

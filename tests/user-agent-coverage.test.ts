@@ -55,9 +55,11 @@ test("every Vapi fetch in src/ sets x-vapi-client", () => {
 
 test("api.ts requests carry the command's User-Agent", async () => {
   const seen: Array<string | undefined> = [];
+  const times: number[] = [];
   const seenClient: Array<string | string[] | undefined> = [];
   const server = createServer((req, res) => {
     seen.push(req.headers["user-agent"]);
+    times.push(performance.now());
     seenClient.push(req.headers["x-vapi-client"]);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end("[]");
@@ -68,6 +70,7 @@ test("api.ts requests carry the command's User-Agent", async () => {
   process.argv = ["node", "src/push.ts", "ua-test-org"];
   process.env.VAPI_TOKEN = "test-token-not-used";
   process.env.VAPI_BASE_URL = `http://127.0.0.1:${port}`;
+  process.env.VAPI_MAX_GITOPS_RPM = "300";
   process.env.npm_lifecycle_event = "apply";
   delete process.env.VAPI_GITOPS_COMMAND;
   delete process.env.CI;
@@ -83,7 +86,23 @@ test("api.ts requests carry the command's User-Agent", async () => {
       String(seenClient[0]),
       /^gitops\/[^;]+; command=apply; run=[0-9a-f-]{36}$/,
     );
+    await Promise.all(Array.from({ length: 9 }, () => vapiGet("/assistant")));
+    assert.equal(times.length, 10);
+    assert.ok(times[9]! - times[0]! >= 850, "requests beyond the initial burst must wait for tokens");
+    assert.ok(times[9]! - times[8]! >= 140, "sustained requests must be spaced by the cap");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("every Vapi fetch uses the shared limiter and warning path", () => {
+  const files = readdirSync(SRC, { recursive: true, encoding: "utf8" });
+  for (const file of files.filter((f) => f.endsWith(".ts"))) {
+    const source = readFileSync(join(SRC, file), "utf8");
+    if (/\bfetch\s*\(/.test(source))
+      assert.ok(["vapi-fetch.ts", "check-status.ts"].includes(file), `${file} must use limitedVapiFetch`);
+  }
+  const shared = readFileSync(join(SRC, "vapi-fetch.ts"), "utf8");
+  assert.match(shared, /await limiter\.acquire\(\)/);
+  assert.ok(shared.indexOf("await limiter.acquire()") < shared.indexOf("await fetch("));
 });
