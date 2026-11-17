@@ -77,7 +77,7 @@ async function main(): Promise<void> {
       loaded: resources,
       org: VAPI_ENV,
       state,
-      kinds: credentialKindsRead(RESOURCES_DIR),
+      kinds: credentialKindsRead(BASE_DIR, VAPI_ENV),
       customerKeysOnly: policy.customerKeysOnly,
     }),
   ];

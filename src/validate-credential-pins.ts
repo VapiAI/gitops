@@ -17,8 +17,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
-  CREDENTIAL_KINDS_FILE,
   type CredentialKinds,
+  credentialKindsLabel,
 } from "./credential-kinds.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { referencesCollect } from "./resolver.ts";
@@ -263,7 +263,7 @@ export function validateCredentialPins(args: {
       else if (!kindsReported)
         finding(
           "credential-pin-unchecked",
-          `resources/${org}/${CREDENTIAL_KINDS_FILE} ` +
+          `${credentialKindsLabel(org)} ` +
             (kinds
               ? `has no entry for ${quoted(missingKinds)}`
               : "doesn't exist yet") +
