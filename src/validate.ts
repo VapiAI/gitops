@@ -474,6 +474,64 @@ export function validateNoIgnoredReferences(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Check 7: Sharing syntax that silently does nothing
+//
+// Two ways of sharing content look right in a file and are dropped without
+// an error. The engine does not process YAML merge keys, so "<<" goes to the
+// API as a field of that name. And Vapi's call-time Liquid has its file tags
+// switched off, so "include", "render" and "layout" render as nothing on a
+// call. Blocks ("$include", "@include") are the supported way to do both.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LIQUID_FILE_TAG = /\{%-?\s*(include|render|layout)\b/;
+
+function checkIgnoredSharing(resources: LoadedResources): ValidationFinding[] {
+  const findings: ValidationFinding[] = [];
+  for (const type of Object.keys(resources) as ResourceType[]) {
+    for (const resource of resources[type]) {
+      const visit = (value: unknown, path: string): void => {
+        if (Array.isArray(value)) {
+          value.forEach((item, index) => visit(item, `${path}[${index}]`));
+          return;
+        }
+        if (typeof value !== "object" || value === null) return;
+        const mapping = value as Record<string, unknown>;
+        if ("<<" in mapping)
+          findings.push({
+            severity: "warn",
+            type,
+            resourceId: resource.resourceId,
+            rule: "yaml-merge-key",
+            fieldPath: path || undefined,
+            message:
+              'YAML merge key ("<<") is not processed: it is sent to Vapi as a field named "<<". ' +
+              'Share config with a config block ("$include") instead — see docs/guides/blocks.md',
+          });
+        const tag =
+          mapping.role === "system" && typeof mapping.content === "string"
+            ? mapping.content.match(LIQUID_FILE_TAG)?.[1]
+            : undefined;
+        if (tag)
+          findings.push({
+            severity: "warn",
+            type,
+            resourceId: resource.resourceId,
+            rule: "liquid-file-tag",
+            fieldPath: path || undefined,
+            message:
+              `system prompt uses the Liquid "${tag}" tag, which Vapi renders as nothing on a call. ` +
+              'Share prompt text with a prompt block ("@include <name>") instead — see docs/guides/blocks.md',
+          });
+        for (const [key, child] of Object.entries(mapping))
+          visit(child, path ? `${path}.${key}` : key);
+      };
+      visit(resource.data, "");
+    }
+  }
+  return findings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public entry: run all checks
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -486,6 +544,7 @@ export function validateResources(
     ...checkPromptDuplications(resources),
     ...checkMaxTokensFloor(resources),
     ...checkVoiceSchemas(resources),
+    ...checkIgnoredSharing(resources),
   ];
 }
 

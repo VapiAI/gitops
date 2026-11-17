@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { basename, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
+import { blockLayers, blocksExpand } from "./blocks.ts";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import {
   FOLDER_MAP,
@@ -42,7 +43,7 @@ export function hashLocalResource(
   const filePath = findLocalResourceFile(type, resourceId);
   if (!filePath) return null;
   try {
-    return hashPayload(parseResourceDataFromFile(filePath));
+    return hashPayload(parseResourceDataFromFile(filePath, RESOURCES_DIR));
   } catch {
     return null;
   }
@@ -283,10 +284,19 @@ export async function loadSingleResource(
     }
   }
 
+  let blocks: Record<string, string>;
+  try {
+    ({ data, usage: blocks } = blocksExpand(data, blockLayers(RESOURCES_DIR)));
+  } catch (error) {
+    throw new Error(
+      `Failed to expand blocks in "${filePath}": ${error instanceof Error ? error.message : error}`,
+    );
+  }
+
   console.log(`  📦 Loaded ${resourceId} (${resourceType})`);
 
   return {
     type: resourceType,
-    resource: { resourceId, filePath: absolutePath, data },
+    resource: { resourceId, filePath: absolutePath, data, blocks },
   };
 }

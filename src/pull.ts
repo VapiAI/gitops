@@ -38,6 +38,7 @@ import {
   formatDriftLabel,
 } from "./drift.ts";
 import { readBaseline, writeBaseline } from "./hash-store.ts";
+import { resourceFileUsesBlocks } from "./resource-parse.ts";
 import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
@@ -619,6 +620,110 @@ export async function writeDashboardBackup(
   );
 }
 
+// A local file that uses blocks is never rewritten by pull. The platform
+// holds the expanded resource, so writing it back would replace every marker
+// with a copy of the block's text and cut the file off from later block
+// edits. When the dashboard version would have been written, it goes beside
+// the file as a backup copy and the person merges the edit by hand.
+function localBlocksFile(
+  resourceType: ResourceType,
+  resourceId: string,
+): string | undefined {
+  const path = findLocalResourcePath(FOLDER_MAP[resourceType], resourceId);
+  return path && resourceFileUsesBlocks(path) ? path : undefined;
+}
+
+async function blocksFileKeep(
+  resourceType: ResourceType,
+  resourceId: string,
+  resource: VapiResource,
+  state: StateFile,
+  localFile: string,
+): Promise<void> {
+  const copy = await writeDashboardBackup(
+    resourceType,
+    resourceId,
+    resource,
+    state,
+  );
+  console.warn(
+    `   ⚠️  ${resourceId}: the dashboard version differs, but the file uses blocks, so it was not overwritten.`,
+  );
+  console.warn(
+    `       Dashboard version saved to ${relative(BASE_DIR, copy)}.`,
+  );
+  console.warn(
+    `       Move the dashboard edit into the file or into the block it belongs to, then run: npm run apply -- ${VAPI_ENV} --resolve=ours ${relative(BASE_DIR, localFile)}`,
+  );
+}
+
+// Pull one resource whose local file uses blocks. Local and platform are
+// compared in expanded form, like any other resource, but no outcome writes
+// the file. The drift baseline moves only when the two sides already agree,
+// so an unresolved dashboard edit is still drift at the next pull and push.
+async function blocksFilePull(options: {
+  resourceType: ResourceType;
+  resourceId: string;
+  resource: VapiResource;
+  state: StateFile;
+  credReverse: Map<string, string>;
+  localFile: string;
+  force?: boolean;
+  driftCounts?: DriftDirectionCounts;
+  bothDiverged?: BothDivergedResource[];
+}): Promise<void> {
+  const { resourceType, resourceId, resource, state, localFile } = options;
+  const localHash = hashLocalResource(resourceType, resourceId);
+  if (localHash === null) {
+    console.warn(
+      `   ⚠️  ${resourceId}: uses blocks that could not be expanded, file left as written (run npm run validate -- ${VAPI_ENV})`,
+    );
+    return;
+  }
+  const platformHash = hashPayload(
+    canonicalizeForHash(resource, state, options.credReverse),
+  );
+  const baseline = readBaseline(VAPI_ENV, resource.id);
+  const direction = classifyDrift({
+    localHash,
+    lastPulledHash: baseline,
+    platformHash,
+  });
+  if (!options.force && options.driftCounts) options.driftCounts[direction]++;
+
+  if (localHash === platformHash) {
+    console.log(
+      `   🧩 ${resourceId} (uses blocks, matches the dashboard — file left as written)`,
+    );
+    await writeBaseline(VAPI_ENV, resource.id, platformHash);
+    return;
+  }
+  if (options.force || direction === "dashboard-ahead") {
+    await blocksFileKeep(resourceType, resourceId, resource, state, localFile);
+    return;
+  }
+  if (direction === "both-diverged") {
+    options.bothDiverged?.push({
+      resourceType,
+      resourceId,
+      resource,
+      localHash,
+      platformHash,
+      lastPulledHash: baseline!,
+    });
+    return;
+  }
+  if (direction === "local-ahead") {
+    console.log(
+      `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
+    );
+    return;
+  }
+  console.log(
+    `   ✏️  ${resourceId} (uses blocks and differs from the dashboard, no drift baseline yet — local file kept)`,
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pull Functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -908,6 +1013,26 @@ export async function pullResourceType(
         skipped++;
         continue;
       }
+    }
+
+    const blocksFile = bootstrap
+      ? undefined
+      : localBlocksFile(resourceType, resourceId);
+    if (blocksFile) {
+      await blocksFilePull({
+        resourceType,
+        resourceId,
+        resource,
+        state,
+        credReverse,
+        localFile: blocksFile,
+        force,
+        driftCounts,
+        bothDiverged,
+      });
+      upsertState(newStateSection, resourceId, { uuid: resource.id });
+      skipped++;
+      continue;
     }
 
     let skipLegacyPreserveChecks = false;
@@ -1238,6 +1363,22 @@ async function resolveBothDivergedResources(options: {
       // `local-ahead` instead of re-flagging `both-diverged`.
       upsertState(section, entry.resourceId, { uuid: entry.resource.id });
       await writeBaseline(VAPI_ENV, entry.resource.id, entry.platformHash);
+      continue;
+    }
+
+    // "theirs" would write the dashboard version over the local file. For a
+    // file that uses blocks that is refused: the conflict stays open, with
+    // the dashboard version beside the file.
+    const blocksFile = localBlocksFile(entry.resourceType, entry.resourceId);
+    if (blocksFile) {
+      await blocksFileKeep(
+        entry.resourceType,
+        entry.resourceId,
+        entry.resource,
+        state,
+        blocksFile,
+      );
+      upsertState(section, entry.resourceId, { uuid: entry.resource.id });
       continue;
     }
 
