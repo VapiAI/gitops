@@ -223,6 +223,7 @@ default-exports the object (safety rule 5).
 | Simulation | `personalityId`, `scenarioId` | Personality and scenario files | `scenarioId: books-cleaning` |
 | Suite | `simulationIds[]` | Simulation files | `- books-cleaning-calm` |
 | Any server block | `credentialId` | A credential **name** in the org | `credentialId: my-api-credential` |
+| Assistant, or squad overrides | `credentialIds[]` | Credential **names**. The list is every key the call may use, not one provider's: [credential pins](docs/guides/credential-pins.md) | `- azure-south` |
 
 The engine resolves IDs and credential names to each org's UUIDs on push.
 

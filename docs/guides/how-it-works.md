@@ -115,6 +115,11 @@ Credentials are managed automatically through the state file. No secrets in reso
 2. Resource files use human-readable credential names
 3. **Push** resolves names back to UUIDs before sending to the API
 
+Pull also records each credential's provider in
+`resources/<org>/.vapi-credential-providers.json`, so `validate` can check a
+`credentialIds` list against the keys the org has: see
+[Credential pins](credential-pins.md).
+
 Setup and pull also refresh a marked block in the gitignored `.env.<org>` file:
 
 ```dotenv

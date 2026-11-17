@@ -8,7 +8,14 @@
 import { existsSync } from "fs";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import { BASE_DIR, loadIgnorePatterns, VAPI_ENV } from "./config.ts";
+import {
+  BASE_DIR,
+  loadIgnorePatterns,
+  RESOURCES_DIR,
+  VAPI_ENV,
+} from "./config.ts";
+import { credentialKindsRead } from "./credential-kinds.ts";
+import { orgPolicyRead } from "./org-policy.ts";
 import { loadResources } from "./resources.ts";
 import { createEmptyState, loadState } from "./state.ts";
 import { stateFileRead } from "./state-paths.ts";
@@ -19,6 +26,7 @@ import {
   validateNoIgnoredReferences,
   validateResources,
 } from "./validate.ts";
+import { validateCredentialPins } from "./validate-credential-pins.ts";
 import { validateReferences } from "./validate-refs.ts";
 
 async function main(): Promise<void> {
@@ -53,6 +61,9 @@ async function main(): Promise<void> {
   if (!stateExists)
     console.log("📄 No state file yet: references must name local files.");
   const state = stateExists ? loadState() : createEmptyState();
+  const policy = orgPolicyRead(RESOURCES_DIR);
+  if (policy.customerKeysOnly)
+    console.log("🔐 Customer keys only: a hidden key is an error in this org.");
   const findings = [
     ...validateResources(resources),
     ...validateNoIgnoredReferences(resources, ignorePatterns),
@@ -61,6 +72,13 @@ async function main(): Promise<void> {
       org: VAPI_ENV,
       state,
       ignorePatterns,
+    }),
+    ...validateCredentialPins({
+      loaded: resources,
+      org: VAPI_ENV,
+      state,
+      kinds: credentialKindsRead(RESOURCES_DIR),
+      customerKeysOnly: policy.customerKeysOnly,
     }),
   ];
   console.log(`\n${summarizeFindings(findings)}\n`);

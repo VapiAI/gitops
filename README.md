@@ -236,6 +236,7 @@ when run without arguments. Full flags and examples:
 | [Writing system prompts](docs/guides/writing-prompts.md) | Structure a voice agent's prompt |
 | [PR checks](docs/guides/pr-checks.md) | Test every pull request with simulations |
 | [Promotion](docs/guides/promotion.md) | Move resources from dev to staging to production |
+| [Credential pins](docs/guides/credential-pins.md) | Pin a call to specific keys with `credentialIds`, and mark an org customer-keys-only |
 | [How the engine works](docs/guides/how-it-works.md) | Understand sync, references, credentials and state |
 | [Configuration](docs/guides/configuration.md) | Environment variables and secrets |
 | [Troubleshooting](docs/guides/troubleshooting.md) | Fix common errors |
