@@ -11,7 +11,18 @@ import { dirname, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { FOLDER_MAP, VALID_EXTENSIONS } from "./resource-parse.ts";
+import {
+  type BlockUsage,
+  blockLayers,
+  blocksChanged,
+  blocksExpand,
+  blocksRecordRead,
+} from "./blocks.ts";
+import {
+  FOLDER_MAP,
+  markdownResourceParse,
+  VALID_EXTENSIONS,
+} from "./resource-parse.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 
 type BindingPolicy = "bind" | "omit";
@@ -46,9 +57,13 @@ export interface PromotionConfig {
 }
 
 export interface PromotionChange {
-  kind: "create" | "update" | "delete";
+  // "sync": the target's file is already identical, but a block it uses has
+  // changed since the target was last pushed, so it needs pushing again.
+  kind: "create" | "update" | "delete" | "sync";
   path: string;
   content?: string;
+  // For "sync": the block files that changed.
+  blocks?: string[];
 }
 
 export interface PromotionPlan {
@@ -606,6 +621,9 @@ export async function promotionPlanBuild(
     options.sourceState,
   );
   const targetByPath = new Map(target.map((file) => [file.path, file]));
+  const targetDir = join(options.rootDir, "resources", options.target);
+  const targetLayers = blockLayers(targetDir);
+  const targetRecord = blocksRecordRead(targetDir);
   const sourcePaths = new Set([...wanted.values()].map((file) => file.path));
   const changes: PromotionChange[] = [];
   const warnings: string[] = [];
@@ -645,7 +663,32 @@ export async function promotionPlanBuild(
         warnings.push(
           `${file.path}: credentialIds entry "${alias}" is left out in ${options.target} (binding policy "omit"). Calls there can use only the keys still on the list, so that provider would run on Vapi's own key.`,
         );
+      continue;
     }
+    // Same file text in both orgs. The target still needs a push when a
+    // block the file uses has changed since the target last received it:
+    // blocks are expanded with the target's own folder first, at push time.
+    let usage: BlockUsage;
+    try {
+      usage = blocksExpand(
+        extname(file.path) === ".ts"
+          ? parsed.data
+          : extname(file.path) === ".md"
+            ? markdownResourceParse(content)
+            : parseYaml(content),
+        targetLayers,
+      ).usage;
+    } catch (error) {
+      throw new Error(
+        `${file.path} can't be expanded for ${options.target}: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+    const blocks = blocksChanged(
+      usage,
+      targetRecord[`${FOLDER_MAP[file.type]}/${file.id}`],
+    );
+    if (Object.keys(usage).length > 0 && blocks.length > 0)
+      changes.push({ kind: "sync", path: file.path, blocks });
   }
   for (const file of target)
     if (
@@ -671,6 +714,7 @@ export async function promotionPlanApply(plan: PromotionPlan): Promise<void> {
       await rm(path, { force: true });
       continue;
     }
+    if (change.kind === "sync") continue;
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, change.content ?? "");
   }
