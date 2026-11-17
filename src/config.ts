@@ -282,7 +282,6 @@ process.env.VAPI_TOKEN = VAPI_TOKEN;
 
 // Paths
 export const RESOURCES_DIR = join(BASE_DIR, "resources", VAPI_ENV);
-export const STATE_FILE_PATH = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Exclusions - Keys to remove when updating resources (PATCH)

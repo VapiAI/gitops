@@ -98,14 +98,15 @@ done
 shopt -u nullglob
 
 # --- 4. Copy state files ----------------------------------------------------
-# .vapi-state.<org>.json is tracked in git (worktrees inherit it automatically),
-# but copy any untracked variants too. `npm run pull` rewrites these locally —
-# copying lets a worktree experiment without touching root.
+# state/<org>/ is tracked in git (worktrees inherit it automatically), but
+# copy any untracked variants too, and the root-level .vapi-state.<org>.json
+# of a repository that has not moved its state yet. `npm run pull` rewrites
+# these locally — copying lets a worktree experiment without touching root.
 log "Copying Vapi GitOps state files from root checkout"
 shopt -s nullglob
-for state_file in "$ROOT"/.vapi-state*.json; do
+for state_file in "$ROOT"/state/*/state.json "$ROOT"/state/*/org.json "$ROOT"/.vapi-state*.json; do
   [[ -e "$state_file" ]] || continue
-  copy_if_present "$(basename "$state_file")"
+  copy_if_present "${state_file#"$ROOT"/}"
 done
 shopt -u nullglob
 
@@ -185,7 +186,7 @@ fi
 log "Setup complete"
 cat <<'INFO'
 Common commands in this workspace:
-  npm run pull     # sync state from Vapi (writes .vapi-state.<org>.json)
+  npm run pull     # sync state from Vapi (writes state/<org>/state.json)
   npm run push     # push local resources to Vapi
   npm run call     # interactive test call against an assistant or squad
   npm test         # repo tests

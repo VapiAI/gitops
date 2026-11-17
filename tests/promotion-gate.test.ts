@@ -67,7 +67,7 @@ function fixture(args: FixtureArgs): void {
   if (args.checks !== undefined)
     write("vapi-checks.yml", `version: 1\nchecks:\n${args.checks}`);
   for (const org of Object.keys(args.orgs))
-    write(`.vapi-state.${org}.json`, "{}\n");
+    write(`state/${org}/state.json`, "{}\n");
   for (const [path, content] of Object.entries(args.files ?? {}))
     write(path, content);
   write(".gitignore", "tmp/\n.env.*\n");

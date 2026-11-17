@@ -102,7 +102,18 @@ jobs:
           PROMOTION_OUTCOME: ${{ steps.promotion.outcome }}
         run: |
           set -euo pipefail
-          git add -A -- ':(glob).vapi-state.*.json'
+          # Engine state lives in state/ (state/<org>/local/ is gitignored).
+          # A repository that has not moved its state there yet still has
+          # .vapi-state.<org>.json at its root. Stage both places, removals
+          # included, so a move commits the old file's removal and the new
+          # file together. Each is skipped when it holds nothing, because
+          # git add fails on a pathspec that matches no file.
+          if [[ -n "$(git ls-files --cached --others --exclude-standard -- state)" ]]; then
+            git add -A -- state
+          fi
+          if [[ -n "$(git ls-files --cached --others -- ':(glob).vapi-state.*.json')" ]]; then
+            git add -A -- ':(glob).vapi-state.*.json'
+          fi
           if [[ "$PROMOTION_OUTCOME" == "success" ]]; then
             git add -A -- resources
           elif [[ -s tmp/promotion-applied.txt ]]; then

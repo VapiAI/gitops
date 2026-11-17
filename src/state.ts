@@ -1,6 +1,13 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
-import { STATE_FILE_PATH, VAPI_ENV } from "./config.ts";
+import { dirname } from "path";
+import { BASE_DIR, VAPI_ENV } from "./config.ts";
+import { assertStateMigrated } from "./migrate-hash-store.ts";
+import {
+  stateFileRead,
+  stateFileWrite,
+  stateLayoutPrepare,
+} from "./state-paths.ts";
 import {
   asResourceState,
   hashPayload,
@@ -63,22 +70,36 @@ export function createEmptyState(): StateFile {
   };
 }
 
+/**
+ * Run at the start of a command that writes state, before any request: move
+ * the old layout into state/<org>/ when that is safe (state-paths.ts), then
+ * refuse a state file still in the legacy per-resource-hash format.
+ */
+export function stateWritePrepare(options: { dryRun?: boolean } = {}): void {
+  // A dry run writes nothing, so it leaves the old layout where it is.
+  if (!options.dryRun)
+    for (const line of stateLayoutPrepare(BASE_DIR, VAPI_ENV))
+      console.log(line);
+  assertStateMigrated(stateFileRead(BASE_DIR, VAPI_ENV));
+}
+
 export function loadState(): StateFile {
-  if (!existsSync(STATE_FILE_PATH)) {
+  const statePath = stateFileRead(BASE_DIR, VAPI_ENV);
+  if (!existsSync(statePath)) {
     console.log(`📄 Creating new state file for environment: ${VAPI_ENV}`);
     return createEmptyState();
   }
 
   let content: unknown;
   try {
-    content = JSON.parse(readFileSync(STATE_FILE_PATH, "utf-8"));
+    content = JSON.parse(readFileSync(statePath, "utf-8"));
   } catch (error) {
     // Failing loudly here is deliberate. If we silently fall back to an empty
     // state on a corrupted file, a subsequent push would treat every remote
     // resource as new and create duplicates across the entire org.
     const msg = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Failed to parse state file at ${STATE_FILE_PATH}: ${msg}\n` +
+      `Failed to parse state file at ${statePath}: ${msg}\n` +
         `Refusing to continue — falling back to empty state would cause duplicate ` +
         `resources on next push. Restore the file from git, or delete it manually ` +
         `to start fresh after confirming the environment has no tracked resources.`,
@@ -120,8 +141,10 @@ export async function saveState(state: StateFile): Promise<void> {
   // A crash or SIGINT mid-write leaves the original state intact rather than
   // truncating it. A truncated state file would silently wipe all UUID
   // mappings on the next load.
-  const tmpPath = `${STATE_FILE_PATH}.tmp`;
+  const statePath = stateFileWrite(BASE_DIR, VAPI_ENV);
+  mkdirSync(dirname(statePath), { recursive: true });
+  const tmpPath = `${statePath}.tmp`;
   await writeFile(tmpPath, JSON.stringify(state, sortedKeysReplacer, 2) + "\n");
-  await rename(tmpPath, STATE_FILE_PATH);
-  console.log(`💾 Saved state file: ${STATE_FILE_PATH}`);
+  await rename(tmpPath, statePath);
+  console.log(`💾 Saved state file: ${statePath}`);
 }

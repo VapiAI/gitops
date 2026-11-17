@@ -8,6 +8,7 @@ import type { CheckPayloadResult } from "./check-payload.ts";
 import { checkPayloadBuild } from "./check-payload.ts";
 import { promotionBindingsResolve, promotionStateParse } from "./promotion.ts";
 import { orgResourcesRead } from "./resource-parse.ts";
+import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { StateFile } from "./types.ts";
 
 export interface CheckJob {
@@ -23,10 +24,10 @@ export function checkTargetLabel(target: CheckTarget): string {
 }
 
 function stateRead(root: string, org: string, warnings: string[]): StateFile {
-  const path = join(root, `.vapi-state.${org}.json`);
+  const path = stateFileRead(root, org);
   if (!existsSync(path)) {
     warnings.push(
-      `no .vapi-state.${org}.json: references by UUID and credential bindings can't resolve`,
+      `no ${stateFileLabel(root, org)}: references by UUID and credential bindings can't resolve`,
     );
     return promotionStateParse("{}");
   }

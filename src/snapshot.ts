@@ -4,7 +4,7 @@
 // Before each PATCH, write the *outgoing* (local) payload AND the *current
 // platform* payload to a per-push directory:
 //
-//   .vapi-state.<env>.snapshots/<ISO-timestamp>/<resource-type>/<id>.json
+//   state/<org>/local/snapshots/<ISO-timestamp>/<resource-type>/<id>.json
 //
 // `npm run rollback -- <env> --to <timestamp>` re-applies each
 // `platform` payload as a PATCH, restoring the dashboard to its state at
@@ -18,10 +18,19 @@
 import { existsSync } from "fs";
 import { mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
+import { snapshotsDir, snapshotsLegacyDir } from "./state-paths.ts";
 import { sortedKeysReplacer } from "./state-serialize.ts";
 
 export function snapshotsRoot(baseDir: string, env: string): string {
-  return join(baseDir, `.vapi-state.${env}.snapshots`);
+  return snapshotsDir(baseDir, env);
+}
+
+// Snapshots written before state/ existed stay readable until the next pull,
+// push or apply moves them, so a rollback right after upgrading still works.
+function snapshotRoots(baseDir: string, env: string): string[] {
+  return [snapshotsDir(baseDir, env), snapshotsLegacyDir(baseDir, env)].filter(
+    (root) => existsSync(root),
+  );
 }
 
 let activeRunDir: string | null = null;
@@ -79,13 +88,11 @@ export async function listSnapshotTimestamps(
   baseDir: string,
   env: string,
 ): Promise<string[]> {
-  const root = snapshotsRoot(baseDir, env);
-  if (!existsSync(root)) return [];
-  const entries = await readdir(root, { withFileTypes: true });
-  return entries
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .sort();
+  const names = new Set<string>();
+  for (const root of snapshotRoots(baseDir, env))
+    for (const entry of await readdir(root, { withFileTypes: true }))
+      if (entry.isDirectory()) names.add(entry.name);
+  return [...names].sort();
 }
 
 export interface SnapshotEntry {
@@ -99,7 +106,11 @@ export async function loadSnapshot(
   env: string,
   timestamp: string,
 ): Promise<SnapshotEntry[]> {
-  const dir = join(snapshotsRoot(baseDir, env), timestamp);
+  const dir =
+    snapshotRoots(baseDir, env)
+      .map((root) => join(root, timestamp))
+      .find((candidate) => existsSync(candidate)) ??
+    join(snapshotsRoot(baseDir, env), timestamp);
   if (!existsSync(dir)) {
     throw new Error(`Snapshot not found: ${dir}`);
   }

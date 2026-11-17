@@ -107,7 +107,7 @@ function driftState(
   } as Record<string, Record<string, { uuid: string }>>;
 }
 
-// Drift baselines live in the hash store (.vapi-state-hash/<org>/<uuid>), which
+// Drift baselines live in the hash store (state/<org>/local/baselines/<uuid>), which
 // resolves beside src/ rather than under a temp dir. Seed them under an org slug
 // no real checkout uses, and remove the whole folder when the file finishes.
 const HASH_STORE_TEST_ENV = `drift-test-${process.pid}`;

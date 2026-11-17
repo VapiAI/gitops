@@ -1,3 +1,4 @@
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -129,12 +130,12 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
   // engine runs from the copied src/, so its store resolves under `dir`.
   // It is deliberately stale: it equals neither the local file's hash nor
   // the canonicalized dashboard hash.
-  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  const hashStore = baselinesDir(dir, ENV);
   mkdirSync(hashStore, { recursive: true });
   writeFileSync(join(hashStore, UUID), "stale-older-basis-hash\n");
 
   writeFileSync(
-    join(dir, `.vapi-state.${ENV}.json`),
+    stateFixturePath(dir, ENV),
     JSON.stringify(
       {
         // A non-empty credentials section keeps push from treating state as

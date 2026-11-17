@@ -6,7 +6,7 @@ import {
   VAPI_TOKEN,
   VAPI_TOKEN_SOURCE,
 } from "./config.ts";
-import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
+import { OrgPinMismatchError, orgPinCheck, orgPinLabel } from "./org-pin.ts";
 import type { VapiResponse } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
@@ -33,7 +33,7 @@ const DRY_RUN_COUNTS = { POST: 0, PATCH: 0, DELETE: 0 };
 let orgPinChecked: Promise<void> | undefined;
 
 /**
- * Check the key against resources/<org>/.vapi-org.json once per process,
+ * Check the key against state/<org>/org.json once per process,
  * before the first request (see org-pin.ts). A mismatch exits instead of
  * throwing, because several callers catch request errors and retry or carry
  * on, and none of them should reach the wrong org.
@@ -54,11 +54,11 @@ export function orgPinGuard(): Promise<void> {
       });
       if (outcome.kind === "pinned")
         console.log(
-          `📌 Pinned resources/${VAPI_ENV}/ to Vapi org ${outcome.orgId} (${ORG_PIN_FILE}). Commit it with the folder.`,
+          `📌 Pinned resources/${VAPI_ENV}/ to Vapi org ${outcome.orgId} (${orgPinLabel(BASE_DIR, VAPI_ENV)}). Commit that file.`,
         );
       if (outcome.kind === "unverified")
         console.warn(
-          `⚠️  Couldn't confirm which Vapi org the key belongs to, so it wasn't checked against resources/${VAPI_ENV}/${ORG_PIN_FILE}.`,
+          `⚠️  Couldn't confirm which Vapi org the key belongs to, so it wasn't checked against ${orgPinLabel(BASE_DIR, VAPI_ENV)}.`,
         );
     } catch (error) {
       if (error instanceof OrgPinMismatchError) {

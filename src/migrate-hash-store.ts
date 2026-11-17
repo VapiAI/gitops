@@ -1,5 +1,6 @@
 // One-time migration from the legacy fat state file to the slim
-// `name → { uuid }` state file + `.vapi-state-hash/<org>/<uuid>` baseline store.
+// `name → { uuid }` state file + the per-machine baseline store, and from
+// the old file locations into `state/<org>/` (see state-paths.ts).
 //
 // This whole module is a REMOVABLE SEAM. When the migration is no longer
 // needed, delete this file + `migrate-cmd.ts`, remove the `assertStateMigrated`
@@ -7,20 +8,26 @@
 // script. Nothing else references it.
 //
 // CONFIG-FREE by design (no `config.ts` import): `migrate` runs without an org
-// argument or a VAPI_TOKEN, across every `.vapi-state.<org>.json` in the repo
-// at once.
+// argument or a VAPI_TOKEN, across every org's state file in the repo at once.
 
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
-import { basename, dirname, join } from "path";
-import { HASH_STORE_ROOT, readBaseline, writeBaseline } from "./hash-store.ts";
+import { relative } from "path";
+import {
+  HASH_STORE_BASE_DIR,
+  readBaseline,
+  writeBaseline,
+} from "./hash-store.ts";
+import {
+  stateFileRead,
+  stateLayoutPrepare,
+  stateOrgsList,
+} from "./state-paths.ts";
 import { asResourceState, sortedKeysReplacer } from "./state-serialize.ts";
 import type { ResourceState } from "./types.ts";
 
-// Repo root, derived from the hash store's known location (single source).
-const BASE_DIR = dirname(HASH_STORE_ROOT);
-
-const STATE_FILE_RE = /^\.vapi-state\.(.+)\.json$/;
+// Repo root, shared with the hash store (single source).
+const BASE_DIR = HASH_STORE_BASE_DIR;
 
 export interface OrgMigrationResult {
   org: string;
@@ -28,6 +35,7 @@ export interface OrgMigrationResult {
   seeded: number; // baselines written into the hash store
   skipped: number; // legacy hashes ignored because a baseline already existed
   slimmed: boolean; // whether the state file was rewritten to slim form
+  notices: string[]; // what moved into state/<org>/, or why it stayed
 }
 
 export interface MigrationResult {
@@ -72,22 +80,11 @@ function isSection(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function discoverStateFiles(
-  baseDir: string,
-): Array<{ org: string; path: string }> {
-  const out: Array<{ org: string; path: string }> = [];
-  for (const name of readdirSync(baseDir)) {
-    const m = STATE_FILE_RE.exec(name);
-    if (!m || !m[1]) continue;
-    out.push({ org: m[1], path: join(baseDir, name) });
-  }
-  return out.sort((a, b) => a.org.localeCompare(b.org));
-}
-
 async function migrateOne(
+  baseDir: string,
   org: string,
-  stateFilePath: string,
 ): Promise<OrgMigrationResult> {
+  const stateFilePath = stateFileRead(baseDir, org);
   const raw = JSON.parse(readFileSync(stateFilePath, "utf-8")) as Record<
     string,
     unknown
@@ -135,26 +132,35 @@ async function migrateOne(
     await rename(tmpPath, stateFilePath);
   }
 
+  // Slim first, in place, then move: each step leaves one complete state
+  // file. An explicit migrate moves state even in a CI run, because whoever
+  // runs it there commits the result; a workflow that would drop state/ from
+  // its commit still stops the move.
+  const notices = stateLayoutPrepare(baseDir, org, {
+    ...process.env,
+    CI: "",
+    GITHUB_ACTIONS: "",
+  });
   return {
     org,
-    stateFile: basename(stateFilePath),
+    stateFile: relative(baseDir, stateFileRead(baseDir, org)),
     seeded,
     skipped,
     slimmed: needsSlim,
+    notices,
   };
 }
 
-// Migrate every `.vapi-state.<org>.json` in the repo root: seed missing
-// baselines from legacy hashes, then rewrite each state file to slim form.
-// Idempotent — re-running on already-slim files seeds nothing and rewrites
-// nothing.
+// Migrate every org's state file, in either location: seed missing baselines
+// from legacy hashes, rewrite the file to slim form, then move the org's
+// engine files into `state/<org>/`. Idempotent — re-running on a migrated
+// repo seeds nothing, rewrites nothing and moves nothing.
 export async function migrateAll(
   baseDir: string = BASE_DIR,
 ): Promise<MigrationResult> {
-  const files = discoverStateFiles(baseDir);
   const orgs: OrgMigrationResult[] = [];
-  for (const { org, path } of files) {
-    orgs.push(await migrateOne(org, path));
+  for (const org of stateOrgsList(baseDir)) {
+    orgs.push(await migrateOne(baseDir, org));
   }
   return { orgs };
 }
@@ -165,7 +171,8 @@ export async function migrateAll(
 // must not be blocked). Shape-only check — never inspects the hash store.
 //
 // The path is passed in (rather than read from config) so this module stays
-// config-free; org-scoped callers already have STATE_FILE_PATH loaded.
+// config-free; callers pass stateFileRead(), which names the file in
+// whichever layout the org is in.
 export function assertStateMigrated(stateFilePath: string): void {
   if (!existsSync(stateFilePath)) return;
 
@@ -188,8 +195,7 @@ export function assertStateMigrated(stateFilePath: string): void {
         throw new Error(
           `State file ${stateFilePath} is in the legacy format ` +
             `(carries per-resource hashes/timestamps). Run \`npm run migrate\` ` +
-            `first to slim every state file and seed the .vapi-state-hash/ ` +
-            `baseline store.`,
+            `first to slim every state file and seed the drift baselines.`,
         );
       }
     }

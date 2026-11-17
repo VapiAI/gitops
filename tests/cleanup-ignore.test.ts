@@ -1,3 +1,4 @@
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
@@ -66,7 +67,7 @@ async function cleanupRun(
     symlinkSync(join(REPO, "node_modules"), join(dir, "node_modules"), "dir");
     writeFileSync(join(dir, `.env.${ORG}`), "VAPI_TOKEN=fake-token-not-used\n");
     writeFileSync(
-      join(dir, `.vapi-state.${ORG}.json`),
+      stateFixturePath(dir, ORG),
       JSON.stringify({ assistants: { "front-desk": { uuid: TRACKED } } }),
     );
     mkdirSync(join(dir, "resources", ORG), { recursive: true });
