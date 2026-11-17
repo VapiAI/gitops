@@ -30,7 +30,7 @@ async function recordSeed(org: string): Promise<void> {
   const usage = new Map<string, BlockUsage>();
   for (const resource of (await orgResourcesRead(ROOT, org)).values())
     usage.set(`${FOLDER_MAP[resource.type]}/${resource.id}`, resource.blocks);
-  blocksRecordUpdate(join(ROOT, "resources", org), usage, usage.keys());
+  blocksRecordUpdate(ROOT, org, usage, usage.keys());
 }
 
 // dev and prod hold the same file, and prod was last pushed with the block
@@ -45,8 +45,8 @@ async function fixtureReset(): Promise<void> {
     "resources/dev/assistants/plain.md": assistantFile("Plain", "Hello."),
     "resources/prod/assistants/triage.md": TRIAGE,
     "resources/prod/assistants/plain.md": assistantFile("Plain", "Hello."),
-    ".vapi-state.dev.json": "{}\n",
-    ".vapi-state.prod.json": "{}\n",
+    "state/dev/state.json": "{}\n",
+    "state/prod/state.json": "{}\n",
     ".gitignore": "tmp/\n.env.*\n",
   });
   await recordSeed("prod");

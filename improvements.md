@@ -111,6 +111,8 @@ you which stack PR closes the row.**
 | 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
 | 39  | Engine state looked like temp files and sat in three places | Deleting the state file makes the next push duplicate every resource | None       | RESOLVED 2026-11-17 (#97)                |
 | 40  | Nothing checked a `credentialIds` list against the keys an org has saved | A list that hides the org's own key runs the call on Vapi's key, silently | None       | RESOLVED 2026-11-17 (#96)                |
+| 41  | Shared prompt text and config had no home, and pull would erase any include marker | Repeated paragraphs drift apart across assistants and orgs | None       | RESOLVED 2026-11-16 (#94)                |
+| 42  | An org with no credentials is re-bootstrapped on every push, which disables the drift check | A dashboard edit is overwritten without a warning in such an org | None       | Open                                     |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2298,7 +2300,7 @@ prompts and `$include` in mappings, looked up in `resources/<org>/templates/`
 then `templates/`, expanded in the loader. Pull never writes a file that uses
 blocks and saves the dashboard version beside it instead. Push records the
 block content each resource went up with in
-`resources/<org>/.vapi-blocks.json`; `npm run sync-blocks` and the promotion
+`state/<org>/blocks.json`; `npm run sync-blocks` and the promotion
 plan (`sync` entries) read it to find resources a block edit has not reached.
 
 ### Status

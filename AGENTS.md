@@ -306,8 +306,8 @@ every org). The engine expands it before validate, push and PR checks.
   `npm run sync-blocks` and show the human the list before any deploy.
 - Don't use Liquid `{% include %}` / `{% render %}` or YAML merge keys (`<<`)
   to share content: Vapi and the engine drop them silently.
-- Commit `resources/<org>/.vapi-blocks.json` when push changes it; never
-  edit or delete it.
+- Commit `state/<org>/blocks.json` when push changes it; never edit or
+  delete it.
 
 Syntax, merge rules and dashboard-edit handling: [Blocks](docs/guides/blocks.md).
 
