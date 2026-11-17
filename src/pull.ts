@@ -368,7 +368,7 @@ async function pullCredentials(state: StateFile): Promise<void> {
   state.credentials = newSection;
   // The state file stays a name → UUID map. What each key is for goes in a
   // file of its own, which the credential-pin check reads.
-  credentialKindsWrite(RESOURCES_DIR, kinds);
+  credentialKindsWrite(BASE_DIR, VAPI_ENV, kinds);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

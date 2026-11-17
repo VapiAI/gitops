@@ -3,17 +3,25 @@
 // The state file maps a credential's name to its UUID and nothing else. A
 // `credentialIds` list can only be checked against the org's keys when the
 // provider of each key is known too, and pull already fetches that. Pull
-// records it in resources/<org>/.vapi-credential-providers.json, which is
-// committed with the folder. It holds no secret: a provider name per key,
-// and whether a storage bucket is set on it.
+// records it in state/<org>/credential-providers.json, which is committed
+// with the state file. It holds no secret: a provider name per key, and
+// whether a storage bucket is set on it.
 //
 // Config-free so validate, push and tests can read any org.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { stateOrgDir } from "./state-paths.ts";
 import { sortedKeysReplacer } from "./state-serialize.ts";
 
-export const CREDENTIAL_KINDS_FILE = ".vapi-credential-providers.json";
+export function credentialKindsPath(rootDir: string, org: string): string {
+  return join(stateOrgDir(rootDir, org), "credential-providers.json");
+}
+
+/** The file as a person names it: its path from the repository root. */
+export function credentialKindsLabel(org: string): string {
+  return `state/${org}/credential-providers.json`;
+}
 
 export interface CredentialKind {
   provider: string;
@@ -46,9 +54,10 @@ export function credentialKindOf(
 
 /** The org's recorded credential kinds, or undefined before its first pull. */
 export function credentialKindsRead(
-  resourcesDir: string,
+  rootDir: string,
+  org: string,
 ): CredentialKinds | undefined {
-  const path = join(resourcesDir, CREDENTIAL_KINDS_FILE);
+  const path = credentialKindsPath(rootDir, org);
   if (!existsSync(path)) return undefined;
   const raw = record(JSON.parse(readFileSync(path, "utf-8")));
   if (!raw) throw new Error(`${path} must hold a JSON object`);
@@ -66,13 +75,14 @@ export function credentialKindsRead(
 
 /** Write the org's credential kinds. Returns false when nothing changed. */
 export function credentialKindsWrite(
-  resourcesDir: string,
+  rootDir: string,
+  org: string,
   kinds: CredentialKinds,
 ): boolean {
-  const path = join(resourcesDir, CREDENTIAL_KINDS_FILE);
+  const path = credentialKindsPath(rootDir, org);
   const content = `${JSON.stringify(kinds, sortedKeysReplacer, 2)}\n`;
   if (existsSync(path) && readFileSync(path, "utf-8") === content) return false;
-  mkdirSync(resourcesDir, { recursive: true });
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, content);
   return true;
 }

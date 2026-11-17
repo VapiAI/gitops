@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  CREDENTIAL_KINDS_FILE,
   credentialKindOf,
   credentialKindsRead,
   credentialKindsWrite,
@@ -36,14 +35,15 @@ test("a credential's kind is its provider, and whether a bucket is set", () => {
 test("the kinds file round-trips, holds nothing else, and isn't rewritten unchanged", () => {
   const dir = mkdtempSync(join(tmpdir(), "vapi-kinds-"));
   try {
-    assert.equal(credentialKindsRead(dir), undefined);
+    assert.equal(credentialKindsRead(dir, "clinic"), undefined);
     const kinds = {
       recordings: { provider: "azure", bucket: true as const },
       elevenlabs: { provider: "11labs" },
     };
-    assert.equal(credentialKindsWrite(dir, kinds), true);
+    assert.equal(credentialKindsWrite(dir, "clinic", kinds), true);
+    const file = join(dir, "state/clinic/credential-providers.json");
     assert.equal(
-      readFileSync(join(dir, CREDENTIAL_KINDS_FILE), "utf-8"),
+      readFileSync(file, "utf-8"),
       `{
   "elevenlabs": {
     "provider": "11labs"
@@ -55,10 +55,10 @@ test("the kinds file round-trips, holds nothing else, and isn't rewritten unchan
 }
 `,
     );
-    assert.deepEqual(credentialKindsRead(dir), kinds);
-    const written = statSync(join(dir, CREDENTIAL_KINDS_FILE)).mtimeMs;
-    assert.equal(credentialKindsWrite(dir, kinds), false);
-    assert.equal(statSync(join(dir, CREDENTIAL_KINDS_FILE)).mtimeMs, written);
+    assert.deepEqual(credentialKindsRead(dir, "clinic"), kinds);
+    const written = statSync(file).mtimeMs;
+    assert.equal(credentialKindsWrite(dir, "clinic", kinds), false);
+    assert.equal(statSync(file).mtimeMs, written);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

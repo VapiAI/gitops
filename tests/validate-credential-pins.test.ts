@@ -539,7 +539,7 @@ test("without the credential kinds file the check says so once, and still checks
   );
   assert.match(
     found[1]!,
-    /resources\/clinic\/\.vapi-credential-providers\.json doesn't exist yet.*npm run pull -- clinic --bootstrap/,
+    /state\/clinic\/credential-providers\.json doesn't exist yet.*npm run pull -- clinic --bootstrap/,
   );
 });
 

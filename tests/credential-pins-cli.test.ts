@@ -163,7 +163,7 @@ test("pull records each key's provider, and validate catches a list that hides o
       ),
     );
     const kindsText = readFileSync(
-      join(orgDir, ".vapi-credential-providers.json"),
+      join(dir, "state", ORG, "credential-providers.json"),
       "utf-8",
     );
     assert.deepEqual(JSON.parse(kindsText), {
@@ -176,7 +176,7 @@ test("pull records each key's provider, and validate catches a list that hides o
     assert.doesNotMatch(kindsText, /secret/);
     // The state file is still a name → UUID map and nothing else.
     const state = JSON.parse(
-      readFileSync(join(dir, `.vapi-state.${ORG}.json`), "utf-8"),
+      readFileSync(join(dir, "state", ORG, "state.json"), "utf-8"),
     );
     assert.deepEqual(state.credentials.elevenlabs, { uuid: id(3) });
 
