@@ -21,6 +21,9 @@ left alone.
 5. Choose `bind` or `omit` for credentials and phone numbers in each target
    org. Pull generates stable aliases in `.env.<org>` from resources that
    already exist there; promotion never copies secrets or provisions numbers.
+   An `omit` that drops an entry from a `credentialIds` list is flagged in the
+   plan, because it narrows which keys calls in the target may use: see
+   [Credential pins](credential-pins.md#promotion).
 6. Run the read-only plan for each transition before the first apply and
    confirm every create, update, and delete is expected.
 

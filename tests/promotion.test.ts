@@ -285,6 +285,70 @@ test("promotion canonicalizes source UUIDs and applies credential and phone poli
     assert.match(content, /phoneNumberIds:\n\s+- target-phone/);
     assert.doesNotMatch(content, new RegExp(sourceTool));
     assert.doesNotMatch(content, new RegExp(sourceCredential));
+    // The entry left out of the list is named, with the file it was in.
+    assert.equal(plan.warnings.length, 1);
+    assert.match(
+      plan.warnings[0]!,
+      /^assistants\/a\.md: credentialIds entry "unknown" is left out in target \(binding policy "omit"\)/,
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("promotion warns about a credentialIds entry it leaves out, and only then", async () => {
+  const fx = await fixture();
+  try {
+    const sourceVoice = "33333333-3333-3333-3333-333333333333";
+    await put(
+      fx.root,
+      "resources/source/squads/front-desk.yml",
+      `name: Front Desk\nmembers: []\nmembersOverrides:\n  credentialIds: [${sourceVoice}, llm]\n  server:\n    url: https://example.com\n    credentialId: hooks\n`,
+    );
+    const build = (aliases: Record<string, "bind" | "omit">) =>
+      promotionPlanBuild({
+        rootDir: fx.root,
+        source: "source",
+        target: "target",
+        patterns: ["squads/**"],
+        sourceState: state({
+          credentials: {
+            voice: { uuid: sourceVoice },
+            llm: { uuid: "source-llm" },
+            hooks: { uuid: "source-hooks" },
+          },
+        }),
+        targetState: state({
+          credentials: {
+            voice: { uuid: "target-voice" },
+            llm: { uuid: "target-llm" },
+            hooks: { uuid: "target-hooks" },
+          },
+        }),
+        bindings: {
+          credentials: { default: "bind", aliases },
+          phoneNumbers: { default: "omit", aliases: {} },
+        },
+      });
+
+    // Every entry bound: nothing to say.
+    assert.deepEqual((await build({})).warnings, []);
+    // A single credentialId left out is what "omit" is for: no warning.
+    assert.deepEqual((await build({ hooks: "omit" })).warnings, []);
+    // A list entry left out narrows what the call may use: warn, by name,
+    // even though the source wrote it as a UUID.
+    const plan = await build({ voice: "omit" });
+    assert.match(plan.changes[0]?.content ?? "", /credentialIds:\n\s+- llm\n/);
+    assert.deepEqual(plan.warnings, [
+      'squads/front-desk.yml: credentialIds entry "voice" is left out in target (binding policy "omit"). Calls there can use only the keys still on the list, so that provider would run on Vapi\'s own key.',
+    ]);
+
+    // Once the target file holds the promoted content there is no change,
+    // and no warning to repeat.
+    await promotionPlanApply(plan);
+    const again = await build({ voice: "omit" });
+    assert.deepEqual(again.changes, []);
+    assert.deepEqual(again.warnings, []);
   } finally {
     await fx.cleanup();
   }
@@ -463,6 +527,10 @@ test("promotionConfigParse reads an org's optional check gate and rejects a non-
   const parsed = promotionConfigParse(config("dev-core"));
   assert.deepEqual(
     [parsed.orgs.dev?.check, parsed.orgs.prod?.check, error],
-    ["dev-core", undefined, "org dev.check must be a check name from vapi-checks.yml"],
+    [
+      "dev-core",
+      undefined,
+      "org dev.check must be a check name from vapi-checks.yml",
+    ],
   );
 });
