@@ -86,7 +86,8 @@ On a 429, the warning names the org and effective RPM, suggests lowering
 rate limit: [EU](https://dashboard.eu.vapi.ai/settings/organization) for
 `api.eu.vapi.ai`, otherwise
 [US](https://dashboard.vapi.ai/settings/organization).
-Existing retry backoff and write gaps still apply.
+Reads and writes use this limiter equally, with no extra write delay.
+Existing retry backoff still applies.
 
 Each org shares one token bucket per process. It refills at
 `maxGitopsRpm / 60` tokens per second, with a small burst capacity of

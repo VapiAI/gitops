@@ -22,19 +22,12 @@ import { limitedVapiFetch } from "./vapi-fetch.ts";
 // Dangerous Sync - Delete everything NOT in state file
 // ─────────────────────────────────────────────────────────────────────────────
 
-const REQUEST_DELAY_MS = 700;
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
   await orgPinGuard();
-  await sleep(REQUEST_DELAY_MS);
   const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
   const url = `${VAPI_BASE_URL}${endpoint}`;
   const response = await limitedVapiFetch(limiter, url, {
@@ -78,7 +71,6 @@ async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
 
 async function vapiDelete(endpoint: string): Promise<void> {
   await orgPinGuard();
-  await sleep(REQUEST_DELAY_MS);
   const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
   const url = `${VAPI_BASE_URL}${endpoint}`;
   const response = await limitedVapiFetch(limiter, url, {

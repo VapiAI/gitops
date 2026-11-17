@@ -206,6 +206,8 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 Vapi requests use a per-org [max GitOps RPM](docs/guides/configuration.md#max-gitops-rpm)
 client ceiling (default 100), configured by `maxGitopsRpm` in the committed
 `.vapi-org.json` or overridden by `VAPI_MAX_GITOPS_RPM`. This is not a Vapi org limit.
+Reads and writes use the same limiter, without an extra write delay; retry
+backoff still applies.
 
 | Command | What it does |
 | --- | --- |
@@ -213,7 +215,7 @@ client ceiling (default 100), configured by `maxGitopsRpm` in the committed
 | `npm run validate -- <org>` | Check resource files offline before deploying |
 | `npm run apply -- <org>` | Deploy: pull, merge, then push (the default) |
 | `npm run pull -- <org>` | Sync platform changes down without overwriting local edits |
-| `npm run push -- <org>` | Push without pulling first (prefer `apply`) |
+| `npm run push -- <org>` | Push without pulling first (prefer `apply`); paced by max GitOps RPM |
 | `npm run rollback -- <org>` | Restore a pre-deploy snapshot |
 | `npm run cleanup -- <org>` | Find, and optionally delete, platform resources with no file |
 | `npm run audit -- <org>` | Report drift between files, state and the platform |

@@ -2084,5 +2084,14 @@ dependency check, as `check-payload.ts` already does.
 - **Risk:** Multiple processes or other clients may still exhaust the platform quota.
 - **Current mitigation:** Committed `maxGitopsRpm` (default 100), overridden by `VAPI_MAX_GITOPS_RPM`; invalid settings stop requests. A 429 warns with the org's region-specific dashboard link.
 - **Possible fix:** Coordinate budgets across processes if deployments need a global client ceiling.
-- **Status:** Implemented; existing backoff and write gaps retained. This is a GitOps client limit, not a Vapi org limit.
+- **Status:** Implemented; existing retry backoff retained; reads and writes paced only by the shared limiter. This is a GitOps client limit, not a Vapi org limit.
 - **Review hardening:** Invalid limits exit cleanly without a stack trace. The setup wizard keeps key/region validation first, using the default client ceiling until the folder is selected. Shared env parsing supports exports and comments without leaking one org’s override to another; 429 advice names the org and effective RPM.
+
+## 2026-11-17 — One client request pacing policy [RESOLVED 2026-11-17] (#95)
+
+- **Problem:** Fixed request sleeps added a second pacing policy on top of max GitOps RPM.
+- **Current behavior:** [API writes](src/api.ts) and [cleanup reads/deletes](src/cleanup.ts) now use only the shared per-org token bucket.
+- **Risk:** A configured burst can still trigger the platform's org rate limit.
+- **Current mitigation:** Keep max GitOps RPM below the org quota; existing 429/5xx retry backoff is unchanged.
+- **Possible fix:** No additional pacing layer is needed.
+- **Status:** Implemented with stub-server coverage for burst writes and sustained limiter spacing.

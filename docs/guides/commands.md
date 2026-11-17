@@ -12,7 +12,8 @@ Every command that contacts Vapi observes the per-org
 Set committed `maxGitopsRpm` or override with `VAPI_MAX_GITOPS_RPM`; this does
 not change the Vapi org API rate limit. Setup validates the key and region
 using the default client ceiling before asking for the org folder; subsequent
-requests use that org’s configured ceiling.
+requests use that org’s configured ceiling. Reads and writes share this
+limiter without an additional write delay; retry backoff still applies.
 
 | Command | Usage | What it does |
 | --- | --- | --- |
