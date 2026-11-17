@@ -2203,6 +2203,62 @@ run's hand-off to the workflow, and an older workflow reads it there.
 
 ---
 
+## 40. Nothing checked a `credentialIds` list against the keys an org has saved
+
+**[RESOLVED 2026-11-17] (#PR_NUMBER)**
+
+**Discovered:** 2026-11-17, while planning one squad per site in an org that
+holds an Azure OpenAI key per site.
+
+### Problem
+
+A `credentialIds` list is the full set of keys a call may use, and every
+squad member's list is pooled into one. A provider left off the list does
+not fail the call: it runs on Vapi's own key. The engine could not tell a
+complete list from one that hides the org's own voice, transcriber or
+storage key.
+
+### Current behavior (Verified)
+
+- The state file records `name → uuid` for a credential and nothing else,
+  so the engine did not know which provider a saved key is for.
+- `validate` only checked that each name on a list exists in the state file.
+- Promotion dropped a `credentialIds` entry whose binding policy is `omit`
+  without saying so.
+- Two credentials with no name and the same provider get the same slug on
+  pull, and the second silently replaces the first in the state file.
+
+### Risk
+
+An org that must run only on its own keys sends audio or prompts to Vapi's
+provider accounts when one entry is missed in one squad file, with nothing
+in the push output or the call to show it.
+
+### Current mitigation
+
+None before this change, other than reading every list by hand.
+
+### Possible fix
+
+Record each credential's provider on pull, report a list that leaves out a
+key the org has saved for something the call uses, and let an org mark
+itself customer-keys-only so the report is an error there.
+
+### Status
+
+**RESOLVED 2026-11-17.** Pull writes
+`resources/<org>/.vapi-credential-providers.json` and warns when two
+credentials collide on one name. `validate` has the
+`credential-pin-hides-key` rule, an error in an org whose
+`.vapi-policy.yml` sets `customerKeysOnly: true`. The promotion plan warns
+when `omit` drops a `credentialIds` entry. See
+[Credential pins](docs/guides/credential-pins.md).
+
+Still open: the slug collision itself is only warned about, and the check
+does not know which models or regions a key covers.
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally

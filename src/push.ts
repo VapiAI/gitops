@@ -27,6 +27,7 @@ import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { prepareResourceLinks } from "./link-preflight.ts";
 import { NameCollisionReport } from "./name-collisions.ts";
 import { computePushPlan, pushBlockingFindings } from "./push-plan.ts";
+import { orgPolicyRead } from "./org-policy.ts";
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
@@ -37,6 +38,7 @@ import {
   validateNoIgnoredReferences,
   validateResources,
 } from "./validate.ts";
+import { validateCredentialPins } from "./validate-credential-pins.ts";
 import { validateReferences } from "./validate-refs.ts";
 import {
   changedFieldPaths,
@@ -57,6 +59,7 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   "simulation suite": "simulationSuites",
 };
 
+import { credentialKindsRead } from "./credential-kinds.ts";
 import {
   credentialForwardMap,
   credentialReverseMap,
@@ -1796,6 +1799,13 @@ async function main(): Promise<void> {
         org: VAPI_ENV,
         state,
         ignorePatterns: loadIgnorePatterns(),
+      }),
+      ...validateCredentialPins({
+        loaded: loadedResources,
+        org: VAPI_ENV,
+        state,
+        kinds: credentialKindsRead(RESOURCES_DIR),
+        customerKeysOnly: orgPolicyRead(RESOURCES_DIR).customerKeysOnly,
       }),
     ];
     if (findings.length > 0) {
