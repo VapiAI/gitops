@@ -33,8 +33,8 @@ test("token bucket allows a burst, then sustains the configured rate", async () 
       now += ms;
     },
   );
-  assert.equal(limiter.capacity, 5);
-  await Promise.all(Array.from({ length: 10 }, () => limiter.acquire()));
+  assert.equal(limiter.capacity, 20);
+  await Promise.all(Array.from({ length: 25 }, () => limiter.acquire()));
   assert.deepEqual(waits, [200, 200, 200, 200, 200]);
   now += 10_000;
   await Promise.all(Array.from({ length: 5 }, () => limiter.acquire()));
@@ -44,7 +44,7 @@ test("token bucket allows a burst, then sustains the configured rate", async () 
 test("low RPM and concurrent requests sustain the cap", async () => {
   let now = 0;
   const limiter = new TokenBucket(
-    30,
+    1,
     () => now,
     async (ms) => {
       now += ms;
@@ -52,7 +52,7 @@ test("low RPM and concurrent requests sustain the cap", async () => {
   );
   assert.equal(limiter.capacity, 1);
   await Promise.all(Array.from({ length: 3 }, () => limiter.acquire()));
-  assert.equal(now, 4000);
+  assert.equal(now, 120000);
   assert.throws(() => new TokenBucket(Infinity), /positive integer/);
   assert.throws(() => new TokenBucket(1.5), /positive integer/);
 });
@@ -66,8 +66,8 @@ test("default RPM has only a small burst across a minute", async () => {
       now += ms;
     },
   );
-  assert.equal(limiter.capacity, 2);
-  await Promise.all(Array.from({ length: 102 }, () => limiter.acquire()));
+  assert.equal(limiter.capacity, 20);
+  await Promise.all(Array.from({ length: 120 }, () => limiter.acquire()));
   assert.equal(now, 60_000);
 });
 
@@ -77,6 +77,59 @@ test("process registry shares an org but isolates other orgs", async () => {
   const b = orgLimiter("/registry-test", "b", 5);
   assert.notEqual(a, b);
   await Promise.all([a.acquire(), b.acquire()]);
+});
+
+test("org limiter cache does not re-read changed configuration", () => {
+  const root = mkdtempSync(join(tmpdir(), "rpm-cache-"));
+  const folder = join(root, "resources", "acme");
+  mkdirSync(folder, { recursive: true });
+  const pin = join(folder, ".vapi-org.json");
+  try {
+    writeFileSync(pin, '{"maxGitopsRpm":75}');
+    const first = orgLimiter(root, "acme");
+    writeFileSync(pin, "{");
+    writeFileSync(join(root, ".env.acme"), "VAPI_MAX_GITOPS_RPM=invalid");
+    assert.equal(orgLimiter(root, "acme"), first);
+    assert.equal(first.rpm, 75);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only the winning RPM source is validated", () => {
+  const root = mkdtempSync(join(tmpdir(), "rpm-winner-"));
+  const folder = join(root, "resources", "acme");
+  mkdirSync(folder, { recursive: true });
+  try {
+    writeFileSync(join(folder, ".vapi-org.json"), '{"maxGitopsRpm":0}');
+    writeFileSync(join(root, ".env.acme"), "VAPI_MAX_GITOPS_RPM=90");
+    writeFileSync(join(root, ".env.acme.local"), "VAPI_MAX_GITOPS_RPM=invalid");
+    assert.equal(maxGitopsRpmRead(root, "acme", {}), 90);
+    writeFileSync(join(root, ".env.acme"), "VAPI_MAX_GITOPS_RPM=invalid");
+    assert.equal(
+      maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "80" }),
+      80,
+    );
+    assert.throws(
+      () => maxGitopsRpmRead(root, "acme", {}),
+      /\.env.acme VAPI_MAX_GITOPS_RPM/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("burst capacity is floored, bounded below by one and capped at twenty", () => {
+  for (const [rpm, capacity] of [
+    [1, 1],
+    [9, 1],
+    [10, 2],
+    [99, 19],
+    [100, 20],
+    [1000, 20],
+  ]) {
+    assert.equal(new TokenBucket(rpm!).capacity, capacity);
+  }
 });
 
 test("max GitOps RPM resolves defaults, committed settings and environment precedence", () => {
@@ -96,10 +149,16 @@ test("max GitOps RPM resolves defaults, committed settings and environment prece
     );
     for (const value of [0, -1, 1.5, "bad", "", null, true, "Infinity"]) {
       writeFileSync(pin, JSON.stringify({ maxGitopsRpm: value }));
+      assert.equal(
+        maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "5" }),
+        5,
+      );
+      rmSync(join(root, ".env.acme"));
       assert.throws(
-        () => maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "5" }),
+        () => maxGitopsRpmRead(root, "acme", {}),
         /❌.*resources\/acme\/\.vapi-org.json/,
       );
+      writeFileSync(join(root, ".env.acme"), "VAPI_MAX_GITOPS_RPM=8\n");
     }
     writeFileSync(pin, "{}");
     for (const value of ["0", "-1", "1.5", "bad", "", "Infinity"]) {
@@ -109,11 +168,9 @@ test("max GitOps RPM resolves defaults, committed settings and environment prece
         /❌.*environment VAPI_MAX_GITOPS_RPM/,
       );
       writeFileSync(join(root, ".env.acme"), `VAPI_MAX_GITOPS_RPM=${value}\n`);
-      assert.throws(
-        () => maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "5" }),
-        /❌.*\.env.acme/,
-      );
+      assert.throws(() => maxGitopsRpmRead(root, "acme", {}), /❌.*\.env.acme/);
     }
+    rmSync(join(root, ".env.acme"));
     writeFileSync(pin, "{");
     assert.throws(
       () => maxGitopsRpmRead(root, "acme", {}),
@@ -311,11 +368,11 @@ test("shared env parsing handles exports, comments and org file precedence", () 
     );
     writeFileSync(
       join(root, ".env.acme"),
-      "export VAPI_MAX_GITOPS_RPM=invalid # invalid even with an override\n",
+      "export VAPI_MAX_GITOPS_RPM=invalid # ignored when overridden\n",
     );
-    assert.throws(
-      () => maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "60" }),
-      /\.env.acme VAPI_MAX_GITOPS_RPM/,
+    assert.equal(
+      maxGitopsRpmRead(root, "acme", { VAPI_MAX_GITOPS_RPM: "60" }),
+      60,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

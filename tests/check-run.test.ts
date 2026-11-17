@@ -339,6 +339,51 @@ test("an abort (SIGINT/SIGTERM) cancels in-flight runs and doesn't start new one
   });
 });
 
+test("a create aborted in the one-RPM limiter queue never sends a POST", async () => {
+  await withStub(async (stub) => {
+    let now = 0;
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const limiter = new TokenBucket(
+      1,
+      () => now,
+      async (ms) => {
+        entered();
+        await gate;
+        now += ms;
+      },
+    );
+    await limiter.acquire();
+    const controller = new AbortController();
+    const pending = checkRunAll(
+      runArgs(stub, [job("pass")], {
+        signal: controller.signal,
+        connectionFor: () => ({
+          token: "unused",
+          baseUrl: stub.baseUrl,
+          userAgent: "test",
+          vapiClient: "test",
+          limiter,
+        }),
+      }),
+    );
+    await waiting;
+    controller.abort();
+    release();
+    const [result] = await pending;
+    assert.equal(result!.outcome, "incomplete");
+    assert.equal(result!.reason, "not started: interrupted");
+    assert.deepEqual(stub.requests, []);
+    assert.equal(now, 60000);
+  });
+});
+
 test("runs that can't fit in the remaining budget aren't started", async () => {
   await withStub(async (stub) => {
     const [result] = await checkRunAll(

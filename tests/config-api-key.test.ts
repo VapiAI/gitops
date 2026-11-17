@@ -4,6 +4,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -68,4 +69,52 @@ test("a key only in .env.<org> is used quietly", () => {
   const run = validateRun("VAPI_PRIVATE_API_KEY=prod-key\n", {});
   assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Using the API key|different key/);
   assert.equal(run.code, 0);
+});
+
+test("existing example-style env files preserve API keys and base URLs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vapi-env-compat-"));
+  try {
+    cpSync(join(REPO, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO, "package.json"), join(dir, "package.json"));
+    symlinkSync(join(REPO, "node_modules"), join(dir, "node_modules"), "dir");
+    const env = { ...process.env };
+    for (const name of [
+      "VAPI_PRIVATE_API_KEY",
+      "VAPI_PRIVATE_API_KEY_ACME_PROD",
+      "VAPI_TOKEN",
+      "VAPI_BASE_URL",
+      "VAPI_MAX_GITOPS_RPM",
+    ])
+      delete env[name];
+    const example = readFileSync(join(REPO, ".env.example"), "utf8");
+    for (const quote of ["", "'", '"']) {
+      writeFileSync(
+        join(dir, ".env.acme-prod"),
+        example
+          .replace(
+            "your-vapi-private-key-here",
+            `${quote}fixture-private-key${quote}`,
+          )
+          .replace(
+            "# VAPI_BASE_URL=https://api.eu.vapi.ai",
+            `VAPI_BASE_URL=${quote}https://api.eu.vapi.ai${quote}`,
+          ),
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          'process.argv = ["node", "config-test", "acme-prod"]; const config = await import("./src/config.ts"); const assert = await import("node:assert/strict"); assert.equal(config.VAPI_TOKEN, "fixture-private-key"); assert.equal(config.VAPI_BASE_URL, "https://api.eu.vapi.ai"); console.log("config values match");',
+        ],
+        { cwd: dir, encoding: "utf8", env, timeout: 30000 },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /config values match/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

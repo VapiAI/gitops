@@ -15,13 +15,14 @@ export async function limitedVapiFetch(
   init: RequestInit = {},
 ): Promise<Response> {
   await limiter.acquire();
+  init.signal?.throwIfAborted();
+  const headers = new Headers(init.headers);
+  if (!headers.has("User-Agent")) headers.set("User-Agent", userAgentGet());
+  if (!headers.has("x-vapi-client"))
+    headers.set("x-vapi-client", vapiClientGet());
   const response = await fetch(url, {
     ...init,
-    headers: {
-      "User-Agent": userAgentGet(),
-      "x-vapi-client": vapiClientGet(),
-      ...init.headers,
-    },
+    headers,
   });
   if (response.status === 429 && !warned.has(limiter)) {
     warned.add(limiter);

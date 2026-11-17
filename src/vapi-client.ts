@@ -24,6 +24,7 @@ export interface VapiConnection {
 export type VapiRetryPolicy = "transient" | "rate-limit-only" | "none";
 
 export interface VapiFetchOptions {
+  signal?: AbortSignal;
   retry?: VapiRetryPolicy;
   maxRetries?: number;
   initialDelayMs?: number;
@@ -90,6 +91,7 @@ export async function vapiFetchJson<T>(
     const url = `${connection.baseUrl}${endpoint}`;
     const response = await limitedVapiFetch(connection.limiter, url, {
       method,
+      signal: options.signal,
       headers: {
         Authorization: `Bearer ${connection.token}`,
         "Content-Type": "application/json",

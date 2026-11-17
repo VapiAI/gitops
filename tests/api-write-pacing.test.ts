@@ -23,24 +23,24 @@ test("API writes use the limiter burst and sustained rate without another gap", 
   process.env.VAPI_MAX_GITOPS_RPM = "300";
   try {
     const { vapiRequest, vapiDelete } = await import("../src/api.ts");
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 23; i++) {
       if (i % 3 === 2) await vapiDelete("/assistant/stub-resource");
       else await vapiRequest(i % 3 === 0 ? "POST" : "PATCH", "/assistant", {});
     }
     assert.deepEqual(
       seen.map(({ method }) => method),
-      ["POST", "PATCH", "DELETE", "POST", "PATCH", "DELETE", "POST", "PATCH"],
+      Array.from({ length: 23 }, (_, i) => ["POST", "PATCH", "DELETE"][i % 3]),
     );
     assert.ok(
       seen[2]!.time - seen[0]!.time < 1000,
       "writes within the limiter burst must not wait for a second pacing policy",
     );
     assert.ok(
-      seen[7]!.time - seen[0]!.time >= 500,
-      "writes beyond the five-token burst must wait for the limiter",
+      seen[22]!.time - seen[0]!.time >= 500,
+      "writes beyond the twenty-token burst must wait for the limiter",
     );
     assert.ok(
-      seen[7]!.time - seen[6]!.time >= 140,
+      seen[22]!.time - seen[21]!.time >= 140,
       "sustained writes must be spaced by the configured refill rate",
     );
   } finally {

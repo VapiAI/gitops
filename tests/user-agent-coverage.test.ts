@@ -26,7 +26,10 @@ test("every fetch in src/ sets the User-Agent", () => {
       .split(/\bfetch\(/)
       .slice(1)
       .forEach((rest, i) => {
-        const call = rest.slice(0, rest.indexOf(");") + 2);
+        const call =
+          file === "vapi-fetch.ts"
+            ? readFileSync(join(SRC, file), "utf8")
+            : rest.slice(0, rest.indexOf(");") + 2);
         if (!call.includes('"User-Agent"'))
           missing.push(`${file} (fetch #${i + 1})`);
       });
@@ -44,7 +47,10 @@ test("every Vapi fetch in src/ sets x-vapi-client", () => {
       .split(/\bfetch\(/)
       .slice(1)
       .forEach((rest, i) => {
-        const call = rest.slice(0, rest.indexOf(");") + 2);
+        const call =
+          file === "vapi-fetch.ts"
+            ? readFileSync(join(SRC, file), "utf8")
+            : rest.slice(0, rest.indexOf(");") + 2);
         const github = call.includes('"X-GitHub-Api-Version"');
         if (!github && !call.includes('"x-vapi-client"'))
           missing.push(`${file} (fetch #${i + 1})`);
@@ -86,14 +92,14 @@ test("api.ts requests carry the command's User-Agent", async () => {
       String(seenClient[0]),
       /^gitops\/[^;]+; command=apply; run=[0-9a-f-]{36}$/,
     );
-    await Promise.all(Array.from({ length: 9 }, () => vapiGet("/assistant")));
-    assert.equal(times.length, 10);
+    await Promise.all(Array.from({ length: 24 }, () => vapiGet("/assistant")));
+    assert.equal(times.length, 25);
     assert.ok(
-      times[9]! - times[0]! >= 850,
+      times[24]! - times[0]! >= 850,
       "requests beyond the initial burst must wait for tokens",
     );
     assert.ok(
-      times[9]! - times[8]! >= 140,
+      times[24]! - times[23]! >= 140,
       "sustained requests must be spaced by the cap",
     );
   } finally {

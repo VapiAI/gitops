@@ -207,7 +207,8 @@ Vapi requests use a per-org [max GitOps RPM](docs/guides/configuration.md#max-gi
 client ceiling (default 100), configured by `maxGitopsRpm` in the committed
 `.vapi-org.json` or overridden by `VAPI_MAX_GITOPS_RPM`. This is not a Vapi org limit.
 Reads and writes use the same limiter, without an extra write delay; retry
-backoff still applies.
+backoff still applies. The burst capacity is capped at 20 requests (20 at the
+default 100 RPM), allowing up to 120 requests in a minute at the default.
 
 | Command | What it does |
 | --- | --- |

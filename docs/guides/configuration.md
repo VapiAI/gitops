@@ -73,13 +73,14 @@ org limit. Set it in the committed `resources/<org>/.vapi-org.json`:
 
 The default is 100 requests per minute, below Vapi's default org API limit
 of 200 RPM. Leave headroom for other clients. Values must be positive
-integers; an invalid setting stops the command and names its source.
+integers; an invalid winning setting stops the command and names its source.
 A settings-only file is valid before pinning, which preserves existing fields.
 
 Precedence is shell/CI `VAPI_MAX_GITOPS_RPM`, then `.env.<org>`,
 `.env.<org>.local` and `.env.local` (first file wins), then committed
 `maxGitopsRpm`, then 100. Quoted values, `export` prefixes and inline
-comments work the same way in the env files for every command.
+comments work the same way in the env files for every command. Only the
+winning value is validated; each org's limiter is configured once per process.
 
 On a 429, the warning names the org and effective RPM, suggests lowering
 `maxGitopsRpm` or setting `VAPI_MAX_GITOPS_RPM`, and links to the org API
@@ -91,5 +92,7 @@ Existing retry backoff still applies.
 
 Each org shares one token bucket per process. It refills at
 `maxGitopsRpm / 60` tokens per second, with a small burst capacity of
-`max(1, ceil(maxGitopsRpm / 60))`. Separate processes do not coordinate,
+`max(1, min(20, floor(maxGitopsRpm / 5)))` (20 requests at the default).
+The default allows up to 120 requests in a minute including the initial burst,
+below the default 200 RPM org limit. Separate processes do not coordinate,
 so their combined traffic can exceed the client ceiling.

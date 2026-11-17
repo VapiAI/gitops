@@ -348,7 +348,7 @@ export async function simRunExecute(
     "POST",
     "/eval/simulation/run",
     body,
-    { retry: "rate-limit-only" },
+    { retry: "rate-limit-only", signal: options.signal },
   );
   const runId = created?.id;
   if (!runId) {
