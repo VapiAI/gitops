@@ -2262,6 +2262,94 @@ does not know which models or regions a key covers.
 
 ---
 
+## 41. Shared prompt text and config had no home, and pull would erase any include marker
+
+### Problem
+
+Assistants in one org, and the same assistant across orgs, repeat the same
+paragraphs (safety wording, tone) and the same settings (voice, transcriber).
+There was no way to keep one copy. YAML anchors only reach inside one file and
+are expanded by the next pull; merge keys (`<<`) are not processed at all and
+are sent to the API as a field; Liquid `{% include %}` renders as nothing on a
+call.
+
+### Current behavior (Verified)
+
+Before blocks: a marker of any kind in a resource file was sent to Vapi as
+literal text. Had the loader expanded it, `pull` would still have destroyed
+it: pull rewrites a file from the platform copy not only when the dashboard
+is ahead but whenever the two sides agree (the `clean` case falls through to
+the write), and under `--force` and `--resolve=theirs`. Promotion compares
+file text, so a change to a shared file would never have reached the next org.
+
+### Risk
+
+Safety wording drifts between copies. With a naive include, the first pull
+after a push silently turns every marker back into a copy.
+
+### Current mitigation
+
+None needed; fixed.
+
+### Possible fix (landed)
+
+Blocks (`src/blocks.ts`, `docs/guides/blocks.md`): `@include <name>` in system
+prompts and `$include` in mappings, looked up in `resources/<org>/templates/`
+then `templates/`, expanded in the loader. Pull never writes a file that uses
+blocks and saves the dashboard version beside it instead. Push records the
+block content each resource went up with in
+`resources/<org>/.vapi-blocks.json`; `npm run sync-blocks` and the promotion
+plan (`sync` entries) read it to find resources a block edit has not reached.
+
+### Status
+
+**[RESOLVED 2026-11-16] (#94)**
+
+---
+
+## 42. An org with no credentials is re-bootstrapped on every push, which disables the drift check
+
+### Problem
+
+The push drift check refuses to overwrite a resource that was edited in the
+dashboard since the last pull. In an org that has no credentials stored in
+Vapi, it never refuses.
+
+### Current behavior (Verified)
+
+`maybeBootstrapState` in `src/push.ts` treats a state file with an empty
+`credentials` section as uninitialized and runs a bootstrap pull before
+applying. A bootstrap pull writes every resource's baseline as the hash of
+the platform's current content. The drift check then compares the platform
+with a baseline taken a moment earlier, finds them equal, and pushes. Seen
+in `tests/blocks-sync.test.ts`: with the stub's `/credential` route removed,
+the dashboard-edited assistant is PATCHed with no drift message; with one
+credential present it is refused.
+
+### Risk
+
+A dashboard edit in such an org is overwritten silently by `push`, `apply`
+and `sync-blocks --apply`, with no prompt in a terminal and no block in CI.
+An org that uses only Vapi-provided models, voices and numbers can have no
+credentials.
+
+### Current mitigation
+
+None. `npm run pull -- <org>` first still shows a dashboard edit before it is
+overwritten, for anyone who reads the output.
+
+### Possible fix
+
+Decide "uninitialized" from the resource sections alone (and from a marker
+that a pull has completed), not from the credentials section being empty; or
+have a bootstrap pull leave existing baselines alone.
+
+### Status
+
+**Open.**
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally

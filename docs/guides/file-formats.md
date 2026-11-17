@@ -178,6 +178,15 @@ simulationIds:
   - books-cleaning-calm
 ```
 
+## Blocks (shared text and config)
+
+Text or settings that several files share can live in one file under
+`templates/` and be included: `@include <name>` on its own line in a system
+prompt, or a `$include: <name>` key in any mapping. An org can replace a
+shared block with its own. Syntax, merge rules and how a block change is
+rolled out: [Blocks](blocks.md), with a tested example in
+[`examples/blocks/`](../../examples/blocks/README.md).
+
 ## TypeScript resources (`.ts`)
 
 Any resource can also be a `.ts` file whose default export is the resource
