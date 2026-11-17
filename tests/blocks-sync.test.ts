@@ -43,7 +43,7 @@ async function usageRead(
 // Mark every resource of an org as pushed with the blocks it uses right now.
 async function recordSeed(root: string, org: string): Promise<void> {
   const usage = await usageRead(root, org);
-  blocksRecordUpdate(join(root, "resources", org), usage, usage.keys());
+  blocksRecordUpdate(root, org, usage, usage.keys());
 }
 
 async function threeOrgs(): Promise<string> {
@@ -155,7 +155,7 @@ test("--apply deploys each org's affected files and fails while any is left behi
     };
     const pushed = await run(root, ["--apply"], (org) => {
       const usage = current[org as "alpha" | "gamma"];
-      blocksRecordUpdate(join(root, "resources", org), usage, usage.keys());
+      blocksRecordUpdate(root, org, usage, usage.keys());
       return true;
     });
     assert.equal(pushed.code, 0, pushed.output);
@@ -201,7 +201,7 @@ test("--apply pushes through the drift check: an untouched resource is updated, 
     "templates/blocks/red-flags.md": "Call 999.\n",
     [`${assistants}/triage.md`]: TRIAGE,
     [`${assistants}/pharmacy.md`]: PHARMACY,
-    [`.vapi-state.${ORG}.json`]: stateFile({
+    [`state/${ORG}/state.json`]: stateFile({
       triage: TRIAGE_ID,
       pharmacy: PHARMACY_ID,
     }),
@@ -226,7 +226,7 @@ test("--apply pushes through the drift check: an untouched resource is updated, 
       await before.stop();
     }
     await recordSeed(root, ORG);
-    const recorded = blocksRecordRead(join(root, "resources", ORG));
+    const recorded = blocksRecordRead(root, ORG);
 
     // The block changes, and someone edits pharmacy in the dashboard.
     filesWrite(root, { "templates/blocks/red-flags.md": "Call 999 now.\n" });
@@ -295,7 +295,7 @@ test("--apply pushes through the drift check: an untouched resource is updated, 
     }
 
     // Only the pushed resource is recorded with the new block.
-    const after = blocksRecordRead(join(root, "resources", ORG));
+    const after = blocksRecordRead(root, ORG);
     assert.notDeepEqual(after["assistants/triage"], recorded["assistants/triage"]);
     assert.deepEqual(
       after["assistants/pharmacy"],

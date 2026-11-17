@@ -3,7 +3,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  BLOCKS_RECORD_FILE,
+  blocksRecordPath,
   blockLayers,
   blocksChanged,
   blocksExpand,
@@ -471,18 +471,17 @@ test("resourceFileUsesBlocks reads the file as written", () => {
 
 test("the blocks record marks only pushed resources as in sync", () => {
   withRepo({ "resources/acme/.keep": "" }, (root) => {
-    const dir = join(root, "resources/acme");
     const current = new Map<string, Record<string, string>>([
       ["assistants/triage", { "blocks/red-flags.md": "aaaa" }],
       ["assistants/pharmacy", { "blocks/red-flags.md": "aaaa" }],
       ["assistants/plain", {}],
     ]);
-    blocksRecordUpdate(dir, current, ["assistants/triage", "assistants/plain"]);
-    assert.deepEqual(blocksRecordRead(dir), {
+    blocksRecordUpdate(root, "acme", current, ["assistants/triage", "assistants/plain"]);
+    assert.deepEqual(blocksRecordRead(root, "acme"), {
       "assistants/triage": { "blocks/red-flags.md": "aaaa" },
     });
     assert.match(
-      readFileSync(join(dir, BLOCKS_RECORD_FILE), "utf8"),
+      readFileSync(blocksRecordPath(root, "acme"), "utf8"),
       /^\{\n {2}"assistants\/triage"/,
     );
 
@@ -492,8 +491,8 @@ test("the blocks record marks only pushed resources as in sync", () => {
       ["assistants/triage", { "blocks/red-flags.md": "bbbb" }],
       ["assistants/pharmacy", { "blocks/red-flags.md": "bbbb" }],
     ]);
-    blocksRecordUpdate(dir, changed, ["assistants/pharmacy"]);
-    const record = blocksRecordRead(dir);
+    blocksRecordUpdate(root, "acme", changed, ["assistants/pharmacy"]);
+    const record = blocksRecordRead(root, "acme");
     assert.deepEqual(
       blocksChanged(changed.get("assistants/triage")!, record["assistants/triage"]),
       ["blocks/red-flags.md"],
@@ -507,7 +506,7 @@ test("the blocks record marks only pushed resources as in sync", () => {
     );
 
     // A resource that is gone, or no longer uses blocks, drops out.
-    blocksRecordUpdate(dir, new Map([["assistants/pharmacy", {}]]), []);
-    assert.deepEqual(blocksRecordRead(dir), {});
+    blocksRecordUpdate(root, "acme", new Map([["assistants/pharmacy", {}]]), []);
+    assert.deepEqual(blocksRecordRead(root, "acme"), {});
   });
 });

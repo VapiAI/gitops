@@ -19,10 +19,11 @@
 // Config-free, like resource-parse.ts, so every org can be read in one run.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml } from "yaml";
+import { stateOrgDir } from "./state-paths.ts";
 
 export const TEMPLATES_FOLDER = "templates";
 export const INCLUDE_KEY = "$include";
@@ -291,7 +292,7 @@ export function blocksExpand<T>(
 // ─────────────────────────────────────────────────────────────────────────────
 // Sync record
 //
-// resources/<org>/.vapi-blocks.json records, for each resource that uses
+// state/<org>/blocks.json records, for each resource that uses
 // blocks, the block content it was last pushed with. Push writes it and it is
 // committed. A resource whose blocks no longer match its entry still runs the
 // old block text on the platform: that is what "npm run sync-blocks" lists
@@ -299,13 +300,15 @@ export function blocksExpand<T>(
 // not changed, so nothing else in git shows that it needs a push.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const BLOCKS_RECORD_FILE = ".vapi-blocks.json";
+export function blocksRecordPath(rootDir: string, org: string): string {
+  return join(stateOrgDir(rootDir, org), "blocks.json");
+}
 
 // "<type folder>/<resource id>" → the blocks it was pushed with.
 export type BlocksRecord = Record<string, BlockUsage>;
 
-export function blocksRecordRead(resourcesDir: string): BlocksRecord {
-  const path = join(resourcesDir, BLOCKS_RECORD_FILE);
+export function blocksRecordRead(rootDir: string, org: string): BlocksRecord {
+  const path = blocksRecordPath(rootDir, org);
   if (!existsSync(path)) return {};
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
   if (!isMapping(parsed)) throw new Error(`${path} must hold a JSON object`);
@@ -326,11 +329,12 @@ export function blocksChanged(
 // resources that no longer exist or no longer use blocks. Entries for
 // resources this push did not touch are kept: they may still be out of date.
 export function blocksRecordUpdate(
-  resourcesDir: string,
+  rootDir: string,
+  org: string,
   current: Map<string, BlockUsage>,
   pushed: Iterable<string>,
 ): void {
-  const before = blocksRecordRead(resourcesDir);
+  const before = blocksRecordRead(rootDir, org);
   const after: BlocksRecord = { ...before };
   for (const key of pushed) {
     const usage = current.get(key);
@@ -343,8 +347,7 @@ export function blocksRecordUpdate(
   if (isDeepStrictEqual(before, after)) return;
   const sorted: BlocksRecord = {};
   for (const key of Object.keys(after).sort()) sorted[key] = after[key]!;
-  writeFileSync(
-    join(resourcesDir, BLOCKS_RECORD_FILE),
-    `${JSON.stringify(sorted, null, 2)}\n`,
-  );
+  const path = blocksRecordPath(rootDir, org);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(sorted, null, 2)}\n`);
 }

@@ -2345,7 +2345,7 @@ async function main(): Promise<void> {
       // edit has not reached yet.
       try {
         if (blocksUsed)
-          blocksRecordUpdate(RESOURCES_DIR, blocksUsed, pushedResources);
+          blocksRecordUpdate(BASE_DIR, VAPI_ENV, blocksUsed, pushedResources);
       } catch (recordError) {
         console.error(
           "\n⚠️  Failed to update the blocks record after apply:",

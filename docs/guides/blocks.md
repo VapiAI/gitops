@@ -242,7 +242,7 @@ Plain `npm run apply -- <org>` also pushes them: to the engine a block edit
 looks like a local edit to every file that includes the block.
 
 **3. Commit the record.** The engine knows what each resource was last pushed
-with from `resources/<org>/.vapi-blocks.json`. Push updates it; commit it
+with from `state/<org>/blocks.json`. Push updates it; commit it
 with your other changes, as you do the state file. Don't edit it by hand. If
 it is missing, every resource that uses a block is listed until it is pushed
 once.
