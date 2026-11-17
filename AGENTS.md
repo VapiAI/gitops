@@ -39,6 +39,7 @@ change, before running:
 | --- | --- |
 | `npm run apply`, `npm run push` | Changes live assistants |
 | `npm run promote -- … --apply` | Changes the next org (often production) |
+| `npm run sync-blocks -- --apply` | Changes live resources in every org that uses the edited block |
 | `npm run rollback -- <org> --to …` | Reverts live resources |
 | `npm run cleanup -- <org> --force --confirm <org>` | Deletes platform resources |
 | `npm run pull -- <org> --force` | Overwrites local edits |
@@ -47,6 +48,7 @@ change, before running:
 
 Safe to run without asking: `npm run validate`, `npm run audit`,
 `npm run check -- … --dry-run`, `npm run promote` without `--apply` (a plan),
+`npm run sync-blocks` without `--apply` (a list),
 plain `npm run pull` (it never overwrites local edits), `npm run push -- <org>
 --dry-run`, `npm run build`, `npm test`.
 
@@ -185,6 +187,8 @@ how sync, conflicts and output icons work:
 | Edit an assistant's system prompt | Edit the Markdown body of `resources/<org>/assistants/<name>.md` |
 | Change assistant settings | Edit the YAML frontmatter of the same file |
 | Add a tool / assistant / squad | Create `resources/<org>/tools/<name>.yml`, `assistants/<name>.md`, `squads/<name>.yml` |
+| Share prompt text or config between files | Put it in `templates/blocks/<name>.md` or `templates/config/<name>.yml` and include it (see [Blocks](#blocks)) |
+| See which resources a block edit reaches | `npm run sync-blocks` (a list; `--apply` deploys and needs a yes) |
 | Add post-call analysis | Create `resources/<org>/structuredOutputs/<name>.yml` and list it in the assistant's `artifactPlan.structuredOutputIds` |
 | Write simulation tests | Create files under `resources/<org>/simulations/` (see [Simulations](#simulations-and-pr-checks)) |
 | Check files offline | `npm run validate -- <org>` |
@@ -242,6 +246,24 @@ The engine resolves IDs and credential names to each org's UUIDs on push.
 | --- | --- |
 | The display name | Change `name` in the file (or in the dashboard, then pull). The filename stays. |
 | The file itself | A renamed file has no state entry, so the next deploy stops at the new-file check. Either keep the old filename, or (with the human's agreement) deploy it as new with `--allow-new-files` and delete the old platform resource with `npm run cleanup -- <org> --force --confirm <org>`. |
+
+### Blocks
+
+A line that says only `@include <name>` in a system prompt, or a
+`$include: <name>` key in a mapping, pulls in a shared file from
+`resources/<org>/templates/` (the org's own) or `templates/` (shared by
+every org). The engine expands it before validate, push and PR checks.
+
+- To change shared wording or settings, edit the block, not the files that
+  include it. Never replace a marker with the block's text.
+- A block edit changes every resource that includes it, in every org. Run
+  `npm run sync-blocks` and show the human the list before any deploy.
+- Don't use Liquid `{% include %}` / `{% render %}` or YAML merge keys (`<<`)
+  to share content: Vapi and the engine drop them silently.
+- Commit `resources/<org>/.vapi-blocks.json` when push changes it; never
+  edit or delete it.
+
+Syntax, merge rules and dashboard-edit handling: [Blocks](docs/guides/blocks.md).
 
 ### Excluding resources (`.vapi-ignore`)
 
@@ -357,6 +379,7 @@ For changes under `src/`, `tests/` or `.github/`:
 | --- | --- |
 | Every resource setting, with examples | [Resource reference](docs/guides/resource-reference.md) |
 | Minimal tested files | [File formats](docs/guides/file-formats.md), [`examples/starter/`](examples/starter/README.md) |
+| Shared prompt text and config | [Blocks](docs/guides/blocks.md), [`examples/blocks/`](examples/blocks/README.md) |
 | System prompts | [Writing system prompts](docs/guides/writing-prompts.md), [Vapi Prompt Optimization Guide](docs/Vapi%20Prompt%20Optimization%20Guide.md) |
 | Commands, flags, test-call output | [Commands](docs/guides/commands.md) |
 | Sync, conflicts, drift, output icons | [How the engine works](docs/guides/how-it-works.md), [sync behavior](docs/learnings/sync-behavior.md) |

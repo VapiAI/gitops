@@ -21,6 +21,7 @@ The other commands are direct only.
 | `npm run sim` | `npm run sim -- <org> --suite <name> --target <name>` | Run a simulation suite against deployed resources. Exits 0 passed, 1 failed, 3 incomplete. |
 | `npm run check` | `npm run check -- <check>` or `--all`, `[--dry-run]` | Run [PR checks](pr-checks.md) against local files, nothing deployed. Exits 0 passed, 1 failed, 2 config or build error, 3 incomplete. |
 | `npm run promote` | `npm run promote -- --pipeline <p> --from <org> --to <org> [--apply]` | Plan, or apply, a [promotion](promotion.md) between orgs. |
+| `npm run sync-blocks` | `npm run sync-blocks [-- --org <org>] [--apply]` | List the resources, in every org, that a [block](blocks.md) edit has not reached yet. `--apply` deploys them through `apply`. Exits 1 if any is left behind. |
 | `npm run build` | `npm run build` | Type-check the code and tests. |
 | `npm test` | `npm test` | Run the test suite. |
 | `npm run test:repository` | `npm run test:repository` | For work on the engine itself: run the test suite inside copies of a repository and check that no file in them changed. Takes a few minutes. |

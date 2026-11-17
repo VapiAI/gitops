@@ -1,0 +1,8 @@
+name: Front Desk
+members:
+  - assistantId: triage
+  - assistantId: pharmacy
+membersOverrides:
+  $include: call-settings
+  variableValues:
+    practice_name: South Clinic

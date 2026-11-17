@@ -134,6 +134,27 @@ Both `pull` and `push` treat this as clean (live sides agree — nothing to
 reconcile). The no-op write/PATCH re-seeds the baseline, self-healing the
 stale pointer. Never blocks, never prompts.
 
+### 6. The local file uses blocks
+
+A file with an `@include` line or a `$include` key is compared in its expanded
+form, so the directions above mean the same thing. What differs is that
+`pull` **never writes the file**: the platform holds the expanded resource,
+and writing it back would replace each marker with a copy of the block. A
+block edit makes every file that includes it `local-ahead`.
+
+| Direction | `pull` on a file that uses blocks |
+| --- | --- |
+| L = D (`clean`, or no baseline yet) | 🧩 file left as written; baseline := the shared hash |
+| `local-ahead` | ⬆️ preserved, as for any file |
+| `dashboard-ahead` | ⚠️ file kept; dashboard version written beside it as `<name>.<TIMESTAMP>.bkp.<ext>`; **baseline untouched**, so the edit is still drift at the next pull and push |
+| `both-diverged` | as scenario 4, except `--resolve=theirs` keeps the file, writes the `.bkp.` copy and leaves the conflict open |
+| any, with `--force` | ⚠️ file kept; `.bkp.` copy written when the two differ |
+| L ≠ D, no baseline | ✏️ file kept, no baseline written |
+
+To resolve a kept dashboard edit, merge it by hand into the file or the
+block, then `npm run apply -- <org> --resolve=ours <file>`. See
+[Blocks](../guides/blocks.md#dashboard-edits-to-a-file-that-uses-blocks).
+
 ---
 
 ## Existence scenarios (something is missing somewhere)

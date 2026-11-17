@@ -41,7 +41,7 @@ function exampleOrgs(): Array<{ root: string; org: string }> {
 }
 
 function validateRun(
-  resourcesDir: string,
+  root: string,
   org: string,
 ): { code: number | null; output: string } {
   const dir = mkdtempSync(join(tmpdir(), "vapi-examples-"));
@@ -50,7 +50,14 @@ function validateRun(
     cpSync(join(REPO, "package.json"), join(dir, "package.json"));
     symlinkSync(join(REPO, "node_modules"), join(dir, "node_modules"), "dir");
     mkdirSync(join(dir, "resources"));
-    cpSync(resourcesDir, join(dir, "resources", org), { recursive: true });
+    cpSync(join(root, "resources", org), join(dir, "resources", org), {
+      recursive: true,
+    });
+    // An example's shared blocks sit beside its resources/ folder.
+    if (existsSync(join(root, "templates")))
+      cpSync(join(root, "templates"), join(dir, "templates"), {
+        recursive: true,
+      });
     writeFileSync(join(dir, `.env.${org}`), "VAPI_TOKEN=fake-token-not-used\n");
     const result = spawnSync(
       process.execPath,
@@ -65,7 +72,7 @@ function validateRun(
 
 test("every example org passes validate", () => {
   const results = exampleOrgs().map(({ root, org }) => {
-    const run = validateRun(join(root, "resources", org), org);
+    const run = validateRun(root, org);
     return [org, run.code, run.code === 0 ? "" : run.output];
   });
   assert.deepEqual(

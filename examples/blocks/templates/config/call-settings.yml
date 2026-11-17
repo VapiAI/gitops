@@ -1,0 +1,4 @@
+silenceTimeoutSeconds: 20
+maxDurationSeconds: 900
+voice:
+  $include: voice
