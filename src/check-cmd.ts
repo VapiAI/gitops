@@ -32,6 +32,7 @@ import {
 } from "./check-status.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import type { VapiConnection } from "./vapi-client.ts";
 
@@ -188,6 +189,7 @@ function connectionsLoad(
   const envKey = process.env.VAPI_PRIVATE_API_KEY ?? process.env.VAPI_TOKEN;
   const connections = new Map<string, OrgConnection>();
   for (const runOrg of runOrgs) {
+    orgLimiterOrExit(root, runOrg);
     const baseUrl = checks.find(
       (check) => check.runOrg === runOrg && check.baseUrl,
     )?.baseUrl;
@@ -277,6 +279,7 @@ function reportWrite(
 }
 
 async function liveRun(
+  root: string,
   parsed: CheckArgs,
   jobs: CheckJob[],
   connections: Map<string, OrgConnection>,
@@ -293,7 +296,13 @@ async function liveRun(
   const vapiClient = vapiClientGet("check");
   const vapi = (job: CheckJob): VapiConnection => {
     const connection = connections.get(job.check.runOrg)!;
-    return { token: connection.token, baseUrl: connection.baseUrl!, userAgent, vapiClient };
+    return {
+      limiter: orgLimiterOrExit(root, job.check.runOrg),
+      token: connection.token,
+      baseUrl: connection.baseUrl!,
+      userAgent,
+      vapiClient,
+    };
   };
   const post = async (status: CommitStatus) => {
     if (statusEnv) await commitStatusPost(statusEnv, status);
@@ -391,7 +400,7 @@ async function checksRun(
         mockNotices: [],
         durationMs: 0,
       }))
-    : await liveRun(parsed, jobs, connections, statusEnv);
+    : await liveRun(root, parsed, jobs, connections, statusEnv);
   reportWrite(root, parsed, results, skipped);
   return { code: exitCode(results), results };
 }

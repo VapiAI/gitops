@@ -1,12 +1,14 @@
 import {
   BASE_DIR,
   DRY_RUN,
+  MAX_GITOPS_RPM,
   VAPI_BASE_URL,
   VAPI_ENV,
   VAPI_TOKEN,
   VAPI_TOKEN_SOURCE,
 } from "./config.ts";
 import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import type { VapiResponse } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
@@ -16,6 +18,7 @@ import {
   shouldRetry,
   VapiApiError,
 } from "./vapi-client.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dry-run accounting
@@ -45,6 +48,7 @@ export function orgPinGuard(): Promise<void> {
         rootDir: BASE_DIR,
         org: VAPI_ENV,
         connection: {
+          limiter: orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
           token: VAPI_TOKEN ?? "",
           baseUrl: VAPI_BASE_URL,
           userAgent: userAgentGet(),
@@ -103,24 +107,8 @@ function formatBodyPreview(body: Record<string, unknown>): string {
 // existing importers and `instanceof` checks see one class.
 export { VapiApiError };
 
-// Minimum gap between writes, to stay under rate limits. Reads skip it: a pull
-// is a handful of list requests, and a 700ms gap before each one was most of a
-// pull's run time. A 429 on a read is still retried with backoff.
-const REQUEST_DELAY_MS = 700;
-
-let lastRequestTime = 0;
-
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function throttle(): Promise<void> {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
-  if (timeSinceLastRequest < REQUEST_DELAY_MS) {
-    await sleep(REQUEST_DELAY_MS - timeSinceLastRequest);
-  }
-  lastRequestTime = Date.now();
 }
 
 export async function vapiRequest<T = VapiResponse>(
@@ -146,8 +134,8 @@ export async function vapiRequest<T = VapiResponse>(
   }
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    await throttle();
-    const response = await fetch(url, {
+    const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+    const response = await limitedVapiFetch(limiter, url, {
       method,
       headers: {
         "Content-Type": "application/json",
@@ -193,7 +181,8 @@ export async function vapiGet<T = unknown>(endpoint: string): Promise<T> {
   const url = `${VAPI_BASE_URL}${endpoint}`;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(url, {
+    const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+    const response = await limitedVapiFetch(limiter, url, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,
@@ -243,8 +232,8 @@ export async function vapiDelete(endpoint: string): Promise<void> {
   }
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    await throttle();
-    const response = await fetch(url, {
+    const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+    const response = await limitedVapiFetch(limiter, url, {
       method: "DELETE",
       headers: {
         Authorization: `Bearer ${VAPI_TOKEN}`,

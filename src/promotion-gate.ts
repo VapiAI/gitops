@@ -9,6 +9,7 @@ import { checkJobsBuild } from "./check-build.ts";
 import type { CheckOutcome, CheckTargetResult } from "./check-run.ts";
 import { checkRunAll, MAX_CONCURRENT, MIN_START_MS } from "./check-run.ts";
 import type { OrgConnection } from "./org-connection.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import type { PromotionConfig } from "./promotion.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
@@ -151,6 +152,7 @@ export async function promotionGateRun(
     const results = await checkRunAll({
       jobs,
       connectionFor: () => ({
+        limiter: orgLimiterOrExit(rootDir, check.runOrg),
         token: connection.token,
         baseUrl: connection.baseUrl ?? DEFAULT_BASE_URL,
         // Gate runs are counted apart from PR check runs.

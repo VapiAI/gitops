@@ -13,8 +13,10 @@ import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, "..");
@@ -147,7 +149,13 @@ async function main(): Promise<void> {
     const outcome = await orgPinCheck({
       rootDir: BASE_DIR,
       org: args.env,
-      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
+      connection: {
+        limiter: orgLimiterOrExit(BASE_DIR, cfg.env),
+        token: cfg.token,
+        baseUrl: cfg.baseUrl,
+        userAgent: userAgentGet(),
+        vapiClient: vapiClientGet(),
+      },
       keySource: cfg.source,
     });
     if (outcome.kind === "unverified")
@@ -205,7 +213,9 @@ async function main(): Promise<void> {
     process.stdout.write(
       `   🔁 ${entry.resourceType}/${entry.resourceId} ... `,
     );
-    const response = await fetch(`${cfg.baseUrl}${endpoint}/${uuid}`, {
+    const limiter = orgLimiterOrExit(BASE_DIR, cfg.env);
+    const url = `${cfg.baseUrl}${endpoint}/${uuid}`;
+    const response = await limitedVapiFetch(limiter, url, {
       method: "PATCH",
       headers: {
         Authorization: `Bearer ${cfg.token}`,

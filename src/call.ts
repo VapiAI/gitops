@@ -5,8 +5,10 @@ import { createRequire } from "module";
 import { dirname, join, resolve } from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "url";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import type { Environment, StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -360,7 +362,8 @@ async function createCall(
 
   console.log(`📞 Creating call...`);
 
-  const response = await fetch(url, {
+  const limiter = orgLimiterOrExit(BASE_DIR, config.env);
+  const response = await limitedVapiFetch(limiter, url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

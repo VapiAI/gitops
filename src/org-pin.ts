@@ -162,9 +162,13 @@ export async function orgPinCheck(args: OrgPinCheckArgs): Promise<OrgPinOutcome>
           `   Stopped before reading or changing anything.\n${fix}`,
       );
     if (!folderExists) return { kind: "unpinned" };
+    const path = orgPinPath(rootDir, org);
+    const settings = existsSync(path)
+      ? JSON.parse(readFileSync(path, "utf8"))
+      : {};
     writeFileSync(
-      orgPinPath(rootDir, org),
-      `${JSON.stringify({ orgId: keyOrg.orgId }, null, 2)}\n`,
+      path,
+      `${JSON.stringify({ ...settings, orgId: keyOrg.orgId }, null, 2)}\n`,
     );
     return { kind: "pinned", orgId: keyOrg.orgId };
   }

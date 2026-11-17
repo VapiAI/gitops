@@ -4,12 +4,14 @@ import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { dirname, extname, join, relative } from "path";
 import { fileURLToPath } from "url";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // slug-utils is config-free (no config.ts side effects) — safe to import in
 // the launcher, which runs before any org/token is selected.
 import { isBackupCopyFile } from "./slug-utils.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -223,8 +225,11 @@ async function apiGet(
   token: string,
   baseUrl: string,
   endpoint: string,
+  org: string,
 ): Promise<unknown> {
-  const response = await fetch(`${baseUrl}${endpoint}`, {
+  const limiter = orgLimiterOrExit(BASE_DIR, org);
+  const url = `${baseUrl}${endpoint}`;
+  const response = await limitedVapiFetch(limiter, url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -497,7 +502,7 @@ export async function runInteractivePull(): Promise<void> {
         snapshots = await Promise.all(
           RESOURCE_TYPES.map(async (type): Promise<ResourceSnapshot> => {
             try {
-              const data = await apiGet(token, baseUrl, type.endpoint);
+              const data = await apiGet(token, baseUrl, type.endpoint, slug);
               return {
                 key: type.key,
                 label: type.label,

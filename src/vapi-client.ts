@@ -6,7 +6,11 @@
 // runner) uses this client instead. api.ts imports the error class and retry
 // policy from here, so both clients fail and retry the same way.
 
+import type { TokenBucket } from "./rate-limit.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
+
 export interface VapiConnection {
+  limiter: TokenBucket;
   token: string;
   baseUrl: string;
   userAgent: string;
@@ -20,6 +24,7 @@ export interface VapiConnection {
 export type VapiRetryPolicy = "transient" | "rate-limit-only" | "none";
 
 export interface VapiFetchOptions {
+  signal?: AbortSignal;
   retry?: VapiRetryPolicy;
   maxRetries?: number;
   initialDelayMs?: number;
@@ -83,8 +88,10 @@ export async function vapiFetchJson<T>(
   const sleep = options.sleep ?? sleepDefault;
 
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(`${connection.baseUrl}${endpoint}`, {
+    const url = `${connection.baseUrl}${endpoint}`;
+    const response = await limitedVapiFetch(connection.limiter, url, {
       method,
+      signal: options.signal,
       headers: {
         Authorization: `Bearer ${connection.token}`,
         "Content-Type": "application/json",

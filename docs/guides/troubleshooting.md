@@ -125,3 +125,17 @@ have. Build `.ts` resources from files in the repository instead.
 
 A folder under `resources/` that isn't a valid org name (lowercase letters,
 digits and hyphens) fails too. Rename it, or move it out of `resources/`.
+
+## 429: max GitOps RPM may be too high
+
+GitOps warns once per org per process on a Vapi 429. Lower `maxGitopsRpm`
+in `resources/<org>/.vapi-org.json`, or its `VAPI_MAX_GITOPS_RPM` override.
+This is a GitOps client limit, not a Vapi org limit. Other clients and other
+GitOps processes can also use the org's API quota.
+
+The warning links to your org-level API rate limit at
+https://dashboard.eu.vapi.ai/settings/organization when the org uses
+`api.eu.vapi.ai`, otherwise https://dashboard.vapi.ai/settings/organization.
+Existing retry/backoff remains in effect; the client ceiling does not
+guarantee that the server will never rate-limit you. See
+[configuration](configuration.md#max-gitops-rpm) for precedence and burst behavior.

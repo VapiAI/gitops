@@ -8,6 +8,7 @@ import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import {
   simRunItemTerminal,
   simRunVerdict,
@@ -237,6 +238,7 @@ const ITEM_PAGE_SIZE = 1000;
 
 function connectionFor(cfg: SimEnv): VapiConnection {
   return {
+    limiter: orgLimiterOrExit(BASE_DIR, cfg.env),
     token: cfg.token,
     baseUrl: cfg.baseUrl,
     userAgent: userAgentGet("sim"),
@@ -346,7 +348,7 @@ export async function simRunExecute(
     "POST",
     "/eval/simulation/run",
     body,
-    { retry: "rate-limit-only" },
+    { retry: "rate-limit-only", signal: options.signal },
   );
   const runId = created?.id;
   if (!runId) {

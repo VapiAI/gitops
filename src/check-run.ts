@@ -84,6 +84,8 @@ export function mockNoticesCollect(items: SimRunItem[]): string[] {
 }
 
 function errorReason(error: unknown): string {
+  if (error instanceof Error && error.name === "AbortError")
+    return "not started: interrupted";
   if (error instanceof VapiApiError && error.statusCode === 402)
     return `billing: the run org can't start simulations (402: ${error.apiMessage})`;
   return error instanceof Error ? error.message : String(error);

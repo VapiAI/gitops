@@ -24,6 +24,7 @@ import {
   orgPinCheck,
   orgPinRead,
 } from "../src/org-pin.ts";
+import { TokenBucket } from "../src/rate-limit.ts";
 import { VapiApiError } from "../src/vapi-client.ts";
 
 // Nothing used to tie resources/<org>/ to a Vapi org, so a key for the wrong
@@ -34,7 +35,13 @@ import { VapiApiError } from "../src/vapi-client.ts";
 delete process.env.VAPI_GITOPS_ORG_PIN;
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
-const CONNECTION = { token: "test-token-not-used", baseUrl: "http://stub", userAgent: "test", vapiClient: "test" };
+const CONNECTION = {
+  token: "test-token-not-used",
+  baseUrl: "http://stub",
+  userAgent: "test",
+  limiter: new TokenBucket(100),
+  vapiClient: "test",
+};
 const SOURCE = "the VAPI_PRIVATE_API_KEY_ACME environment variable";
 
 // A probe stub: endpoint (without the query) → response or error.

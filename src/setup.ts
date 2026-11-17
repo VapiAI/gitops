@@ -12,6 +12,11 @@ import {
   resolveOrgApiKey,
 } from "./api-key.ts";
 import { updateEnvConnection } from "./bindings.ts";
+import {
+  DEFAULT_MAX_GITOPS_RPM,
+  orgLimiterOrExit,
+  TokenBucket,
+} from "./rate-limit.ts";
 import { typeArgFor } from "./resource-type-args.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import {
@@ -22,6 +27,7 @@ import {
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -33,6 +39,13 @@ const VAPI_REGIONS: Record<string, string> = {
   us: "https://api.vapi.ai",
   eu: "https://api.eu.vapi.ai",
 };
+let requestOrg: string | undefined;
+const validationLimiter = new TokenBucket(
+  DEFAULT_MAX_GITOPS_RPM,
+  undefined,
+  undefined,
+  "setup (folder not selected)",
+);
 let vapiBaseUrl = VAPI_REGIONS.us!;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -94,7 +107,10 @@ const c = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function apiGet(token: string, endpoint: string): Promise<unknown> {
-  const response = await fetch(`${vapiBaseUrl}${endpoint}`, {
+  const limiter = requestOrg
+    ? orgLimiterOrExit(BASE_DIR, requestOrg)
+    : validationLimiter;
+  const response = await limitedVapiFetch(limiter, `${vapiBaseUrl}${endpoint}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -410,6 +426,8 @@ function fail(message: string): never {
 
 async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const { slug, region, resources } = options;
+  requestOrg = slug;
+  orgLimiterOrExit(BASE_DIR, slug);
   const envPath = join(BASE_DIR, `.env.${slug}`);
   const resourceDir = join(BASE_DIR, "resources", slug);
   const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
@@ -668,6 +686,8 @@ async function main(): Promise<void> {
   });
 
   const slug = slugify(rawSlug);
+  requestOrg = slug;
+  orgLimiterOrExit(BASE_DIR, slug);
 
   // Check if org already exists locally
   const resourceDir = join(BASE_DIR, "resources", slug);

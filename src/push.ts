@@ -16,6 +16,7 @@ import {
   removeExcludedKeys,
   STATE_FILE_PATH,
   STRICT_VALIDATION,
+  MAX_GITOPS_RPM,
   VAPI_BASE_URL,
   VAPI_ENV,
 } from "./config.ts";
@@ -93,6 +94,8 @@ import type {
   ResourceType,
   StateFile,
 } from "./types.ts";
+import { orgLimiter } from "./rate-limit.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error Formatting
@@ -351,7 +354,9 @@ async function upsertResourceWithStateRecovery(options: {
         const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
         if (resourceType) {
           if (platformPayloadForSnapshot === undefined) {
-            const platformResponse = await fetch(
+            const limiter = orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM);
+            const platformResponse = await limitedVapiFetch(
+              limiter,
               `${VAPI_BASE_URL}${updateEndpoint}`,
               {
                 method: "GET",

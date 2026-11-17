@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { TokenBucket } from "../src/rate-limit.ts";
 import { runSimulation, simRunItemsFetch } from "../src/sim.ts";
 
 // runSimulation against a local stub of the simulations API. Each stub
@@ -359,7 +360,13 @@ test("simRunItemsFetch: pages until totalItems and dedupes overlapping pages", a
     ],
     async (baseUrl) => {
       const items = await simRunItemsFetch(
-        { token: "t", baseUrl, userAgent: "test", vapiClient: "test" },
+        {
+          token: "t",
+          baseUrl,
+          userAgent: "test",
+          limiter: new TokenBucket(100),
+          vapiClient: "test",
+        },
         "run-1",
       );
       assert.equal(items.length, 1002);
