@@ -115,7 +115,7 @@ a key for every provider it uses.
 
 The state file maps a credential's name to its UUID and nothing else. Pull
 also records each key's provider in
-`resources/<org>/.vapi-credential-providers.json`:
+`state/<org>/credential-providers.json`:
 
 ```json
 {

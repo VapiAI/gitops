@@ -91,6 +91,7 @@ you which stack PR closes the row.**
 | 37  | Resource validation ran only at deploy time, after merge | A config `apply` refuses could merge and block deploys and promotion | #32        | RESOLVED 2026-10-03 (#76)                       |
 | 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
 | 39  | Engine state looked like temp files and sat in three places | Deleting the state file makes the next push duplicate every resource | None       | RESOLVED 2026-11-17 (#97)                |
+| 40  | Nothing checked a `credentialIds` list against the keys an org has saved | A list that hides the org's own key runs the call on Vapi's key, silently | None       | RESOLVED 2026-11-17 (#96)                |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2228,7 +2229,7 @@ itself customer-keys-only so the report is an error there.
 ### Status
 
 **RESOLVED 2026-11-17.** Pull writes
-`resources/<org>/.vapi-credential-providers.json` and warns when two
+`state/<org>/credential-providers.json` and warns when two
 credentials collide on one name. `validate` has the
 `credential-pin-hides-key` rule, an error in an org whose
 `.vapi-policy.yml` sets `customerKeysOnly: true`. The promotion plan warns
