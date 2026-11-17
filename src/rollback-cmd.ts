@@ -1,5 +1,6 @@
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import { limitedVapiFetch } from "./vapi-fetch.ts";
-import { orgLimiter } from "./rate-limit.ts";
+
 // CLI entry: `npm run rollback -- <org> --to <ISO-timestamp>` |
 //             `npm run rollback -- <org> --list`
 //
@@ -10,10 +11,10 @@ import { orgLimiter } from "./rate-limit.ts";
 // Self-contained (does not import config.ts) so it can run in isolation
 // without triggering the global CLI parser.
 
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
@@ -149,7 +150,13 @@ async function main(): Promise<void> {
     const outcome = await orgPinCheck({
       rootDir: BASE_DIR,
       org: args.env,
-      connection: { limiter: orgLimiter(BASE_DIR, cfg.env), token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
+      connection: {
+        limiter: orgLimiterOrExit(BASE_DIR, cfg.env),
+        token: cfg.token,
+        baseUrl: cfg.baseUrl,
+        userAgent: userAgentGet(),
+        vapiClient: vapiClientGet(),
+      },
       keySource: cfg.source,
     });
     if (outcome.kind === "unverified")
@@ -207,16 +214,20 @@ async function main(): Promise<void> {
     process.stdout.write(
       `   🔁 ${entry.resourceType}/${entry.resourceId} ... `,
     );
-    const response = await limitedVapiFetch(orgLimiter(BASE_DIR, cfg.env), `${cfg.baseUrl}${endpoint}/${uuid}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${cfg.token}`,
-        "Content-Type": "application/json",
-        "User-Agent": userAgentGet(),
-        "x-vapi-client": vapiClientGet(),
+    const response = await limitedVapiFetch(
+      orgLimiterOrExit(BASE_DIR, cfg.env),
+      `${cfg.baseUrl}${endpoint}/${uuid}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${cfg.token}`,
+          "Content-Type": "application/json",
+          "User-Agent": userAgentGet(),
+          "x-vapi-client": vapiClientGet(),
+        },
+        body: JSON.stringify(entry.payload.platform),
       },
-      body: JSON.stringify(entry.payload.platform),
-    });
+    );
     if (!response.ok) {
       const text = await response.text();
       console.log(`❌ ${response.status}`);

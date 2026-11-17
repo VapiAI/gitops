@@ -1,4 +1,3 @@
-import { TokenBucket } from "../src/rate-limit.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -9,12 +8,20 @@ import { MOCK_MARKER } from "../src/check-mocks.ts";
 import type { CheckRunBody } from "../src/check-payload.ts";
 import type { CheckRunArgs, CheckTargetResult } from "../src/check-run.ts";
 import { checkRunAll, MIN_START_MS } from "../src/check-run.ts";
+import { TokenBucket } from "../src/rate-limit.ts";
 
 // checkRunAll against a stateful stub of the simulations API. The target
 // assistant's name picks the stub's behaviour for that run.
 
 type Behaviour =
-  "pass" | "fail" | "skipped" | "hang" | "slow" | "unmocked" | "402" | "502";
+  | "pass"
+  | "fail"
+  | "skipped"
+  | "hang"
+  | "slow"
+  | "unmocked"
+  | "402"
+  | "502";
 
 interface StubRun {
   id: string;
@@ -230,7 +237,8 @@ function runArgs(
       token: "t",
       baseUrl: stub.baseUrl,
       userAgent: "vapi-gitops-check/test",
-      limiter: new TokenBucket(100), vapiClient: "gitops/test; command=check",
+      limiter: new TokenBucket(100),
+      vapiClient: "gitops/test; command=check",
     }),
     deadline: DEADLINE_FAR(),
     pollIntervalMs: 1,

@@ -10,8 +10,9 @@ The other commands are direct only.
 Every command that contacts Vapi observes the per-org
 [max GitOps RPM](configuration.md#max-gitops-rpm) client ceiling (default 100).
 Set committed `maxGitopsRpm` or override with `VAPI_MAX_GITOPS_RPM`; this does
-not change the Vapi org API rate limit. Setup asks for the org folder before
-validating the key so its client ceiling applies to validation too.
+not change the Vapi org API rate limit. Setup validates the key and region
+using the default client ceiling before asking for the org folder; subsequent
+requests use that org’s configured ceiling.
 
 | Command | Usage | What it does |
 | --- | --- | --- |

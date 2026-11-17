@@ -1,4 +1,4 @@
-import { orgLimiter } from "./rate-limit.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 // CLI entry: `npm run check -- <check>|--all [options]`
 //
 // Builds each check target's inline simulation-run payload from the files
@@ -22,7 +22,7 @@ import type { CheckReportSkipped } from "./check-report.ts";
 import { checkReportJson, checkReportMarkdown } from "./check-report.ts";
 import type { CheckTargetResult } from "./check-run.ts";
 import { checkRunAll, outcomeState } from "./check-run.ts";
-import { checkAffectedBy, changedFilesRead } from "./check-select.ts";
+import { changedFilesRead, checkAffectedBy } from "./check-select.ts";
 import type { CommitStatus, GitHubStatusEnv } from "./check-status.ts";
 import {
   AGGREGATE_CONTEXT,
@@ -189,7 +189,7 @@ function connectionsLoad(
   const envKey = process.env.VAPI_PRIVATE_API_KEY ?? process.env.VAPI_TOKEN;
   const connections = new Map<string, OrgConnection>();
   for (const runOrg of runOrgs) {
-    orgLimiter(root, runOrg);
+    orgLimiterOrExit(root, runOrg);
     const baseUrl = checks.find(
       (check) => check.runOrg === runOrg && check.baseUrl,
     )?.baseUrl;
@@ -296,7 +296,13 @@ async function liveRun(
   const vapiClient = vapiClientGet("check");
   const vapi = (job: CheckJob): VapiConnection => {
     const connection = connections.get(job.check.runOrg)!;
-    return { limiter: orgLimiter(root, job.check.runOrg), token: connection.token, baseUrl: connection.baseUrl!, userAgent, vapiClient };
+    return {
+      limiter: orgLimiterOrExit(root, job.check.runOrg),
+      token: connection.token,
+      baseUrl: connection.baseUrl!,
+      userAgent,
+      vapiClient,
+    };
   };
   const post = async (status: CommitStatus) => {
     if (statusEnv) await commitStatusPost(statusEnv, status);

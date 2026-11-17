@@ -1,14 +1,14 @@
-import { maxGitopsRpmRead } from "./rate-limit.ts";
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import type { Environment, ResourceType } from "./types.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { maxGitopsRpmRead } from "./rate-limit.ts";
 import {
   ignorePatternsRead,
   matchesIgnore as matchesIgnorePatterns,
 } from "./resource-parse.ts";
 import { resolveResourceTypes, VALID_TYPE_ARGS } from "./resource-type-args.ts";
+import type { Environment, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
@@ -52,7 +52,6 @@ function parseEnvironment(): Environment {
 
   return envArg;
 }
-
 
 function parseFlags(): {
   forceDelete: boolean;
@@ -248,7 +247,14 @@ export const {
 // .env.<org>. See resolveOrgApiKey.
 const SHELL_ENV = { ...process.env };
 
-export const MAX_GITOPS_RPM = maxGitopsRpmRead(BASE_DIR, VAPI_ENV, SHELL_ENV);
+export const MAX_GITOPS_RPM = (() => {
+  try {
+    return maxGitopsRpmRead(BASE_DIR, VAPI_ENV, SHELL_ENV);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+})();
 
 const ENV_FILE_VARS = loadEnvFile(VAPI_ENV, BASE_DIR);
 const API_KEY = resolveOrgApiKey(VAPI_ENV, SHELL_ENV, ENV_FILE_VARS);

@@ -1,22 +1,22 @@
-import { limitedVapiFetch } from "./vapi-fetch.ts";
-import { orgLimiter } from "./rate-limit.ts";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
+import { orgPinGuard } from "./api.ts";
 import {
   BASE_DIR,
-  MAX_GITOPS_RPM,
   loadIgnorePatterns,
+  MAX_GITOPS_RPM,
   matchesIgnore,
   VAPI_BASE_URL,
   VAPI_ENV,
   VAPI_TOKEN,
 } from "./config.ts";
-import { orgPinGuard } from "./api.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import { FOLDER_MAP } from "./resource-parse.ts";
 import { slugify } from "./slug-utils.ts";
 import { loadState } from "./state.ts";
 import type { ResourceType } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dangerous Sync - Delete everything NOT in state file
@@ -35,13 +35,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
   await orgPinGuard();
   await sleep(REQUEST_DELAY_MS);
-  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), `${VAPI_BASE_URL}${endpoint}`, {
-    headers: {
-      Authorization: `Bearer ${VAPI_TOKEN}`,
-      "User-Agent": userAgentGet(),
-      "x-vapi-client": vapiClientGet(),
+  const response = await limitedVapiFetch(
+    orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
+    `${VAPI_BASE_URL}${endpoint}`,
+    {
+      headers: {
+        Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
+      },
     },
-  });
+  );
   if (!response.ok) {
     throw new Error(`GET ${endpoint} failed: ${response.status}`);
   }
@@ -77,14 +81,18 @@ async function vapiGet<T>(endpoint: string, debug = false): Promise<T> {
 async function vapiDelete(endpoint: string): Promise<void> {
   await orgPinGuard();
   await sleep(REQUEST_DELAY_MS);
-  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM), `${VAPI_BASE_URL}${endpoint}`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${VAPI_TOKEN}`,
-      "User-Agent": userAgentGet(),
-      "x-vapi-client": vapiClientGet(),
+  const response = await limitedVapiFetch(
+    orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
+    `${VAPI_BASE_URL}${endpoint}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${VAPI_TOKEN}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
+      },
     },
-  });
+  );
   if (!response.ok && response.status !== 404) {
     throw new Error(`DELETE ${endpoint} failed: ${response.status}`);
   }

@@ -77,7 +77,9 @@ test("api.ts requests carry the command's User-Agent", async () => {
   delete process.env.GITHUB_ACTIONS;
   try {
     const { vapiGet } = await import("../src/api.ts");
-    const { userAgentGet, vapiClientGet } = await import("../src/user-agent.ts");
+    const { userAgentGet, vapiClientGet } = await import(
+      "../src/user-agent.ts"
+    );
     await vapiGet("/assistant");
     assert.deepEqual(seen, [userAgentGet()]);
     assert.match(seen[0] ?? "", /^vapi-gitops-apply\/[^ ]+$/);
@@ -88,8 +90,14 @@ test("api.ts requests carry the command's User-Agent", async () => {
     );
     await Promise.all(Array.from({ length: 9 }, () => vapiGet("/assistant")));
     assert.equal(times.length, 10);
-    assert.ok(times[9]! - times[0]! >= 850, "requests beyond the initial burst must wait for tokens");
-    assert.ok(times[9]! - times[8]! >= 140, "sustained requests must be spaced by the cap");
+    assert.ok(
+      times[9]! - times[0]! >= 850,
+      "requests beyond the initial burst must wait for tokens",
+    );
+    assert.ok(
+      times[9]! - times[8]! >= 140,
+      "sustained requests must be spaced by the cap",
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -100,9 +108,14 @@ test("every Vapi fetch uses the shared limiter and warning path", () => {
   for (const file of files.filter((f) => f.endsWith(".ts"))) {
     const source = readFileSync(join(SRC, file), "utf8");
     if (/\bfetch\s*\(/.test(source))
-      assert.ok(["vapi-fetch.ts", "check-status.ts"].includes(file), `${file} must use limitedVapiFetch`);
+      assert.ok(
+        ["vapi-fetch.ts", "check-status.ts"].includes(file),
+        `${file} must use limitedVapiFetch`,
+      );
   }
   const shared = readFileSync(join(SRC, "vapi-fetch.ts"), "utf8");
   assert.match(shared, /await limiter\.acquire\(\)/);
-  assert.ok(shared.indexOf("await limiter.acquire()") < shared.indexOf("await fetch("));
+  assert.ok(
+    shared.indexOf("await limiter.acquire()") < shared.indexOf("await fetch("),
+  );
 });

@@ -2085,3 +2085,4 @@ dependency check, as `check-payload.ts` already does.
 - **Current mitigation:** Committed `maxGitopsRpm` (default 100), overridden by `VAPI_MAX_GITOPS_RPM`; invalid settings stop requests. A 429 warns with the org's region-specific dashboard link.
 - **Possible fix:** Coordinate budgets across processes if deployments need a global client ceiling.
 - **Status:** Implemented; existing backoff and write gaps retained. This is a GitOps client limit, not a Vapi org limit.
+- **Review hardening:** Invalid limits exit cleanly without a stack trace. The setup wizard keeps key/region validation first, using the default client ceiling until the folder is selected.

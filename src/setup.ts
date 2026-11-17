@@ -1,5 +1,3 @@
-import { limitedVapiFetch } from "./vapi-fetch.ts";
-import { orgLimiter } from "./rate-limit.ts";
 import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
@@ -14,6 +12,11 @@ import {
   resolveOrgApiKey,
 } from "./api-key.ts";
 import { updateEnvConnection } from "./bindings.ts";
+import {
+  DEFAULT_MAX_GITOPS_RPM,
+  orgLimiterOrExit,
+  TokenBucket,
+} from "./rate-limit.ts";
 import { typeArgFor } from "./resource-type-args.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 import {
@@ -24,6 +27,7 @@ import {
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -35,7 +39,8 @@ const VAPI_REGIONS: Record<string, string> = {
   us: "https://api.vapi.ai",
   eu: "https://api.eu.vapi.ai",
 };
-let requestOrg = "setup";
+let requestOrg: string | undefined;
+const validationLimiter = new TokenBucket(DEFAULT_MAX_GITOPS_RPM);
 let vapiBaseUrl = VAPI_REGIONS.us!;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -97,14 +102,18 @@ const c = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function apiGet(token: string, endpoint: string): Promise<unknown> {
-  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, requestOrg), `${vapiBaseUrl}${endpoint}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": userAgentGet(),
-      "x-vapi-client": vapiClientGet(),
+  const response = await limitedVapiFetch(
+    requestOrg ? orgLimiterOrExit(BASE_DIR, requestOrg) : validationLimiter,
+    `${vapiBaseUrl}${endpoint}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
+      },
     },
-  });
+  );
 
   if (!response.ok) {
     const text = await response.text();
@@ -414,12 +423,14 @@ function fail(message: string): never {
 async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const { slug, region, resources } = options;
   requestOrg = slug;
-  orgLimiter(BASE_DIR, slug);
+  orgLimiterOrExit(BASE_DIR, slug);
   const envPath = join(BASE_DIR, `.env.${slug}`);
   const resourceDir = join(BASE_DIR, "resources", slug);
   const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
 
-  console.log(c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`));
+  console.log(
+    c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`),
+  );
 
   // Never clobber an org that already has local state. Re-running setup is
   // a destructive operation in the wizard (it deletes and re-pulls), and an
@@ -452,7 +463,9 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   // Setup writes the key into .env.<org> and downloads that org, so a key
   // that may belong to another org is a hard stop here, not a warning.
   if (resolved.warning) {
-    fail(`${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`);
+    fail(
+      `${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`,
+    );
   }
   const otherOrg = orgWithKey(slug, resolved.token);
   if (otherOrg) {
@@ -572,7 +585,9 @@ async function main(): Promise<void> {
   // so explain the non-interactive path instead.
   if (!process.stdin.isTTY) {
     console.error(
-      c.red("\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n"),
+      c.red(
+        "\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n",
+      ),
     );
     console.error(SETUP_USAGE);
     process.exit(1);
@@ -588,22 +603,8 @@ async function main(): Promise<void> {
   );
   console.log("");
 
-  // ── Step 1: Folder slug, API key + region ────────────────────────────────────────
+  // ── Step 1: API key + region ────────────────────────────────────────
 
-  const rawSlug = await input({
-    message: "Folder name for this org (e.g. my-org, my-org-prod)",
-    validate: (value) => {
-      const slug = slugify(value);
-      return slug && SLUG_RE.test(slug) ? true : "Must be lowercase alphanumeric with hyphens (e.g. my-org-name)";
-    },
-    transformer: (value) => {
-      const slug = slugify(value);
-      return slug && slug !== value ? `${value} → ${c.dim(slug)}` : value;
-    },
-  });
-  const slug = slugify(rawSlug);
-  requestOrg = slug;
-  orgLimiter(BASE_DIR, slug);
   let trimmedKey = "";
 
   // eslint-disable-next-line no-constant-condition
@@ -667,6 +668,25 @@ async function main(): Promise<void> {
 
     // "retry" or failed switch → loop back to password prompt
   }
+
+  // ── Step 2: Folder slug ───────────────────────────────────────────────
+
+  const rawSlug = await input({
+    message: "Folder name for this org (e.g. my-org, my-org-prod)",
+    validate: (value) => {
+      const slug = slugify(value);
+      return slug && SLUG_RE.test(slug)
+        ? true
+        : "Must be lowercase alphanumeric with hyphens (e.g. my-org-name)";
+    },
+    transformer: (value) => {
+      const slug = slugify(value);
+      return slug && slug !== value ? `${value} → ${c.dim(slug)}` : value;
+    },
+  });
+  const slug = slugify(rawSlug);
+  requestOrg = slug;
+  orgLimiterOrExit(BASE_DIR, slug);
 
   // Check if org already exists locally
   const resourceDir = join(BASE_DIR, "resources", slug);
@@ -815,12 +835,7 @@ async function main(): Promise<void> {
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(
-    slug,
-    downloadAll ? "all" : selectedIds,
-    trimmedKey,
-    vapiBaseUrl,
-  );
+  invokePull(slug, downloadAll ? "all" : selectedIds, trimmedKey, vapiBaseUrl);
 
   // ── Done ──────────────────────────────────────────────────────────────
 

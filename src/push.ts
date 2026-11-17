@@ -1,12 +1,9 @@
-import { limitedVapiFetch } from "./vapi-fetch.ts";
-import { orgLimiter } from "./rate-limit.ts";
 import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
-  MAX_GITOPS_RPM,
   ALLOW_NEW_FILES,
   APPLY_FILTER,
   BASE_DIR,
@@ -14,6 +11,7 @@ import {
   DRY_RUN,
   FORCE_DELETE,
   loadIgnorePatterns,
+  MAX_GITOPS_RPM,
   OVERWRITE_DRIFT,
   RESOURCES_DIR,
   removeExcludedKeys,
@@ -31,6 +29,7 @@ import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
 import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
+import { orgLimiter } from "./rate-limit.ts";
 import {
   formatRecanonicalizeReport,
   recanonicalizeStateKeys,
@@ -45,6 +44,7 @@ import {
   validateResources,
 } from "./validate.ts";
 import { validateReferences } from "./validate-refs.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 import {
   changedFieldPaths,
   versionActorResolve,
@@ -354,7 +354,8 @@ async function upsertResourceWithStateRecovery(options: {
         const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
         if (resourceType) {
           if (platformPayloadForSnapshot === undefined) {
-            const platformResponse = await limitedVapiFetch(orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
+            const platformResponse = await limitedVapiFetch(
+              orgLimiter(BASE_DIR, VAPI_ENV, MAX_GITOPS_RPM),
               `${VAPI_BASE_URL}${updateEndpoint}`,
               {
                 method: "GET",

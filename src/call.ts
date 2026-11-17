@@ -1,14 +1,14 @@
-import { limitedVapiFetch } from "./vapi-fetch.ts";
-import { orgLimiter } from "./rate-limit.ts";
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import { dirname, join, resolve } from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "url";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import type { Environment, StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -362,16 +362,20 @@ async function createCall(
 
   console.log(`📞 Creating call...`);
 
-  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, config.env), url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.token}`,
-      "User-Agent": userAgentGet(),
-      "x-vapi-client": vapiClientGet(),
+  const response = await limitedVapiFetch(
+    orgLimiterOrExit(BASE_DIR, config.env),
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.token}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+  );
 
   if (!response.ok) {
     const errorText = await response.text();

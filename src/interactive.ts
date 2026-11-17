@@ -1,17 +1,17 @@
-import { limitedVapiFetch } from "./vapi-fetch.ts";
-import { orgLimiter } from "./rate-limit.ts";
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { dirname, extname, join, relative } from "path";
 import { fileURLToPath } from "url";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // slug-utils is config-free (no config.ts side effects) — safe to import in
 // the launcher, which runs before any org/token is selected.
 import { isBackupCopyFile } from "./slug-utils.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
+import { limitedVapiFetch } from "./vapi-fetch.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -227,14 +227,18 @@ async function apiGet(
   endpoint: string,
   org: string,
 ): Promise<unknown> {
-  const response = await limitedVapiFetch(orgLimiter(BASE_DIR, org), `${baseUrl}${endpoint}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": userAgentGet(),
-      "x-vapi-client": vapiClientGet(),
+  const response = await limitedVapiFetch(
+    orgLimiterOrExit(BASE_DIR, org),
+    `${baseUrl}${endpoint}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "User-Agent": userAgentGet(),
+        "x-vapi-client": vapiClientGet(),
+      },
     },
-  });
+  );
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`API GET ${endpoint} failed (${response.status}): ${text}`);

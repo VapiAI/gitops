@@ -1,12 +1,13 @@
-import { orgLimiter } from "./rate-limit.ts";
+import { orgLimiterOrExit } from "./rate-limit.ts";
+
 // The promotion check gate: `orgs.<slug>.check: <name>` in promotion.yml
 // names a vapi-checks.yml check that must pass in that org before any
 // transition promotes out of it. The gate runs the same check as the PR
 // workflow, built from the source org's files at the promoted commit.
 
+import { checkJobsBuild } from "./check-build.ts";
 import type { CheckDefinition } from "./check-config.ts";
 import { CHECKS_CONFIG_FILE, checksConfigLoad } from "./check-config.ts";
-import { checkJobsBuild } from "./check-build.ts";
 import type { CheckOutcome, CheckTargetResult } from "./check-run.ts";
 import { checkRunAll, MAX_CONCURRENT, MIN_START_MS } from "./check-run.ts";
 import type { OrgConnection } from "./org-connection.ts";
@@ -152,7 +153,7 @@ export async function promotionGateRun(
     const results = await checkRunAll({
       jobs,
       connectionFor: () => ({
-        limiter: orgLimiter(rootDir, check.runOrg),
+        limiter: orgLimiterOrExit(rootDir, check.runOrg),
         token: connection.token,
         baseUrl: connection.baseUrl ?? DEFAULT_BASE_URL,
         // Gate runs are counted apart from PR check runs.

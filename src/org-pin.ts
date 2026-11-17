@@ -18,8 +18,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { orgApiKeyVar } from "./api-key.ts";
 import {
-  type VapiConnection,
   VapiApiError,
+  type VapiConnection,
   vapiFetchJson,
 } from "./vapi-client.ts";
 
@@ -138,7 +138,9 @@ export interface OrgPinCheckArgs {
  * key belongs to another org, or to an empty org while the folder is pinned
  * to one that had resources.
  */
-export async function orgPinCheck(args: OrgPinCheckArgs): Promise<OrgPinOutcome> {
+export async function orgPinCheck(
+  args: OrgPinCheckArgs,
+): Promise<OrgPinOutcome> {
   const { rootDir, org, connection, keySource } = args;
   // Set only by tests/no-vapi-api.ts: tests that stub fetch count requests.
   if (process.env.VAPI_GITOPS_ORG_PIN === "off") return { kind: "unpinned" };
@@ -163,7 +165,9 @@ export async function orgPinCheck(args: OrgPinCheckArgs): Promise<OrgPinOutcome>
       );
     if (!folderExists) return { kind: "unpinned" };
     const path = orgPinPath(rootDir, org);
-    const settings = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+    const settings = existsSync(path)
+      ? JSON.parse(readFileSync(path, "utf8"))
+      : {};
     writeFileSync(
       path,
       `${JSON.stringify({ ...settings, orgId: keyOrg.orgId }, null, 2)}\n`,
