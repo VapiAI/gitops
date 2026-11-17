@@ -90,6 +90,7 @@ you which stack PR closes the row.**
 | 36  | `cleanup` deletes resources excluded by `.vapi-ignore`   | A destructive cleanup can delete resources another team owns | None       | RESOLVED 2026-10-03                             |
 | 37  | Resource validation ran only at deploy time, after merge | A config `apply` refuses could merge and block deploys and promotion | #32        | RESOLVED 2026-10-03 (#76)                       |
 | 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
+| 39  | Engine state looked like temp files and sat in three places | Deleting the state file makes the next push duplicate every resource | None       | RESOLVED 2026-11-17 (#PR_NUMBER)                |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2059,6 +2060,67 @@ dependency check, as `check-payload.ts` already does.
 ### Status
 
 **Open.**
+
+---
+
+## 39. Engine state looked like temp files and sat in three places
+
+**[RESOLVED 2026-11-17] (#PR_NUMBER)**
+
+**Discovered:** 2026-11-17, from a user asking which of the generated
+dot-files were safe to delete.
+
+### Problem
+
+Everything the engine generates and tracks sat under dot-names in three
+places: `.vapi-state.<org>.json`, `.vapi-state.<org>.snapshots/` and
+`.vapi-state-hash/` at the repository root, and `.vapi-org.json` inside
+`resources/<org>/` beside the hand-written `.vapi-ignore`. Nothing told a
+person which of those files they own and which the engine owns, and the root
+files read as leftovers.
+
+### Current behavior before the fix (Verified)
+
+- `src/config.ts` built `.vapi-state.<org>.json` at the root, and eleven
+  other modules rebuilt the same path inline.
+- `src/org-pin.ts` wrote `resources/<org>/.vapi-org.json`.
+- `src/hash-store.ts` and `src/snapshot.ts` each built their own root folder.
+
+### Risk
+
+Deleting the state file is silent until the next push, which then creates
+every resource again as a duplicate. Deleting the pin removes the check that
+stops a key for another org.
+
+### Current mitigation
+
+None needed once the fix below lands.
+
+### Possible fix (landed)
+
+One folder, `state/<org>/`, holds the state file (`state.json`), the org pin
+(`org.json`) and, under a gitignored `local/`, this machine's baselines and
+snapshots. `state/README.md` says the engine writes it and what breaks when a
+file goes missing. `resources/<org>/` now holds hand-written files only.
+`src/state-paths.ts` is the one module that knows both layouts.
+
+An older repository keeps working: every command reads the old places, and
+the next `pull`, `push` or `apply` on a person's machine moves the org with
+one rename per file and prints one line. The move is held back in a CI run
+and while a workflow stages `.vapi-state.*.json` but not `state/`, because
+either would commit the old file's removal without the new file. The
+promotion workflow stages both places. `tests/state-layout.test.ts` and
+`tests/promotion-workflow-commit.test.ts` cover each path.
+
+Two things stay where they were, on purpose. Dashboard backups
+(`<name>.<timestamp>.bkp.md`) stay beside the resource they shadow: a person
+opens them next to the file to merge by hand, nothing reads them back, and
+they are gitignored. `tmp/promotion-applied.txt` stays in `tmp/`: it is one
+run's hand-off to the workflow, and an older workflow reads it there.
+
+### Status
+
+**RESOLVED 2026-11-17.**
 
 ---
 

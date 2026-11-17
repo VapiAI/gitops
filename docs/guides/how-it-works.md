@@ -5,16 +5,24 @@
 Resources are scoped by organization, with names you choose (not fixed `dev`/`stg`/`prod`). Each org gets:
 
 - `.env.<org>` — private API key and base URL
-- `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
-- `.vapi-state-hash/<org>/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
-- `resources/<org>/` — all resource files
+- `resources/<org>/` — all resource files. Hand-written: this is what you edit
+- `state/<org>/` — what the engine generates and tracks. Never edit or delete it by hand ([state/README.md](../../state/README.md))
+  - `state.json` — resource name ↔ UUID mappings (nothing else — committed)
+  - `org.json` — the Vapi org the folder is pinned to (committed)
+  - `local/baselines/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
+  - `local/snapshots/` — pre-deploy snapshots for `npm run rollback` (per-developer, gitignored)
 
 ```
 vapi-gitops/
 ├── .env.my-org                    # Private API key for my-org
 ├── .env.production                # Private API key for production
-├── .vapi-state.my-org.json        # State file for my-org
-├── .vapi-state.production.json    # State file for production
+├── state/                         # Written by the engine; don't edit by hand
+│   ├── my-org/
+│   │   ├── state.json             # Name → UUID mappings for my-org
+│   │   ├── org.json               # The Vapi org my-org is pinned to
+│   │   └── local/                 # This machine only (gitignored)
+│   └── production/
+│       └── (same structure)
 ├── resources/
 │   ├── my-org/                    # Dev/test org resources
 │   │   ├── assistants/
@@ -48,7 +56,7 @@ files
 
 Conflict handling is **per resource, never umbrella**: apply defaults to `--resolve=defer`, so the pull stage preserves local files and the drift baselines for genuinely conflicted resources, and the push stage then asks one interactive question per conflicted resource (push mine / keep dashboard / save a `.bkp` copy for manual merge). Clean and one-sided changes flow silently in their obvious direction. The full scenario matrix lives in `docs/learnings/sync-behavior.md`. Explicit `--resolve=ours|theirs|fail` keep non-interactive (CI) semantics.
 
-Before updating a resource, push GETs its current dashboard payload, hashes it, and compares against the stored baseline (`.vapi-state-hash/<org>/<uuid>`):
+Before updating a resource, push GETs its current dashboard payload, hashes it, and compares against the stored baseline (`state/<org>/local/baselines/<uuid>`):
 
 - **Hashes match** → your local edit is the natural next step in the change chain → pushed silently, and the baseline is refreshed from the PATCH **response** (what the platform actually stored).
 - **Hashes differ** → someone else published changes since your last sync. In a terminal, push asks **for that resource only**: ① push my local version (take ownership) ② keep the dashboard version (skip, local untouched) ③ save the dashboard version as `<name>.<TIMESTAMP>.bkp.<ext>` beside your file and skip, for a manual merge. In CI / piped runs the resource is blocked instead (use `--overwrite` to push unconditionally).
@@ -168,7 +176,7 @@ requests themselves; there is no separate telemetry.
 | Path | What it is |
 | --- | --- |
 | `resources/<org>/` | Your resources, one folder per org |
-| `.vapi-state.<org>.json` | Name → UUID mappings per org (committed) |
+| `state/<org>/` | What the engine generates and tracks: name → UUID mappings and the org pin (committed), plus `local/` (gitignored). Not edited by hand |
 | `.env.<org>` | API key and generated binding IDs (gitignored) |
 | `promotion.yml`, `vapi-checks.yml` | Promotion pipelines and PR checks (copy from the `*.example.yml` files) |
 | `resources/<org>/.vapi-ignore` | Platform resources this repo shouldn't manage (see `resources/.vapi-ignore.example`) |

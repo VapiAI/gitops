@@ -14,7 +14,7 @@ The other commands are direct only.
 | `npm run apply` | `npm run apply -- <org> [types or paths]` | **The default deploy:** pull, merge, then push. See [workflows](workflows.md). |
 | `npm run pull` | `npm run pull -- <org> [--force] [--bootstrap]` | Sync platform changes down; never overwrites local edits unless `--force`. |
 | `npm run push` | `npm run push -- <org> [--dry-run] [--strict]` | Push without pulling first. Prefer `apply`. `--strict` aborts before any API call if validation finds an error. |
-| `npm run rollback` | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore a pre-deploy snapshot from `.vapi-state.<org>.snapshots/`. |
+| `npm run rollback` | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore a pre-deploy snapshot from `state/<org>/local/snapshots/`. |
 | `npm run cleanup` | `npm run cleanup -- <org> [--force --confirm <org>]` | List platform resources with no file; delete them only with both flags. |
 | `npm run audit` | `npm run audit -- <org> [--type <type>]` | Report drift between files, state and the platform. Exits 1 on any finding, so it can run in CI. |
 | `npm run call` | `npm run call -- <org> -a <assistant>` or `-s <squad>` | Talk to an assistant or squad from your terminal. |
@@ -109,14 +109,47 @@ The test-call CLI cleans its terminal output for the developer loop:
 
 ## Upgrading from an older version
 
-Repositories created before the state-file format changed need a one-time
-migration. `pull`, `push` and `apply` refuse to run until it's done:
+`npm run migrate` brings an older repository up to date. It needs no org and
+no API key, and it's safe to run more than once:
 
 ```bash
 npm run migrate
+git add -A -- state ':(glob).vapi-state.*.json' resources
+git commit -m "chore: move engine state into state/"
 ```
 
-It rewrites every org's `.vapi-state.<org>.json` to the current
-`{ "name": { "uuid": … } }` format and seeds your local
-`.vapi-state-hash/` drift baseline from the old file. It's safe to run more
-than once. Commit the rewritten state files.
+It does two things.
+
+**Moves engine files into `state/<org>/`.** They used to sit under dot-names
+in three places. Nothing changes inside the files.
+
+| Before | Now |
+| --- | --- |
+| `.vapi-state.<org>.json` | `state/<org>/state.json` |
+| `resources/<org>/.vapi-org.json` | `state/<org>/org.json` |
+| `.vapi-state-hash/<org>/` | `state/<org>/local/baselines/` |
+| `.vapi-state.<org>.snapshots/` | `state/<org>/local/snapshots/` |
+
+You don't have to run it for this: the engine keeps reading the old places,
+and the next `pull`, `push` or `apply` on your machine moves that org and
+says so in one line. Either way, commit the removal of the old file together
+with the new folder.
+
+The move is held back in two cases, and the command tells you which:
+
+- **In a CI run.** State stays where it is and is updated in place. Only a
+  workflow that commits both places can record a move, so run
+  `npm run migrate` on your machine and commit the result.
+- **When a workflow under `.github/workflows/` stages `.vapi-state.*.json` but
+  not `state/`.** That workflow would commit the old file's removal without
+  the new one. Take upstream's `promotion.yml` workflow, or add
+  `git add -A -- state` to your own commit step, then run `npm run migrate`.
+
+If both the old and the new file exist for an org and they disagree, every
+writing command stops before it changes anything and names the two files.
+
+**Rewrites a legacy-format state file.** Repositories created before the
+state-file format changed carry per-resource hashes in the state file, and
+`pull`, `push` and `apply` refuse to run until they're gone. `migrate`
+rewrites each file to the current `{ "name": { "uuid": … } }` format and
+seeds this machine's drift baselines from the old file.
