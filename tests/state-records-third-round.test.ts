@@ -24,7 +24,8 @@ import { fileURLToPath } from "node:url";
 // engine keeps files of its own in that folder, and none of them is a
 // person's edit:
 //
-//   resources/<org>/.vapi-org.json    shown as deleted between migrate and its commit
+//   resources/<org>/.vapi-org.json                     shown as deleted between migrate and its commit
+//   resources/<org>/.vapi-credential-providers.json    written by every pull
 //
 // If pull counted one as a local edit, the keep rule would be off and pull
 // would overwrite the committed change with the platform's copy.
@@ -178,6 +179,18 @@ test("older layout: an org pin the engine wrote, not committed yet, is not a loc
   // shows it as untracked.
   const kept = await pullKeepsMerged(freshClone("root"), (root) =>
     put(root, PIN, '{\n  "orgId": "org-test"\n}\n'),
+  );
+  assert.equal(kept, true, "pull overwrote the merged change");
+});
+
+test("older layout: a credential providers record the engine wrote, not committed yet, is not a local edit", async () => {
+  // The first pull after upgrading leaves this file untracked.
+  const kept = await pullKeepsMerged(freshClone("root"), (root) =>
+    put(
+      root,
+      "resources/dev/.vapi-credential-providers.json",
+      '{\n  "crm-api": {\n    "provider": "webhook"\n  }\n}\n',
+    ),
   );
   assert.equal(kept, true, "pull overwrote the merged change");
 });
