@@ -247,6 +247,12 @@ with your other changes, as you do the state file. Don't edit it by hand. If
 it is missing, every resource that uses a block is listed until it is pushed
 once.
 
+In a repository whose state is still in the layout from before `state/`, the
+record is `resources/<org>/.vapi-blocks.json` instead, which the commit step
+that repository already has stages with the folder. `npm run migrate` moves
+it with the rest: see
+[Upgrading from an older version](commands.md#upgrading-from-an-older-version).
+
 ### With promotion
 
 When orgs are linked by a [promotion](promotion.md) pipeline (for example

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -16,6 +16,8 @@ import {
   parseResourceDataFromFile,
   resourceFileUsesBlocks,
 } from "../src/resource-parse.ts";
+import { migrateAll } from "../src/migrate-hash-store.ts";
+import { commitStepAcknowledge } from "../src/state-paths.ts";
 import { filesWrite, repoCreate } from "./blocks-helpers.ts";
 
 // Blocks are looked up from an org's folder, so every test builds a small
@@ -469,8 +471,49 @@ test("resourceFileUsesBlocks reads the file as written", () => {
   );
 });
 
+test("the blocks record is written where the org's state is committed, and migrate moves it", async () => {
+  const current = new Map<string, Record<string, string>>([
+    ["assistants/triage", { "blocks/red-flags.md": "aaaa" }],
+  ]);
+  const entry = { "assistants/triage": { "blocks/red-flags.md": "aaaa" } };
+  withRepo({ "state/acme/state.json": "{}\n" }, (root) => {
+    blocksRecordUpdate(root, "acme", current, ["assistants/triage"]);
+    assert.equal(
+      blocksRecordPath(root, "acme"),
+      join(root, "state/acme/blocks.json"),
+    );
+    assert.equal(existsSync(join(root, "resources/acme")), false);
+    assert.deepEqual(blocksRecordRead(root, "acme"), entry);
+  });
+  // The layout from before state/: beside the old org pin, which a commit
+  // step written for that layout stages. Nothing goes under state/.
+  withRepo({ ".vapi-state.acme.json": "{}\n" }, (root) => {
+    blocksRecordUpdate(root, "acme", current, ["assistants/triage"]);
+    assert.equal(
+      blocksRecordPath(root, "acme"),
+      join(root, "resources/acme/.vapi-blocks.json"),
+    );
+    assert.equal(existsSync(join(root, "state")), false);
+    assert.deepEqual(blocksRecordRead(root, "acme"), entry);
+  });
+  const root = repoCreate({ ".vapi-state.acme.json": "{}\n" });
+  try {
+    blocksRecordUpdate(root, "acme", current, ["assistants/triage"]);
+    commitStepAcknowledge(root);
+    await migrateAll(root);
+    assert.equal(existsSync(join(root, "resources/acme/.vapi-blocks.json")), false);
+    assert.equal(
+      blocksRecordPath(root, "acme"),
+      join(root, "state/acme/blocks.json"),
+    );
+    assert.deepEqual(blocksRecordRead(root, "acme"), entry);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the blocks record marks only pushed resources as in sync", () => {
-  withRepo({ "resources/acme/.keep": "" }, (root) => {
+  withRepo({ "resources/acme/.keep": "", "state/acme/state.json": "{}\n" }, (root) => {
     const current = new Map<string, Record<string, string>>([
       ["assistants/triage", { "blocks/red-flags.md": "aaaa" }],
       ["assistants/pharmacy", { "blocks/red-flags.md": "aaaa" }],

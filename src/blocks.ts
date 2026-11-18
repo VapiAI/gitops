@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml } from "yaml";
-import { stateOrgDir } from "./state-paths.ts";
+import { stateRecordPath } from "./state-paths.ts";
 
 export const TEMPLATES_FOLDER = "templates";
 export const INCLUDE_KEY = "$include";
@@ -294,14 +294,15 @@ export function blocksExpand<T>(
 //
 // state/<org>/blocks.json records, for each resource that uses
 // blocks, the block content it was last pushed with. Push writes it and it is
-// committed. A resource whose blocks no longer match its entry still runs the
+// committed. While the org's state is in the layout from before state/, the
+// file is resources/<org>/.vapi-blocks.json, which an older commit step stages. A resource whose blocks no longer match its entry still runs the
 // old block text on the platform: that is what "npm run sync-blocks" lists
 // and what promotion adds to its plan. The file text of such a resource has
 // not changed, so nothing else in git shows that it needs a push.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function blocksRecordPath(rootDir: string, org: string): string {
-  return join(stateOrgDir(rootDir, org), "blocks.json");
+  return stateRecordPath(rootDir, org, "blocks");
 }
 
 // "<type folder>/<resource id>" → the blocks it was pushed with.
