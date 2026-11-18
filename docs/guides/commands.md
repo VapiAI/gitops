@@ -261,6 +261,13 @@ git add state/commit-step.json
   baselines yet, the first `pull` after upgrading keeps every local file, and
   an edit made in the dashboard comes down on the next `pull`. Nothing is
   lost.
+- **`credential-pin-unchecked`** from `validate`, once for each org that has a
+  `credentialIds` list, until that org's credential providers record is
+  committed. It is a warning and changes no exit code. Run
+  `npm run pull -- <org> --bootstrap` and commit the file it writes:
+  `state/<org>/credential-providers.json`, or
+  `resources/<org>/.vapi-credential-providers.json` while the org's state is
+  in the older layout. See [credential pins](credential-pins.md).
 
 After `npm run migrate`:
 
