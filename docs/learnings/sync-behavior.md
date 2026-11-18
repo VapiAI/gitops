@@ -194,7 +194,7 @@ sweep, which consume the resources today without consuming the verdict.
 
 | Command | Behavior |
 |---|---|
-| `pull` | direction unknown (`no-baseline`) → falls back to git/mtime modified-detection: modified files ✏️ preserved; unmodified files 📝 rewritten — and the baseline is seeded. **Run a plain pull first on any fresh clone.** |
+| `pull` | direction unknown (`no-baseline`) → falls back to git modified-detection, then to the last-save rule: a file is ✏️ preserved unless the engine has saved this org's state on this machine since the file was written. A fresh clone has no save yet, so its first pull preserves every file; after that, an untouched file is 📝 rewritten and its baseline seeded. **Run a plain pull first on any fresh clone.** |
 | `push` (without pulling first) | drift check skipped with a warning, PATCH proceeds, baseline seeded from the response. Risk window: this one push cannot detect dashboard drift. |
 | `audit` | `no-baseline` info findings (do not block CI) |
 

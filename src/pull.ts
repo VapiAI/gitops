@@ -47,7 +47,7 @@ import {
   stateWritePrepare,
   upsertState,
 } from "./state.ts";
-import { stateFileRead } from "./state-paths.ts";
+import { stateSavedStampPath } from "./state-paths.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
 // Map resource types to their API endpoints
@@ -959,7 +959,11 @@ export async function pullResourceType(
       }
     }
 
-    // Skip locally edited files even without git (mtime-based detection).
+    // With no baseline and nothing changed in git, keep the file unless this
+    // machine's engine has saved state since the file was last written. That
+    // moment comes from the engine's own stamp, never from the state file's
+    // timestamp: after a clone or a checkout that is only the order git wrote
+    // the files in. A fresh clone has no stamp, so it keeps every file.
     if (
       !skipLegacyPreserveChecks &&
       !bootstrap &&
@@ -974,19 +978,15 @@ export async function pullResourceType(
         join(dir, `${resourceId}.yaml`),
       ].find((p) => existsSync(p));
       if (localFile) {
-        const stateFilePath = stateFileRead(BASE_DIR, VAPI_ENV);
-        if (existsSync(stateFilePath)) {
-          const localMtime = statSync(localFile).mtimeMs;
-          const stateMtime = statSync(stateFilePath).mtimeMs;
-          if (localMtime > stateMtime) {
-            console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-            upsertState(newStateSection, resourceId, {
-              uuid: resource.id,
-              origin: "pulled",
-            });
-            skipped++;
-            continue;
-          }
+        const stamp = stateSavedStampPath(BASE_DIR, VAPI_ENV);
+        if (
+          !existsSync(stamp) ||
+          statSync(localFile).mtimeMs > statSync(stamp).mtimeMs
+        ) {
+          console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
+          upsertState(newStateSection, resourceId, { uuid: resource.id, origin: "pulled" });
+          skipped++;
+          continue;
         }
       }
     }

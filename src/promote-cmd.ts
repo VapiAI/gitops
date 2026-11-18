@@ -4,7 +4,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CheckDefinition } from "./check-config.ts";
 import type { OrgConnection } from "./org-connection.ts";
-import { stateFileRead } from "./state-paths.ts";
+import {
+  OLD_LAYOUT_NOTICE,
+  stateFileRead,
+  stateLayout,
+  stateNoticesPrint,
+} from "./state-paths.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
 import type { PromotionGateResult } from "./promotion-gate.ts";
@@ -328,6 +333,13 @@ export async function promotionCommandRun(
     const file = resolve(ROOT_DIR, APPLIED_PATHS_FILE);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, "");
+    // Said once here, so the pull and push of each org don't repeat it.
+    const orgs = transitionsBuild(config, parsed).flatMap((transition) => [
+      transition.source,
+      transition.target,
+    ]);
+    if (orgs.some((org) => stateLayout(ROOT_DIR, org) === "root"))
+      stateNoticesPrint([OLD_LAYOUT_NOTICE]);
   }
   // Applying a deletion removes the intermediate org's state entry. Carry the
   // reviewed authorization forward so the same deletion can reach later orgs.

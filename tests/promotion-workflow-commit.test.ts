@@ -12,7 +12,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { StateLayoutError, stateLayoutPrepare } from "../src/state-paths.ts";
+import { migrateAll } from "../src/migrate-hash-store.ts";
+import {
+  OLD_LAYOUT_NOTICE,
+  StateLayoutError,
+  stateLayoutPrepare,
+} from "../src/state-paths.ts";
 
 // Runs the promotion workflow's real "Commit reconciled files and UUID
 // state" step (read from .github/workflows/promotion.yml, run with bash -e)
@@ -75,8 +80,9 @@ function repoReset(
     `version: 1\norgs:\n${orgs.map((org) => `  ${org}: {}`).join("\n")}\npipelines:\n${pipelineYaml}\n`,
   );
   for (const org of orgs) write(`state/${org}/state.json`, "{}\n");
-  // The repository carries the workflow whose commit step runs here: the
-  // engine moves state only under a commit step it can see stages state/.
+  // The repository carries the workflow whose commit step runs here:
+  // `npm run migrate` moves state only under a commit step it can see
+  // stages state/.
   write(
     ".github/workflows/promotion.yml",
     readFileSync(join(REPO, ".github/workflows/promotion.yml"), "utf8"),
@@ -284,8 +290,8 @@ test("a repository that has not moved its state still commits the root state fil
 test("a move is committed whole: the old file's removal and the new file in one commit", async () => {
   repoResetOldLayout();
   const base = git(ORIGIN, "rev-parse", "main").trim();
-  // What `npm run migrate` does before the promotion in the same run.
-  for (const org of ["a", "b"]) stateLayoutPrepare(CLONE, org, {});
+  // `npm run migrate`, then a promotion, committed by the same run.
+  await migrateAll(CLONE);
   const failure = await promote();
   const step = commitStep("success");
   assert.deepEqual(
@@ -311,7 +317,7 @@ test("a move is committed whole: the old file's removal and the new file in one 
 
 test("a failed promotion after a move still commits the move whole", async () => {
   repoResetOldLayout();
-  for (const org of ["a", "b"]) stateLayoutPrepare(CLONE, org, {});
+  await migrateAll(CLONE);
   const failure = await promote(1);
   const step = commitStep("failure");
   assert.deepEqual(
@@ -403,8 +409,10 @@ test("under a commit step the engine can't read, state stays at the root and kee
   git(CLONE, "add", "-A");
   git(CLONE, "commit", "-qm", "ci: our own commit step");
   git(CLONE, "push", "-q", "origin", "main");
-  // A command on a person's machine, then the run in CI.
+  // A command on a person's machine, `npm run migrate` without the flag,
+  // then the run in CI.
   const local = ["a", "b"].flatMap((org) => stateLayoutPrepare(CLONE, org, {}));
+  const migrated = (await migrateAll(CLONE)).orgs.flatMap((org) => org.moved);
   const run = ["a", "b"].flatMap((org) =>
     stateLayoutPrepare(CLONE, org, { CI: "true" }),
   );
@@ -420,8 +428,9 @@ test("under a commit step the engine can't read, state stays at the root and kee
   );
   assert.deepEqual(
     {
-      held: [...local, ...run].every((line) => /stays where it is/.test(line)),
+      held: [...local, ...run].every((line) => line === OLD_LAYOUT_NOTICE),
       notices: [local.length, run.length],
+      migrated,
       failure,
       code: step.status,
       b: originFile(OLD_STATE("b")),
@@ -432,6 +441,7 @@ test("under a commit step the engine can't read, state stays at the root and kee
     {
       held: true,
       notices: [2, 2],
+      migrated: [],
       failure: undefined,
       code: 0,
       b: '{"assistants":{"intake":{"uuid":"uuid-b"}}}\n',

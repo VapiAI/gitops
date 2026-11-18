@@ -23,7 +23,7 @@ import {
   orgPinCheck,
   orgPinRead,
 } from "../src/org-pin.ts";
-import { orgPinFilePath } from "../src/state-paths.ts";
+import { orgPinFilePath, stateFilePath } from "../src/state-paths.ts";
 import { VapiApiError } from "../src/vapi-client.ts";
 
 // Nothing used to tie resources/<org>/ to a Vapi org, so a key for the wrong
@@ -104,6 +104,9 @@ test("keyOrgFetch stops at a rejected key", async () => {
 test("orgPinCheck pins an unpinned folder to the key's org", async () => {
   const root = orgDir({ folder: true });
   try {
+    // The org's state is in state/acme/, so its pin goes beside it.
+    mkdirSync(join(root, "state", "acme"), { recursive: true });
+    writeFileSync(stateFilePath(root, "acme"), "{}\n");
     const { probeFetch } = probes({ "/assistant": [{ orgId: "org-a" }] });
     const outcome = await orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch });
     assert.deepEqual(outcome, { kind: "pinned", orgId: "org-a" });

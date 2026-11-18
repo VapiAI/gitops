@@ -9,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -19,26 +20,32 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { assertStateMigrated, migrateAll } from "../src/migrate-hash-store.ts";
 import {
+  OLD_LAYOUT_NOTICE,
   StateLayoutError,
   baselinesDir,
+  commitStepAcknowledge,
   orgPinFilePath,
   orgPinFileRead,
   orgPinFileWrite,
   snapshotsDir,
+  stateFileLeftover,
   stateFilePath,
   stateFileRead,
   stateFileWrite,
+  stateLayout,
   stateLayoutPrepare,
-  stateMoveBlocker,
+  stateNoticesPrint,
   stateOrgsList,
 } from "../src/state-paths.ts";
 
 // Engine state used to sit under dot-names at the repository root and in
 // resources/<org>/. It now lives in state/<org>/. Losing or half-moving the
-// state file makes the next push create every resource again, so these tests
-// pin every way an older repository reaches the new layout: read in place,
-// moved by a command on a person's machine, held back in CI and under a
-// workflow that would not commit the move, cut short, and in disagreement.
+// state file makes the next push create every resource again, and a commit
+// step that stages only the old place would leave moved state out of git.
+// So an org is in one layout, every command reads and writes the layout it
+// finds, and only `npm run migrate` moves an org. These tests pin that: an
+// old repository left exactly where it is on a person's machine and in CI,
+// a moved one, one cut short, two places in disagreement, and the move.
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 const ORG = "acme";
@@ -86,10 +93,22 @@ function oldRepo(): string {
   return root;
 }
 
+// The workflows this repository ships, whose commit step stages state/.
+function shippedWorkflows(root: string): void {
+  cpSync(join(REPO, ".github/workflows"), join(root, ".github/workflows"), {
+    recursive: true,
+  });
+}
+
 function layout(root: string): Record<string, string | undefined> {
   return {
     oldState: read(root, `.vapi-state.${ORG}.json`),
     oldPin: read(root, `resources/${ORG}/.vapi-org.json`),
+    oldBaseline: read(root, `.vapi-state-hash/${ORG}/${UUID}`),
+    oldSnapshot: read(
+      root,
+      `.vapi-state.${ORG}.snapshots/2026-01-01T00-00-00-000Z/assistants/intake.json`,
+    ),
     state: read(root, `state/${ORG}/state.json`),
     pin: read(root, `state/${ORG}/org.json`),
     baseline: read(root, `state/${ORG}/local/baselines/${UUID}`),
@@ -100,9 +119,22 @@ function layout(root: string): Record<string, string | undefined> {
   };
 }
 
+const OLD = {
+  oldState: STATE,
+  oldPin: PIN,
+  oldBaseline: "baseline-hash\n",
+  oldSnapshot: "{}\n",
+  state: undefined,
+  pin: undefined,
+  baseline: undefined,
+  snapshot: undefined,
+};
+
 const MOVED = {
   oldState: undefined,
   oldPin: undefined,
+  oldBaseline: undefined,
+  oldSnapshot: undefined,
   state: STATE,
   pin: PIN,
   baseline: "baseline-hash\n",
@@ -115,32 +147,38 @@ function withRepo(root: string, body: () => void | Promise<void>) {
     .finally(() => rmSync(root, { recursive: true, force: true }));
 }
 
-// ── Reading ──────────────────────────────────────────────────────────────
+function emptyRepo(files: Record<string, string> = {}): string {
+  const root = mkdtempSync(join(tmpdir(), "state-layout-"));
+  for (const [path, content] of Object.entries(files)) put(root, path, content);
+  return root;
+}
 
-test("orgs are listed from both layouts, and an org with no state yet reads from state/", () => {
+// ── Which layout an org is in ────────────────────────────────────────────
+
+test("orgs are listed from both layouts", () => {
   const root = oldRepo();
   return withRepo(root, () => {
     put(root, "state/beta/state.json", "{}\n");
     put(root, "state/README.md", "# state\n");
     put(root, "state/no-state-file/local/baselines/x", "h\n");
-    assert.deepEqual(
-      [
-        stateOrgsList(root),
-        stateFileRead(root, "fresh") === stateFilePath(root, "fresh"),
-      ],
-      [["acme", "beta"], true],
-    );
+    assert.deepEqual(stateOrgsList(root), ["acme", "beta"]);
   });
 });
 
-test("reads fall back to the old file only while the new one is absent", () => {
+test("a file is read and written where it is", () => {
   const root = oldRepo();
   return withRepo(root, () => {
     const before = [stateFileRead(root, ORG), orgPinFileRead(root, ORG)];
     put(root, `state/${ORG}/state.json`, STATE);
     put(root, `state/${ORG}/org.json`, PIN);
     assert.deepEqual(
-      [before, stateFileRead(root, ORG), orgPinFileRead(root, ORG)],
+      [
+        before,
+        stateFileRead(root, ORG),
+        orgPinFileRead(root, ORG),
+        stateFileWrite === stateFileRead,
+        orgPinFileWrite === orgPinFileRead,
+      ],
       [
         [
           join(root, `.vapi-state.${ORG}.json`),
@@ -148,173 +186,213 @@ test("reads fall back to the old file only while the new one is absent", () => {
         ],
         stateFilePath(root, ORG),
         orgPinFilePath(root, ORG),
+        true,
+        true,
       ],
     );
   });
 });
 
-// ── Moving on a person's machine ─────────────────────────────────────────
-
-test("a command on a person's machine moves everything and says so in one line", () => {
-  const root = oldRepo();
-  return withRepo(root, () => {
-    const notices = stateLayoutPrepare(root, ORG, LOCAL);
-    assert.deepEqual(
-      {
-        notices,
-        layout: layout(root),
-        leftovers: existsSync(join(root, ".vapi-state-hash")),
-      },
-      {
-        notices: [
-          `📦 Moved .vapi-state-hash/${ORG}/, .vapi-state.${ORG}.snapshots/, .vapi-state.${ORG}.json, resources/${ORG}/.vapi-org.json into state/${ORG}/. Commit the removal together with the new folder.`,
-        ],
-        layout: MOVED,
-        leftovers: false,
-      },
-    );
+test("an org with no state yet goes where the repository's other orgs keep theirs", () => {
+  const old = oldRepo();
+  const moved = emptyRepo({ "state/beta/state.json": STATE });
+  const mixed = emptyRepo({
+    "state/beta/state.json": STATE,
+    ".vapi-state.gamma.json": STATE,
   });
+  try {
+    assert.deepEqual(
+      [
+        stateLayout(old, "new-org"),
+        stateFileWrite(old, "new-org"),
+        orgPinFileWrite(old, "new-org"),
+        stateLayout(moved, "new-org"),
+        stateFileWrite(moved, "new-org"),
+        orgPinFileWrite(moved, "new-org"),
+        // One org still at the root means the commit step may still be the
+        // old one, so a new org goes where that step looks.
+        stateLayout(mixed, "new-org"),
+      ],
+      [
+        "root",
+        join(old, ".vapi-state.new-org.json"),
+        join(old, "resources/new-org/.vapi-org.json"),
+        "folder",
+        stateFilePath(moved, "new-org"),
+        orgPinFilePath(moved, "new-org"),
+        "root",
+      ],
+    );
+  } finally {
+    for (const root of [old, moved, mixed])
+      rmSync(root, { recursive: true, force: true });
+  }
 });
 
-test("a second run moves nothing and says nothing", () => {
-  const root = oldRepo();
-  return withRepo(root, () => {
-    stateLayoutPrepare(root, ORG, LOCAL);
-    assert.deepEqual(
-      [stateLayoutPrepare(root, ORG, LOCAL), layout(root)],
-      [[], MOVED],
-    );
+test("an org's pin decides its layout while it has no state file", () => {
+  // Each org's pin says the opposite of where the other org keeps its state.
+  const pinnedOld = emptyRepo({
+    "state/beta/state.json": STATE,
+    [`resources/${ORG}/.vapi-org.json`]: PIN,
   });
+  const pinnedNew = emptyRepo({
+    ".vapi-state.gamma.json": STATE,
+    [`state/${ORG}/org.json`]: PIN,
+  });
+  try {
+    assert.deepEqual(
+      [stateLayout(pinnedOld, ORG), stateLayout(pinnedNew, ORG)],
+      ["root", "folder"],
+    );
+  } finally {
+    for (const root of [pinnedOld, pinnedNew])
+      rmSync(root, { recursive: true, force: true });
+  }
 });
 
-test("a repository that never had the old layout is left alone", () => {
-  const root = mkdtempSync(join(tmpdir(), "state-layout-"));
+test("a repository with no state at all uses state/ only where the commit step is seen or said to stage it", () => {
+  const layoutOf = (files: Record<string, string>, shipped = false) => {
+    const root = emptyRepo(files);
+    if (shipped) shippedWorkflows(root);
+    try {
+      return stateLayout(root, ORG);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+  const word = '{\n  "stagesStateFolder": true\n}\n';
+  assert.deepEqual(
+    {
+      "no workflow": layoutOf({}),
+      "the workflows this repository ships": layoutOf({}, true),
+      "the step from before state/": layoutOf({
+        ".github/workflows/promotion.yml": OLD_WORKFLOW,
+      }),
+      "no workflow, and a person's word": layoutOf({
+        "state/commit-step.json": word,
+      }),
+      "the step from before state/, and a person's word": layoutOf({
+        ".github/workflows/promotion.yml": OLD_WORKFLOW,
+        "state/commit-step.json": word,
+      }),
+    },
+    {
+      "no workflow": "root",
+      "the workflows this repository ships": "folder",
+      "the step from before state/": "root",
+      "no workflow, and a person's word": "folder",
+      "the step from before state/, and a person's word": "root",
+    },
+  );
+});
+
+// ── A command leaves committed state where it is ─────────────────────────
+
+test("a command leaves an old repository exactly where it is, on any machine and under any workflow", () => {
+  for (const env of [LOCAL, CI, { GITHUB_ACTIONS: "true" }]) {
+    for (const shipped of [false, true]) {
+      const root = oldRepo();
+      if (shipped) shippedWorkflows(root);
+      const first = stateLayoutPrepare(root, ORG, env);
+      const second = stateLayoutPrepare(root, ORG, env);
+      const after = layout(root);
+      const stateFolder = existsSync(join(root, "state"));
+      rmSync(root, { recursive: true, force: true });
+      assert.deepEqual(
+        { first, second, after, stateFolder },
+        {
+          first: [OLD_LAYOUT_NOTICE],
+          second: [OLD_LAYOUT_NOTICE],
+          after: OLD,
+          stateFolder: false,
+        },
+      );
+    }
+  }
+});
+
+test("the older-layout line is one line, printed once per command", () => {
+  const printed: string[] = [];
+  const log = console.log;
+  console.log = (line: string) => void printed.push(line);
+  try {
+    // apply prints it, then starts a pull and a push with the same environment.
+    const command: NodeJS.ProcessEnv = {};
+    stateNoticesPrint([OLD_LAYOUT_NOTICE], command);
+    stateNoticesPrint([OLD_LAYOUT_NOTICE, "something else"], command);
+    stateNoticesPrint([OLD_LAYOUT_NOTICE], command);
+    // The next command starts with a fresh environment.
+    stateNoticesPrint([OLD_LAYOUT_NOTICE], {});
+  } finally {
+    console.log = log;
+  }
+  assert.deepEqual(
+    [
+      printed,
+      OLD_LAYOUT_NOTICE.includes("\n"),
+      /npm run migrate/.test(OLD_LAYOUT_NOTICE),
+    ],
+    [[OLD_LAYOUT_NOTICE, "something else", OLD_LAYOUT_NOTICE], false, true],
+  );
+});
+
+test("a repository in state/ gets no notice, and a new org joins it there", () => {
+  const root = emptyRepo({ [`state/${ORG}/state.json`]: STATE });
   return withRepo(root, () => {
-    put(root, `state/${ORG}/state.json`, STATE);
     assert.deepEqual(
       [
         stateLayoutPrepare(root, ORG, LOCAL),
         stateLayoutPrepare(root, ORG, CI),
-        stateFileWrite(root, ORG, CI) === stateFilePath(root, ORG),
-        stateFileWrite(root, "new-org", CI) === stateFilePath(root, "new-org"),
-        orgPinFileWrite(root, "new-org", CI) ===
-          orgPinFilePath(root, "new-org"),
+        stateLayoutPrepare(root, "new-org", CI),
+        stateFileWrite(root, "new-org") === stateFilePath(root, "new-org"),
       ],
-      [[], [], true, true, true],
+      [[], [], [], true],
     );
   });
 });
 
-test("machine-local files merge into a folder that already exists, newest side winning", () => {
+test("for an org in state/, this machine's baselines and snapshots follow, newest side winning", () => {
+  // What a teammate's machine holds after someone else ran migrate.
   const root = oldRepo();
   return withRepo(root, () => {
+    rmSync(join(root, `.vapi-state.${ORG}.json`));
+    rmSync(join(root, `resources/${ORG}/.vapi-org.json`));
+    put(root, `state/${ORG}/state.json`, STATE);
+    put(root, `state/${ORG}/org.json`, PIN);
     put(root, `state/${ORG}/local/baselines/${UUID}`, "newer-hash\n");
     put(root, `.vapi-state-hash/${ORG}/other`, "other-hash\n");
-    stateLayoutPrepare(root, ORG, LOCAL);
+    const notices = stateLayoutPrepare(root, ORG, LOCAL);
     assert.deepEqual(
       [
+        notices,
         readdirSync(baselinesDir(root, ORG)).sort(),
         read(root, `state/${ORG}/local/baselines/${UUID}`),
         existsSync(join(root, ".vapi-state-hash")),
         readdirSync(snapshotsDir(root, ORG)),
+        stateLayoutPrepare(root, ORG, LOCAL),
       ],
       [
+        [
+          `📦 Moved .vapi-state-hash/${ORG}/, .vapi-state.${ORG}.snapshots/ into state/${ORG}/local/. Both places are gitignored.`,
+        ],
         [UUID, "other"].sort(),
         "newer-hash\n",
         false,
         ["2026-01-01T00-00-00-000Z"],
+        [],
       ],
     );
   });
 });
 
-// ── Held back ────────────────────────────────────────────────────────────
+// ── A CI run under a workflow that would not commit what it writes ───────
 
-test("a CI run leaves committed state where it is and writes it in place", () => {
-  const root = oldRepo();
-  return withRepo(root, () => {
-    const notices = stateLayoutPrepare(root, ORG, CI);
-    assert.deepEqual(
-      {
-        notices,
-        layout: layout(root),
-        stateWrite: stateFileWrite(root, ORG, CI),
-        pinWrite: orgPinFileWrite(root, ORG, CI),
-      },
-      {
-        notices: [
-          `📦 Moved .vapi-state-hash/${ORG}/, .vapi-state.${ORG}.snapshots/ into state/${ORG}/.`,
-          "ℹ️  .vapi-state.acme.json and resources/acme/.vapi-org.json stays where it is: a CI run never moves state. Run `npm run migrate` on your machine and commit the result to move it into state/acme/.",
-        ],
-        // Gitignored files move anywhere: no workflow can lose them.
-        layout: {
-          ...MOVED,
-          oldState: STATE,
-          oldPin: PIN,
-          state: undefined,
-          pin: undefined,
-        },
-        stateWrite: join(root, `.vapi-state.${ORG}.json`),
-        pinWrite: join(root, `resources/${ORG}/.vapi-org.json`),
-      },
-    );
+test("a CI run stops before it writes state/ its workflow would not commit", () => {
+  const root = emptyRepo({
+    [`state/${ORG}/state.json`]: STATE,
+    ".github/workflows/promotion.yml": OLD_WORKFLOW,
   });
-});
-
-test("GITHUB_ACTIONS counts as a CI run", () => {
-  const root = oldRepo();
   return withRepo(root, () => {
-    stateLayoutPrepare(root, ORG, { GITHUB_ACTIONS: "true" });
-    assert.equal(layout(root).oldState, STATE);
-  });
-});
-
-test("a workflow that stages only the old file holds the move back, on any machine", () => {
-  const root = oldRepo();
-  return withRepo(root, () => {
-    put(root, ".github/workflows/promotion.yml", OLD_WORKFLOW);
-    const notices = stateLayoutPrepare(root, ORG, LOCAL);
-    assert.deepEqual(
-      {
-        blocker: stateMoveBlocker(root, LOCAL),
-        warned: notices.at(-1),
-        oldState: layout(root).oldState,
-        state: layout(root).state,
-        // A new org follows the layout the workflow commits.
-        newOrgState: stateFileWrite(root, "new-org", LOCAL),
-        newOrgPin: orgPinFileWrite(root, "new-org", LOCAL),
-      },
-      {
-        blocker: { kind: "workflow", file: ".github/workflows/promotion.yml" },
-        warned:
-          "⚠️  .vapi-state.acme.json and resources/acme/.vapi-org.json stays where it is: .github/workflows/promotion.yml stages .vapi-state.*.json but not state/. Add `git add -A -- state` to that step, then run `npm run migrate`.",
-        oldState: STATE,
-        state: undefined,
-        newOrgState: join(root, ".vapi-state.new-org.json"),
-        newOrgPin: join(root, "resources/new-org/.vapi-org.json"),
-      },
-    );
-  });
-});
-
-test("the workflow this repository ships does not hold the move back", () => {
-  const root = oldRepo();
-  return withRepo(root, () => {
-    cpSync(join(REPO, ".github/workflows"), join(root, ".github/workflows"), {
-      recursive: true,
-    });
-    assert.deepEqual(
-      [stateMoveBlocker(root, LOCAL), stateMoveBlocker(root, CI)],
-      [undefined, { kind: "ci" }],
-    );
-  });
-});
-
-test("a CI run stops before it writes state its workflow would not commit", () => {
-  const root = mkdtempSync(join(tmpdir(), "state-layout-"));
-  return withRepo(root, () => {
-    put(root, `state/${ORG}/state.json`, STATE);
-    put(root, ".github/workflows/promotion.yml", OLD_WORKFLOW);
     assert.throws(
       () => stateLayoutPrepare(root, ORG, CI),
       (error: unknown) =>
@@ -324,42 +402,73 @@ test("a CI run stops before it writes state its workflow would not commit", () =
         ) &&
         /Stopped before reading or changing anything/.test(error.message),
     );
-    // The same checkout on a person's machine is warned, not stopped.
-    assert.match(
-      stateLayoutPrepare(root, ORG, LOCAL)[0]!,
-      /^⚠️ {2}\.github\/workflows\/promotion\.yml/,
-    );
+    // The same checkout on a person's machine runs: whoever commits there
+    // sees what they stage.
+    assert.deepEqual(stateLayoutPrepare(root, ORG, LOCAL), []);
   });
 });
 
-// ── Cut short, or in disagreement ────────────────────────────────────────
+// ── Cut short, or in both places ─────────────────────────────────────────
 
-test("a move cut short between two files finishes on the next run", () => {
+test("a move cut short between two files is read where each file is, and migrate finishes it", async () => {
   const root = oldRepo();
-  return withRepo(root, () => {
+  shippedWorkflows(root);
+  try {
     // The state file moved; the run died before the pin did.
     put(root, `state/${ORG}/state.json`, STATE);
     rmSync(join(root, `.vapi-state.${ORG}.json`));
     stateLayoutPrepare(root, ORG, LOCAL);
-    assert.deepEqual(layout(root), MOVED);
-  });
+    const cut = [
+      stateFileRead(root, ORG),
+      orgPinFileWrite(root, ORG),
+      layout(root).oldPin,
+      layout(root).pin,
+    ];
+    await migrateAll(root);
+    assert.deepEqual(
+      [cut, layout(root)],
+      [
+        [
+          stateFilePath(root, ORG),
+          join(root, `resources/${ORG}/.vapi-org.json`),
+          PIN,
+          undefined,
+        ],
+        MOVED,
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
-test("the same content in both places is one state: the old copy goes, even in CI", () => {
+test("the same content in both places: state/ is read, the old copy stays, and only migrate removes it", async () => {
+  // Same mapping, different key order and spacing: a merge or a formatter.
+  const copy = `{"assistants":{"intake":{"uuid":"${UUID}"}}}`;
   for (const env of [LOCAL, CI]) {
     const root = oldRepo();
-    // Same mapping, different key order and spacing: a merge or a formatter.
-    put(
-      root,
-      `state/${ORG}/state.json`,
-      `{"assistants":{"intake":{"uuid":"${UUID}"}}}`,
-    );
-    stateLayoutPrepare(root, ORG, env);
+    shippedWorkflows(root);
+    put(root, `state/${ORG}/state.json`, copy);
+    const notices = stateLayoutPrepare(root, ORG, env);
+    const held = layout(root);
+    const leftover = stateFileLeftover(root, ORG);
+    await migrateAll(root);
     const after = layout(root);
     rmSync(root, { recursive: true, force: true });
     assert.deepEqual(
-      [after.oldState, after.state],
-      [undefined, `{"assistants":{"intake":{"uuid":"${UUID}"}}}`],
+      {
+        notice: notices.at(-1),
+        read: [held.oldState, held.state],
+        leftover: leftover?.endsWith(`.vapi-state.${ORG}.json`),
+        afterMigrate: [after.oldState, after.state, after.pin],
+      },
+      {
+        notice:
+          "ℹ️  .vapi-state.acme.json is still here beside its copy in state/acme/. `npm run migrate` removes it.",
+        read: [STATE, copy],
+        leftover: true,
+        afterMigrate: [undefined, copy, PIN],
+      },
     );
   }
 });
@@ -421,38 +530,53 @@ test("the legacy-format guard reads the state file in either place", () => {
   });
 });
 
-test("migrate slims and moves every org, in a CI run too", async () => {
+test("under a commit step seen to stage state/, migrate slims and moves every org, in a CI run too", async () => {
   const root = oldRepo();
   const ci = process.env.CI;
   process.env.CI = "true";
   try {
+    shippedWorkflows(root);
     put(root, `.vapi-state.${ORG}.json`, FAT_STATE);
     put(root, "state/beta/state.json", STATE);
     const result = await migrateAll(root);
+    const after = layout(root);
     assert.deepEqual(
       {
         orgs: result.orgs.map((org) => [
           org.org,
           org.stateFile,
           org.slimmed,
-          org.notices.length,
+          org.moved,
         ]),
-        oldState: layout(root).oldState,
-        state: JSON.parse(layout(root).state!),
-        pin: layout(root).pin,
+        after: { ...after, state: JSON.parse(after.state!) },
+        rootLeftovers: readdirSync(root).filter((name) =>
+          name.startsWith(".vapi-state"),
+        ),
         again: (await migrateAll(root)).orgs.map((org) => [
           org.slimmed,
-          org.notices,
+          org.moved,
         ]),
       },
       {
         orgs: [
-          [ORG, "state/acme/state.json", true, 1],
-          ["beta", "state/beta/state.json", false, 0],
+          [
+            ORG,
+            "state/acme/state.json",
+            true,
+            [
+              `.vapi-state.${ORG}.json`,
+              `resources/${ORG}/.vapi-org.json`,
+              `.vapi-state-hash/${ORG}/`,
+              `.vapi-state.${ORG}.snapshots/`,
+            ],
+          ],
+          ["beta", "state/beta/state.json", false, []],
         ],
-        oldState: undefined,
-        state: { assistants: { intake: { uuid: UUID } } },
-        pin: PIN,
+        after: {
+          ...MOVED,
+          state: { assistants: { intake: { uuid: UUID } } },
+        },
+        rootLeftovers: [],
         again: [
           [false, []],
           [false, []],
@@ -466,14 +590,37 @@ test("migrate slims and moves every org, in a CI run too", async () => {
   }
 });
 
-test("migrate does not move state while a workflow would drop it", async () => {
+test("migrate slims in place and moves nothing while a workflow would drop state/, whatever a person says", async () => {
   const root = oldRepo();
   try {
     put(root, ".github/workflows/promotion.yml", OLD_WORKFLOW);
+    put(root, `.vapi-state.${ORG}.json`, FAT_STATE);
     const result = await migrateAll(root);
+    let refusal = "";
+    try {
+      commitStepAcknowledge(root);
+    } catch (error) {
+      refusal = error instanceof StateLayoutError ? error.message : "other";
+    }
     assert.deepEqual(
-      [result.orgs[0]!.stateFile, layout(root).oldState, layout(root).state],
-      [".vapi-state.acme.json", STATE, undefined],
+      [
+        result.orgs[0]!.stateFile,
+        result.orgs[0]!.slimmed,
+        result.orgs[0]!.moved,
+        JSON.parse(layout(root).oldState!),
+        layout(root).state,
+        /is not true yet/.test(refusal),
+        existsSync(join(root, "state")),
+      ],
+      [
+        ".vapi-state.acme.json",
+        true,
+        [],
+        { assistants: { intake: { uuid: UUID } } },
+        undefined,
+        true,
+        false,
+      ],
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -482,6 +629,7 @@ test("migrate does not move state while a workflow would drop it", async () => {
 
 // ── Real commands against a stub API ─────────────────────────────────────
 
+const ON_PLATFORM = "What the platform holds.";
 const ASSISTANT = (id: string, name: string) => ({
   id,
   orgId: "org-a",
@@ -489,7 +637,7 @@ const ASSISTANT = (id: string, name: string) => ({
   model: {
     provider: "openai",
     model: "gpt-4o",
-    messages: [{ role: "system", content: "hi" }],
+    messages: [{ role: "system", content: ON_PLATFORM }],
   },
   voice: { provider: "11labs", voiceId: "burt" },
 });
@@ -525,6 +673,7 @@ async function engineRun(
     VAPI_BASE_URL: `http://127.0.0.1:${port}`,
     CI: "",
     GITHUB_ACTIONS: "",
+    VAPI_GITOPS_OLD_LAYOUT_NOTICE: "",
     ...env,
   };
   try {
@@ -545,77 +694,71 @@ async function engineRun(
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 
-test("pull on a person's machine moves an old repository once and keeps every mapping", async () => {
-  const root = oldRepo();
-  try {
-    const first = await engineRun(root, ["src/pull.ts", ORG, "--force"], LOCAL);
-    const state = JSON.parse(layout(root).state ?? "{}");
-    const second = await engineRun(
-      root,
-      ["src/pull.ts", ORG, "--force"],
-      LOCAL,
-    );
-    assert.deepEqual(
-      {
-        codes: [first.code, second.code],
-        moved: [count(first.out, "📦 Moved"), count(second.out, "📦 Moved")],
-        oldState: layout(root).oldState,
-        oldPin: layout(root).oldPin,
-        pin: layout(root).pin,
-        // The tracked resource kept its UUID; the new one was added beside it.
-        tracked: state.assistants.intake,
-        uuids: Object.values(
-          state.assistants as Record<string, { uuid: string }>,
-        )
-          .map((entry) => entry.uuid)
-          .sort(),
-        rootLeftovers: readdirSync(root).filter((name) =>
-          name.startsWith(".vapi-state"),
-        ),
-      },
-      {
-        codes: [0, 0],
-        moved: [1, 0],
-        oldState: undefined,
-        oldPin: undefined,
-        pin: PIN,
-        tracked: { uuid: UUID },
-        uuids: [UUID, UUID_NEW],
-        rootLeftovers: [],
-      },
-      first.out + second.out,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+test("pull leaves an old repository where it is and keeps every mapping, on a person's machine and in CI", async () => {
+  for (const env of [LOCAL, CI]) {
+    const root = oldRepo();
+    try {
+      shippedWorkflows(root);
+      const first = await engineRun(root, ["src/pull.ts", ORG, "--force"], env);
+      const second = await engineRun(
+        root,
+        ["src/pull.ts", ORG, "--force"],
+        env,
+      );
+      const state = JSON.parse(layout(root).oldState ?? "{}");
+      assert.deepEqual(
+        {
+          codes: [first.code, second.code],
+          told: [
+            count(first.out, OLD_LAYOUT_NOTICE),
+            count(second.out, OLD_LAYOUT_NOTICE),
+          ],
+          moved: count(first.out + second.out, "📦 Moved"),
+          pin: [layout(root).oldPin, layout(root).pin],
+          // The tracked resource kept its UUID; the new one was added beside it.
+          tracked: state.assistants?.intake,
+          uuids: Object.values(
+            (state.assistants ?? {}) as Record<string, { uuid: string }>,
+          )
+            .map((entry) => entry.uuid)
+            .sort(),
+          // Nothing of the engine's is written under state/, baselines included.
+          stateFolder: existsSync(join(root, "state")),
+          newBaseline: existsSync(
+            join(root, ".vapi-state-hash", ORG, UUID_NEW),
+          ),
+        },
+        {
+          codes: [0, 0],
+          told: [1, 1],
+          moved: 0,
+          pin: [PIN, undefined],
+          tracked: { uuid: UUID },
+          uuids: [UUID, UUID_NEW],
+          stateFolder: false,
+          newBaseline: true,
+        },
+        first.out + second.out,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
-test("pull in a CI run updates an old repository's state file in place", async () => {
+test("pull keeps an old copy of the state file identical to the one in state/", async () => {
   const root = oldRepo();
   try {
-    const run = await engineRun(root, ["src/pull.ts", ORG, "--force"], CI);
-    const state = JSON.parse(layout(root).oldState ?? "{}");
+    put(root, `state/${ORG}/state.json`, STATE);
+    const run = await engineRun(root, ["src/pull.ts", ORG, "--force"], LOCAL);
+    const after = layout(root);
     assert.deepEqual(
-      {
-        code: run.code,
-        told: count(run.out, "a CI run never moves state"),
-        state: layout(root).state,
-        pin: [layout(root).oldPin, layout(root).pin],
-        tracked: state.assistants?.intake,
-        uuids: Object.values(
-          (state.assistants ?? {}) as Record<string, { uuid: string }>,
-        )
-          .map((entry) => entry.uuid)
-          .sort(),
-      },
-      {
-        code: 0,
-        told: 1,
-        state: undefined,
-        pin: [PIN, undefined],
-        tracked: { uuid: UUID },
-        uuids: [UUID, UUID_NEW],
-      },
+      [
+        run.code,
+        after.oldState === after.state,
+        Object.keys(JSON.parse(after.state ?? "{}").assistants ?? {}).length,
+      ],
+      [0, true, 2],
       run.out,
     );
   } finally {
@@ -644,21 +787,17 @@ test("pull stops before any request when the two state files disagree", async ()
   }
 });
 
-test("a dry-run push moves nothing", async () => {
+test("a dry-run push changes nothing", async () => {
   const root = oldRepo();
   try {
-    const run = await engineRun(root, ["src/push.ts", ORG, "--dry-run"], LOCAL);
-    assert.deepEqual(
-      [count(run.out, "📦 Moved"), layout(root).oldState, layout(root).state],
-      [0, STATE, undefined],
-      run.out,
-    );
+    await engineRun(root, ["src/push.ts", ORG, "--dry-run"], LOCAL);
+    assert.deepEqual(layout(root), OLD);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("a baseline is still read from the old folder until it moves", async () => {
+test("a baseline is read from the old folder, where an old repository keeps it", async () => {
   const root = oldRepo();
   try {
     put(
@@ -679,3 +818,68 @@ test("a baseline is still read from the old folder until it moves", async () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── A file pull has no baseline for ──────────────────────────────────────
+//
+// With no baseline and nothing changed in git, pull has to pick between the
+// file and the platform's copy. It keeps the file unless this machine's
+// engine has saved state since the file was last written. It used to read
+// that from the state file's timestamp, which in a fresh clone is only the
+// order git wrote the files in: state at the root is written before
+// resources/ and state/<org>/state.json after it.
+
+const LOCAL_EDIT = "Edited here, not on the platform yet.";
+const intakeFile = (prompt: string) =>
+  "---\nname: Intake\nmodel:\n  provider: openai\n  model: gpt-4o\nvoice:\n  provider: 11labs\n  voiceId: burt\n---\n\n" +
+  prompt +
+  "\n";
+
+for (const where of ["at the root", "in state/"] as const) {
+  test(`with state ${where}, pull keeps a file it has no baseline for until this machine has saved state after it`, async () => {
+    const root = emptyRepo({
+      [where === "at the root"
+        ? `.vapi-state.${ORG}.json`
+        : `state/${ORG}/state.json`]: STATE,
+    });
+    const file = join(root, `resources/${ORG}/assistants/intake.md`);
+    const kept = () => readFileSync(file, "utf8").includes(LOCAL_EDIT);
+    try {
+      put(
+        root,
+        `resources/${ORG}/assistants/intake.md`,
+        intakeFile(LOCAL_EDIT),
+      );
+      // Written long before the state file, as a checkout may leave it.
+      utimesSync(file, new Date("2020-01-01"), new Date("2020-01-01"));
+      const first = await engineRun(root, ["src/pull.ts", ORG], LOCAL);
+      const afterFirst = kept();
+      // Edited again after the engine saved state: still the person's.
+      const later = new Date(Date.now() + 60_000);
+      utimesSync(file, later, later);
+      const second = await engineRun(root, ["src/pull.ts", ORG], LOCAL);
+      const afterSecond = kept();
+      // Untouched since the engine last saved state here: the platform's copy.
+      utimesSync(file, new Date("2020-01-01"), new Date("2020-01-01"));
+      const third = await engineRun(root, ["src/pull.ts", ORG], LOCAL);
+      assert.deepEqual(
+        {
+          codes: [first.code, second.code, third.code],
+          "no save here yet": afterFirst,
+          "written after the last save": afterSecond,
+          "older than the last save": kept(),
+          platform: readFileSync(file, "utf8").includes(ON_PLATFORM),
+        },
+        {
+          codes: [0, 0, 0],
+          "no save here yet": true,
+          "written after the last save": true,
+          "older than the last save": false,
+          platform: true,
+        },
+        first.out + second.out + third.out,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

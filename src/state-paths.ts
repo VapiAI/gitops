@@ -11,7 +11,11 @@
 //
 // Until this folder existed the same files sat at the repository root and in
 // resources/<org>/ under dot-names. This module is the only place that knows
-// both layouts: it reads the old one, and moves it when that is safe.
+// both layouts. An org is in one of them, decided by where its committed
+// state file is. Every command reads the layout it finds and writes back to
+// the same one. Only `npm run migrate` moves an org from the old layout to
+// this one: a commit step that stages only the old place would otherwise
+// leave moved state out of git, with every run still passing.
 //
 // Config-free on purpose, so `npm run migrate` and tests can import it
 // without an org argument or a token.
@@ -27,8 +31,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { dirname, join } from "path";
-import { parse as parseYaml } from "yaml";
+import { dirname, join, relative } from "path";
+import { commitStepRead } from "./commit-step.ts";
+
+export { commitStepRead };
 
 export const STATE_DIR = "state";
 
@@ -76,34 +82,6 @@ export function snapshotsLegacyDir(rootDir: string, org: string): string {
   return join(rootDir, `.vapi-state.${org}.snapshots`);
 }
 
-/** The state file as a person names it: its path from the repository root. */
-export function stateFileLabel(rootDir: string, org: string): string {
-  return existsSync(stateFilePath(rootDir, org)) ||
-    !existsSync(stateFileLegacyPath(rootDir, org))
-    ? `${STATE_DIR}/${org}/state.json`
-    : `.vapi-state.${org}.json`;
-}
-
-function firstExisting(next: string, legacy: string): string {
-  return existsSync(next) || !existsSync(legacy) ? next : legacy;
-}
-
-/** The state file to read: state/<org>/state.json, else the old root file. */
-export function stateFileRead(rootDir: string, org: string): string {
-  return firstExisting(
-    stateFilePath(rootDir, org),
-    stateFileLegacyPath(rootDir, org),
-  );
-}
-
-/** The org pin to read: state/<org>/org.json, else the old file in resources/. */
-export function orgPinFileRead(rootDir: string, org: string): string {
-  return firstExisting(
-    orgPinFilePath(rootDir, org),
-    orgPinFileLegacyPath(rootDir, org),
-  );
-}
-
 /** Orgs that have a state file in either layout, sorted. */
 export function stateOrgsList(rootDir: string): string[] {
   const orgs = new Set<string>();
@@ -119,137 +97,10 @@ export function stateOrgsList(rootDir: string): string[] {
   return [...orgs].sort((a, b) => a.localeCompare(b));
 }
 
-// ── Who commits state after a run ────────────────────────────────────────
-//
-// A run in CI writes the state file and leaves committing it to a later step
-// the engine can't watch. If that step stages only the place state used to
-// be, moving state takes the UUID map out of git: every run still passes, and
-// the next one creates every resource again. So state moves by itself only
-// when a workflow is seen to stage state/, or when nothing in the repository
-// can commit state after a run. A step the engine can't read is not seen.
-
-interface WorkflowRead {
-  file: string;
-  /** A `git add` line stages state/. */
-  stagesNew: boolean;
-  /** A `git add` line stages .vapi-state.*.json. */
-  stagesOld: boolean;
-  /** False only when the file is read as unable to write to the repository. */
-  canCommit: boolean;
-}
+// ── Which layout an org is in ────────────────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-// What a workflow's `git add` lines stage. A pathspec the engine can't read
-// (a variable, one org's folder) counts for nothing.
-function gitAddsRead(text: string): { stagesNew: boolean; stagesOld: boolean } {
-  let stagesNew = false;
-  let stagesOld = false;
-  for (const line of text.replace(/\\\r?\n/g, " ").split("\n")) {
-    if (/^\s*#/.test(line)) continue;
-    for (const command of line.replace(/\s#.*$/, "").split(/&&|\|\||;/)) {
-      const at = command.search(/\bgit add\b/);
-      if (at < 0) continue;
-      const args = command
-        .slice(at + "git add".length)
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((arg) => arg.replace(/^["']|["']$/g, ""));
-      const paths = args
-        .filter((arg) => !arg.startsWith("-"))
-        .map((path) => path.replace(/^:\([a-z,]*\)/, "").replace(/^\.\//, ""));
-      const everything =
-        paths.length === 0
-          ? args.some((arg) => arg === "--all" || /^-[a-zA-Z]*A/.test(arg))
-          : paths.some((path) => path === "." || path === ":/");
-      if (everything || paths.some((path) => /^state(\/\**)?$/.test(path)))
-        stagesNew = true;
-      if (everything || paths.some((path) => path.includes(".vapi-state.")))
-        stagesOld = true;
-    }
-  }
-  return { stagesNew, stagesOld };
-}
-
-// Only a workflow whose permissions keep `contents` read-only in every job,
-// and that never runs `git commit` or `git push`, is read as unable to commit.
-// A file that doesn't parse, or sets no permissions, can.
-function workflowCanCommit(text: string): boolean {
-  if (/\bgit\s+(commit|push)\b/.test(text)) return true;
-  let doc: unknown;
-  try {
-    doc = parseYaml(text);
-  } catch {
-    return true;
-  }
-  if (!isRecord(doc) || !isRecord(doc.jobs)) return true;
-  const writes = (permissions: unknown): boolean | undefined =>
-    permissions === undefined
-      ? undefined
-      : permissions === "write-all" ||
-        (isRecord(permissions) && permissions.contents === "write");
-  const top = writes(doc.permissions);
-  return Object.values(doc.jobs).some(
-    (job) =>
-      (isRecord(job) ? writes(job.permissions) : undefined) ?? top ?? true,
-  );
-}
-
-function workflowsRead(rootDir: string): WorkflowRead[] {
-  const dir = join(rootDir, ".github", "workflows");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => /\.ya?ml$/.test(name))
-    .sort()
-    .map((name) => {
-      const text = readFileSync(join(dir, name), "utf8");
-      return {
-        file: `.github/workflows/${name}`,
-        ...gitAddsRead(text),
-        canCommit: workflowCanCommit(text),
-      };
-    });
-}
-
-export type CommitStep =
-  /** A workflow is seen to stage the old state file and not state/. */
-  | { kind: "stale"; file: string }
-  /** Something may commit state after a run, and it isn't seen to stage state/. */
-  | { kind: "unseen"; file?: string }
-  /** Every workflow that can commit is seen to stage state/. */
-  | { kind: "seen"; stagesOld: boolean }
-  /** Nothing here commits state after a run. */
-  | { kind: "none" };
-
-/**
- * What is seen of the step that commits state after a run. In GitHub Actions
- * the engine knows which workflow is running it and reads that one alone;
- * anywhere else it reads every workflow in .github/workflows/. With no
- * workflow that can commit, a root promotion.yml still means some pipeline
- * runs promotion and commits what it records.
- */
-export function commitStepRead(
-  rootDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-): CommitStep {
-  const every = workflowsRead(rootDir);
-  const running =
-    env.GITHUB_ACTIONS === "true"
-      ? /\.github\/workflows\/[^@]+/.exec(env.GITHUB_WORKFLOW_REF ?? "")?.[0]
-      : undefined;
-  const own = every.filter((workflow) => workflow.file === running);
-  const workflows = own.length > 0 ? own : every;
-  const stale = workflows.find((w) => w.stagesOld && !w.stagesNew);
-  if (stale) return { kind: "stale", file: stale.file };
-  const unseen = workflows.find((w) => w.canCommit && !w.stagesNew);
-  if (unseen) return { kind: "unseen", file: unseen.file };
-  if (workflows.some((w) => w.stagesNew))
-    return { kind: "seen", stagesOld: workflows.some((w) => w.stagesOld) };
-  return own.length === 0 && existsSync(join(rootDir, "promotion.yml"))
-    ? { kind: "unseen" }
-    : { kind: "none" };
 }
 
 /** Whether a person has said, with `npm run migrate -- --commit-step-stages-state`, that their commit step stages state/. */
@@ -264,127 +115,129 @@ export function commitStepAcknowledged(rootDir: string): boolean {
   }
 }
 
-function unseenReason(file: string | undefined): string {
-  return file
-    ? `${file} can commit to this repository and is not seen to stage ${STATE_DIR}/`
-    : `promotion.yml is set up and no workflow in .github/workflows/ is seen to stage ${STATE_DIR}/`;
-}
-
-export type StateMoveBlocker =
-  | { kind: "workflow"; file: string }
-  | { kind: "unseen"; file?: string }
-  | { kind: "ci" };
-
-export function stateRunIsCi(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CI === "true" || env.CI === "1" || env.GITHUB_ACTIONS === "true";
-}
+export type StateLayout = "folder" | "root";
 
 /**
- * Why committed state must stay where it is for now. A workflow seen to stage
- * only the old file holds it, and so does a commit step that isn't seen to
- * stage state/ until a person says it does. A CI run never moves state: only
- * the person who changes the commit step can commit the move with it.
+ * The layout an org's engine files are in: "folder" for state/<org>/, "root"
+ * for the files from before state/ existed.
+ *
+ * Where the org's state file is decides it, or its org pin when it has no
+ * state file. An org with neither goes where the repository's other orgs
+ * keep their state. In a repository with no
+ * state at all, state/ is used only when the commit step is seen to stage it
+ * or a person has said it does; otherwise the first state file is written
+ * where every older commit step looks for it. That reading is of every
+ * workflow, on any machine, so whoever writes first picks the same place.
  */
-export function stateMoveBlocker(
-  rootDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-): StateMoveBlocker | undefined {
-  const step = commitStepRead(rootDir, env);
-  if (step.kind === "stale") return { kind: "workflow", file: step.file };
-  if (step.kind === "unseen" && !commitStepAcknowledged(rootDir))
-    return { kind: "unseen", file: step.file };
-  return stateRunIsCi(env) ? { kind: "ci" } : undefined;
-}
-
-/**
- * What the commit step has to stage before state can move, when nothing is
- * seen to stage state/ and nobody has said it does. For `npm run migrate`.
- */
-export function commitStepAsk(rootDir: string): string[] | undefined {
-  const blocker = stateMoveBlocker(rootDir, {});
-  if (blocker?.kind !== "unseen") return undefined;
-  return [
-    `⚠️  Nothing moved into ${STATE_DIR}/: ${unseenReason(blocker.file)}.`,
-    "   Whatever commits state after a run in this repository has to stage both of these:",
-    `     git add -A -- ${STATE_DIR}                       the new folder: each org's state.json, org.json and records`,
-    "     git add -A -- ':(glob).vapi-state.*.json'   the old files, so the commit that moves them records their removal",
-    `   A commit action or a script needs the same two paths: ${STATE_DIR} and .vapi-state.*.json.`,
-    "   Upstream's .github/workflows/promotion.yml has both, guarded for a repository where one matches nothing.",
-    "   When your step does that, say so. This writes that down and moves every org:",
-    `     npm run migrate -- ${COMMIT_STEP_FLAG}`,
-    `   The engine can't check a step it can't read. From then on it takes your word, kept in ${STATE_DIR}/commit-step.json.`,
-  ];
-}
-
-/**
- * Record a person's word that their commit step stages state/. Refused while
- * a workflow is seen to stage only the old file: that is seen to be untrue.
- * Returns the line to print.
- */
-export function commitStepAcknowledge(rootDir: string): string {
+export function stateLayout(rootDir: string, org: string): StateLayout {
+  if (existsSync(stateFilePath(rootDir, org))) return "folder";
+  if (existsSync(stateFileLegacyPath(rootDir, org))) return "root";
+  if (existsSync(orgPinFilePath(rootDir, org))) return "folder";
+  if (existsSync(orgPinFileLegacyPath(rootDir, org))) return "root";
+  const orgs = stateOrgsList(rootDir);
+  if (orgs.some((other) => !existsSync(stateFilePath(rootDir, other))))
+    return "root";
+  if (orgs.length > 0) return "folder";
   const step = commitStepRead(rootDir, {});
-  if (step.kind === "stale")
-    throw new StateLayoutError(
-      `${step.file} stages .vapi-state.*.json but not ${STATE_DIR}/, so ${COMMIT_STEP_FLAG} is not true yet.\n` +
-        `   Add \`git add -A -- ${STATE_DIR}\` to that step first. Nothing was changed.`,
-    );
-  if (step.kind !== "unseen")
-    return `ℹ️  ${COMMIT_STEP_FLAG} is not needed here: ${step.kind === "seen" ? `a workflow is seen to stage ${STATE_DIR}/` : "nothing in this repository commits state after a run"}.`;
-  if (commitStepAcknowledged(rootDir))
-    return `ℹ️  ${STATE_DIR}/commit-step.json already says the commit step stages ${STATE_DIR}/.`;
-  const path = commitStepFilePath(rootDir);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(
-    path,
-    `${JSON.stringify({ stagesStateFolder: true }, null, 2)}\n`,
-  );
-  return `✍️  Wrote ${STATE_DIR}/commit-step.json: you said the commit step stages ${STATE_DIR}/. Commit it together with the move.`;
+  return step.kind === "seen" ||
+    (step.kind !== "stale" && commitStepAcknowledged(rootDir))
+    ? "folder"
+    : "root";
 }
 
-// A repository that has any old root state file still follows the old layout.
-function legacyStateExists(rootDir: string): boolean {
-  return readdirSync(rootDir).some((name) =>
-    /^\.vapi-state\..+\.json$/.test(name),
-  );
-}
-
-// A file that exists is written in place. A file that doesn't exist yet goes
-// to state/<org>/, except where the commit step is seen to stage only the old
-// place, or isn't seen at all in a repository that still has old state files.
-function legacyLayoutKept(
+// A file that exists is read and written where it is. A file that doesn't
+// exist yet goes where the org's layout puts it.
+function fileInLayout(
+  next: string,
+  legacy: string,
   rootDir: string,
   org: string,
-  env: NodeJS.ProcessEnv,
-): boolean {
-  if (existsSync(stateFilePath(rootDir, org))) return false;
-  if (existsSync(stateFileLegacyPath(rootDir, org))) return true;
-  const blocker = stateMoveBlocker(rootDir, env);
-  if (blocker?.kind === "workflow") return true;
-  return blocker?.kind === "unseen" && legacyStateExists(rootDir);
-}
-
-/** The state file to write. Call stateLayoutPrepare first in a command that writes. */
-export function stateFileWrite(
-  rootDir: string,
-  org: string,
-  env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return legacyLayoutKept(rootDir, org, env)
-    ? stateFileLegacyPath(rootDir, org)
-    : stateFilePath(rootDir, org);
-}
-
-/** The org pin to write: beside the state file, in whichever layout it uses. */
-export function orgPinFileWrite(
-  rootDir: string,
-  org: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const next = orgPinFilePath(rootDir, org);
-  const legacy = orgPinFileLegacyPath(rootDir, org);
   if (existsSync(next)) return next;
   if (existsSync(legacy)) return legacy;
-  return legacyLayoutKept(rootDir, org, env) ? legacy : next;
+  return stateLayout(rootDir, org) === "folder" ? next : legacy;
+}
+
+/** The org's state file: where it is, else where its first write goes. */
+export function stateFileRead(rootDir: string, org: string): string {
+  return fileInLayout(
+    stateFilePath(rootDir, org),
+    stateFileLegacyPath(rootDir, org),
+    rootDir,
+    org,
+  );
+}
+
+/** The state file to write: the one that is read. */
+export const stateFileWrite = stateFileRead;
+
+/** The org pin: where it is, else beside the state file in the org's layout. */
+export function orgPinFileRead(rootDir: string, org: string): string {
+  return fileInLayout(
+    orgPinFilePath(rootDir, org),
+    orgPinFileLegacyPath(rootDir, org),
+    rootDir,
+    org,
+  );
+}
+
+/** The org pin to write: the one that is read. */
+export const orgPinFileWrite = orgPinFileRead;
+
+/** The state file as a person names it: its path from the repository root. */
+export function stateFileLabel(rootDir: string, org: string): string {
+  return relative(rootDir, stateFileRead(rootDir, org)).replaceAll("\\", "/");
+}
+
+/** Where this machine's baselines for the org are written. */
+export function baselinesWriteDir(rootDir: string, org: string): string {
+  return stateLayout(rootDir, org) === "folder"
+    ? baselinesDir(rootDir, org)
+    : baselinesLegacyDir(rootDir, org);
+}
+
+/** Where this machine's push snapshots for the org are written. */
+export function snapshotsWriteDir(rootDir: string, org: string): string {
+  return stateLayout(rootDir, org) === "folder"
+    ? snapshotsDir(rootDir, org)
+    : snapshotsLegacyDir(rootDir, org);
+}
+
+/**
+ * A file the engine touches each time it saves the org's state file on this
+ * machine. It sits with the baselines, so it is never committed and a fresh
+ * clone has none. Pull reads "has the engine synced here since this file was
+ * written" from it rather than from the state file's own timestamp, which
+ * after a clone or a checkout is only the order git wrote the files in.
+ */
+export function stateSavedStampPath(rootDir: string, org: string): string {
+  return join(baselinesWriteDir(rootDir, org), ".state-saved");
+}
+
+// ── The committed files, in both places ──────────────────────────────────
+
+interface CommittedFile {
+  legacy: string;
+  next: string;
+  legacyLabel: string;
+  nextLabel: string;
+}
+
+function committedFiles(rootDir: string, org: string): CommittedFile[] {
+  return [
+    {
+      legacy: stateFileLegacyPath(rootDir, org),
+      next: stateFilePath(rootDir, org),
+      legacyLabel: `.vapi-state.${org}.json`,
+      nextLabel: `${STATE_DIR}/${org}/state.json`,
+    },
+    {
+      legacy: orgPinFileLegacyPath(rootDir, org),
+      next: orgPinFilePath(rootDir, org),
+      legacyLabel: `resources/${org}/.vapi-org.json`,
+      nextLabel: `${STATE_DIR}/${org}/org.json`,
+    },
+  ];
 }
 
 export class StateLayoutError extends Error {}
@@ -414,6 +267,55 @@ function sameJson(a: string, b: string): boolean {
   }
 }
 
+// Files that sit in both places. They must hold the same content: a copy
+// that differs may carry an entry the other lacks, and reading either one
+// alone would lose it.
+function committedInBothPlaces(rootDir: string, org: string): CommittedFile[] {
+  const both = committedFiles(rootDir, org).filter(
+    (file) => existsSync(file.legacy) && existsSync(file.next),
+  );
+  for (const file of both)
+    if (!sameJson(file.legacy, file.next))
+      throw new StateLayoutError(
+        `${file.legacyLabel} and ${file.nextLabel} both exist and disagree.\n` +
+          `   Stopped before reading or changing anything.\n` +
+          `   ${file.nextLabel} is the current location. Compare the two, copy across any entry\n` +
+          `   only the old file has, then delete ${file.legacyLabel}.`,
+      );
+  return both;
+}
+
+/**
+ * The old state file, when the org also has one in state/<org>/ with the same
+ * content (a move cut short, or a merge that brought the old file back). The
+ * engine keeps it identical to the one it reads, so whichever of the two the
+ * commit step stages is complete, until `npm run migrate` removes it.
+ */
+export function stateFileLeftover(
+  rootDir: string,
+  org: string,
+): string | undefined {
+  const legacy = stateFileLegacyPath(rootDir, org);
+  return existsSync(legacy) && existsSync(stateFilePath(rootDir, org))
+    ? legacy
+    : undefined;
+}
+
+// ── A command that writes state ──────────────────────────────────────────
+
+export function stateRunIsCi(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CI === "true" || env.CI === "1" || env.GITHUB_ACTIONS === "true";
+}
+
+function notSeenReason(file: string | undefined): string {
+  return file
+    ? `${file} can commit to this repository and is not seen to stage ${STATE_DIR}/`
+    : `no workflow in .github/workflows/ is seen to stage ${STATE_DIR}/`;
+}
+
+/** The one line a command prints while an org's state is still in the old layout. */
+export const OLD_LAYOUT_NOTICE = `ℹ️  Engine state here is in the older layout (.vapi-state.<org>.json at the repository root). \`npm run migrate\` moves it into ${STATE_DIR}/ and says what the commit step has to stage first.`;
+
 // Move a folder of machine-local files. Where both sides hold an entry the
 // new one wins: it was written after the old layout stopped being written.
 function localDirMove(legacy: string, next: string): boolean {
@@ -433,8 +335,9 @@ function localDirMove(legacy: string, next: string): boolean {
 }
 
 /**
- * Move this machine's baselines and snapshots into state/<org>/local/.
- * They are gitignored in both places, so no workflow can lose them.
+ * Move this machine's baselines and snapshots into state/<org>/local/, for an
+ * org whose committed state is already in state/<org>/. They are gitignored
+ * in both places, so no commit step can lose them.
  */
 export function stateLocalMove(rootDir: string, org: string): string[] {
   const moved: string[] = [];
@@ -453,122 +356,212 @@ export function stateLocalMove(rootDir: string, org: string): string[] {
 }
 
 /**
- * Bring one org's engine files into state/<org>/ when that is safe, before a
- * command writes anything. Returns the lines to print.
+ * Run before a command writes anything for an org. Moves no committed file:
+ * the org stays in the layout it is in. Returns the lines to print.
  *
- * Each committed file moves by one rename, so the full state is always in
- * exactly one of the two places. Throws StateLayoutError, before anything is
- * read or changed, when both places hold a file and they disagree, or when a
- * CI run would write state in a place its commit step isn't seen to stage.
+ * Throws StateLayoutError, before anything is read or changed, when the two
+ * places hold a file and disagree, or when a CI run would write state where
+ * the workflow running it is seen not to stage it.
  */
 export function stateLayoutPrepare(
   rootDir: string,
   org: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  const files = [
-    {
-      legacy: stateFileLegacyPath(rootDir, org),
-      next: stateFilePath(rootDir, org),
-      legacyLabel: `.vapi-state.${org}.json`,
-      nextLabel: `${STATE_DIR}/${org}/state.json`,
-    },
-    {
-      legacy: orgPinFileLegacyPath(rootDir, org),
-      next: orgPinFilePath(rootDir, org),
-      legacyLabel: `resources/${org}/.vapi-org.json`,
-      nextLabel: `${STATE_DIR}/${org}/org.json`,
-    },
-  ].filter((file) => existsSync(file.legacy));
-
-  for (const file of files)
-    if (existsSync(file.next) && !sameJson(file.legacy, file.next))
-      throw new StateLayoutError(
-        `${file.legacyLabel} and ${file.nextLabel} both exist and disagree.\n` +
-          `   Stopped before reading or changing anything.\n` +
-          `   ${file.nextLabel} is the current location. Compare the two, copy across any entry\n` +
-          `   only the old file has, then delete ${file.legacyLabel}.`,
-      );
-
+  const both = committedInBothPlaces(rootDir, org);
+  const layout = stateLayout(rootDir, org);
   const notices: string[] = [];
-  const blocker = stateMoveBlocker(rootDir, env);
-  const ci = stateRunIsCi(env);
-  const step = commitStepRead(rootDir, env);
-  const inFolder =
-    stateFileWrite(rootDir, org, env) === stateFilePath(rootDir, org);
-  if (
-    inFolder &&
-    (blocker?.kind === "workflow" || blocker?.kind === "unseen")
-  ) {
-    const problem =
-      blocker.kind === "workflow"
-        ? `${blocker.file} stages .vapi-state.*.json but not ${STATE_DIR}/, so it won't commit ${STATE_DIR}/${org}/.`
-        : `${unseenReason(blocker.file)}, so ${STATE_DIR}/${org}/ may never be committed.`;
-    const fix =
-      blocker.kind === "workflow"
-        ? `Add \`git add -A -- ${STATE_DIR}\` to that step.`
-        : `Make the step that commits state stage \`${STATE_DIR}\`. If it already does, run \`npm run migrate -- ${COMMIT_STEP_FLAG}\` on your machine and commit ${STATE_DIR}/commit-step.json.`;
-    if (ci)
+
+  if (stateRunIsCi(env)) {
+    const step = commitStepRead(rootDir, env);
+    const said = commitStepAcknowledged(rootDir);
+    const stopped =
+      "Stopped before reading or changing anything: UUIDs recorded by this run would be lost.";
+    if (layout === "folder" && step.kind === "stale")
       throw new StateLayoutError(
-        `${problem}\n   Stopped before reading or changing anything: UUIDs recorded by this run would be lost.\n   ${fix}`,
+        `${step.file} stages .vapi-state.*.json but not ${STATE_DIR}/, so it won't commit ${STATE_DIR}/${org}/.\n` +
+          `   ${stopped}\n   Add \`git add -A -- ${STATE_DIR}\` to that step.`,
       );
-    // With only a promotion.yml to go on there may be no pipeline at all, so
-    // a person's machine isn't warned on every command. A CI run still stops.
-    if (blocker.kind === "workflow" || blocker.file)
-      notices.push(`⚠️  ${problem} ${fix}`);
-  }
-  // The mirror case: state still at the old place, under a commit step that
-  // has moved on to state/.
-  if (ci && !inFolder && existsSync(stateFileLegacyPath(rootDir, org))) {
-    const why =
-      step.kind === "seen" && !step.stagesOld
-        ? `this repository's workflow stages ${STATE_DIR}/ but not .vapi-state.*.json`
-        : step.kind === "unseen" && commitStepAcknowledged(rootDir)
-          ? `${STATE_DIR}/commit-step.json says the commit step stages ${STATE_DIR}/`
-          : undefined;
-    if (why)
+    if (layout === "folder" && step.kind === "unseen" && !said)
       throw new StateLayoutError(
-        `.vapi-state.${org}.json is still at the repository root, and ${why}, so what this run records in it may never be committed.\n` +
-          "   Stopped before reading or changing anything.\n" +
-          "   Run `npm run migrate` on your machine and commit the result, so the file is where the commit step looks.",
+        `${notSeenReason(step.file)}, so ${STATE_DIR}/${org}/ may never be committed.\n` +
+          `   ${stopped}\n` +
+          `   Make the step that commits state stage \`${STATE_DIR}\`. If it already does, run \`npm run migrate -- ${COMMIT_STEP_FLAG}\` on your machine and commit ${STATE_DIR}/commit-step.json.`,
+      );
+    // The mirror case: state still at the old place, under a commit step
+    // that has moved on to state/.
+    if (layout === "root" && existsSync(stateFileLegacyPath(rootDir, org))) {
+      const why =
+        step.kind === "seen" && !step.stagesOld
+          ? `this repository's workflow stages ${STATE_DIR}/ but not .vapi-state.*.json`
+          : step.kind === "unseen" && said
+            ? `${STATE_DIR}/commit-step.json says the commit step stages ${STATE_DIR}/`
+            : undefined;
+      if (why)
+        throw new StateLayoutError(
+          `.vapi-state.${org}.json is still at the repository root, and ${why}, so what this run records in it may never be committed.\n` +
+            "   Stopped before reading or changing anything.\n" +
+            "   Run `npm run migrate` on your machine and commit the result, so the file is where the commit step looks.",
+        );
+    }
+    if (layout === "folder" && step.kind !== "seen" && said)
+      notices.push(
+        `ℹ️  ${STATE_DIR}/commit-step.json says this run's commit step stages ${STATE_DIR}/. The engine can't see that step: if it doesn't, what this run records in ${STATE_DIR}/${org}/ is lost.`,
       );
   }
-  if (ci && inFolder && step.kind === "unseen")
-    notices.push(
-      `ℹ️  ${STATE_DIR}/commit-step.json says this run's commit step stages ${STATE_DIR}/. The engine can't see that step: if it doesn't, what this run records in ${STATE_DIR}/${org}/ is lost.`,
-    );
+
+  if (layout === "root") return [...notices, OLD_LAYOUT_NOTICE];
 
   const moved = stateLocalMove(rootDir, org);
-  // Same content in both places: an earlier move was cut short, or a merge
-  // brought the old file back unchanged. The old copy carries nothing.
-  for (const file of files.filter((entry) => existsSync(entry.next))) {
+  if (moved.length > 0)
+    notices.push(
+      `📦 Moved ${moved.join(", ")} into ${STATE_DIR}/${org}/local/. Both places are gitignored.`,
+    );
+  if (both.length > 0)
+    notices.push(
+      `ℹ️  ${both.map((file) => file.legacyLabel).join(" and ")} is still here beside its copy in ${STATE_DIR}/${org}/. \`npm run migrate\` removes it.`,
+    );
+  return notices;
+}
+
+/**
+ * Print a command's layout notices. The older-layout line prints once per
+ * command, also across the pull and push that apply and promote start.
+ */
+export function stateNoticesPrint(
+  notices: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  for (const notice of notices) {
+    if (notice === OLD_LAYOUT_NOTICE) {
+      if (env.VAPI_GITOPS_OLD_LAYOUT_NOTICE === "shown") continue;
+      env.VAPI_GITOPS_OLD_LAYOUT_NOTICE = "shown";
+    }
+    console.log(notice);
+  }
+}
+
+// ── npm run migrate: the only thing that moves committed state ──────────
+
+export interface StateMoveRead {
+  /** Whether `npm run migrate` moves committed state in this repository. */
+  open: boolean;
+  /** What it prints before anything moves. */
+  lines: string[];
+}
+
+const COMMIT_STEP_NEEDS = [
+  "   Once state is in state/, whatever commits state after a run has to stage both of these:",
+  `     git add -A -- ${STATE_DIR}                       the new folder: each org's state.json, org.json and records`,
+  "     git add -A -- ':(glob).vapi-state.*.json'   the old files, so the commit that moves them records their removal",
+  `   A commit action or a script needs the same two paths: ${STATE_DIR} and .vapi-state.*.json.`,
+  "   Upstream's .github/workflows/promotion.yml has both, guarded for a repository where one matches nothing.",
+];
+
+/**
+ * Whether `npm run migrate` may move committed state, and what it says first.
+ * It moves state when every commit step in .github/workflows/ is seen to
+ * stage state/, or when a person has said theirs does. It never guesses that
+ * nothing commits state: a pipeline the engine has no file for is not seen.
+ */
+export function stateMoveRead(rootDir: string): StateMoveRead {
+  const step = commitStepRead(rootDir, {});
+  if (step.kind === "stale")
+    return {
+      open: false,
+      lines: [
+        ...COMMIT_STEP_NEEDS,
+        `⚠️  Nothing moves into ${STATE_DIR}/: ${step.file} stages .vapi-state.*.json but not ${STATE_DIR}/.`,
+        `   Add \`git add -A -- ${STATE_DIR}\` to that step, then run \`npm run migrate\` again.`,
+      ],
+    };
+  if (step.kind === "seen")
+    return {
+      open: true,
+      lines: [
+        ...COMMIT_STEP_NEEDS,
+        `✅ Every commit step in .github/workflows/ is seen to stage ${STATE_DIR}/. A pipeline the engine has no file for (another CI system, a script that commits with its own token) is not read and needs the same two lines.`,
+      ],
+    };
+  if (commitStepAcknowledged(rootDir))
+    return {
+      open: true,
+      lines: [
+        ...COMMIT_STEP_NEEDS,
+        `✍️  ${STATE_DIR}/commit-step.json says the commit step stages ${STATE_DIR}/. The engine can't check a step it can't read, so it takes that word.`,
+      ],
+    };
+  return {
+    open: false,
+    lines: [
+      `⚠️  Nothing moves into ${STATE_DIR}/ yet: ${notSeenReason(step.kind === "unseen" ? step.file : undefined)}.`,
+      ...COMMIT_STEP_NEEDS,
+      "   When your step does that, say so. This writes that down and moves every org:",
+      `     npm run migrate -- ${COMMIT_STEP_FLAG}`,
+      `   The engine can't check a step it can't read. From then on it takes your word, kept in ${STATE_DIR}/commit-step.json.`,
+    ],
+  };
+}
+
+/**
+ * What the commit step has to stage before state can move, when nothing is
+ * seen to stage state/ and nobody has said it does. Undefined when
+ * `npm run migrate` would move state, or when a workflow is seen to stage
+ * only the old file.
+ */
+export function commitStepAsk(rootDir: string): string[] | undefined {
+  const step = commitStepRead(rootDir, {});
+  if (step.kind === "stale" || step.kind === "seen") return undefined;
+  return commitStepAcknowledged(rootDir)
+    ? undefined
+    : stateMoveRead(rootDir).lines;
+}
+
+/**
+ * Record a person's word that their commit step stages state/. Refused while
+ * a workflow is seen to stage only the old file: that is seen to be untrue.
+ * Returns the line to print.
+ */
+export function commitStepAcknowledge(rootDir: string): string {
+  const step = commitStepRead(rootDir, {});
+  if (step.kind === "stale")
+    throw new StateLayoutError(
+      `${step.file} stages .vapi-state.*.json but not ${STATE_DIR}/, so ${COMMIT_STEP_FLAG} is not true yet.\n` +
+        `   Add \`git add -A -- ${STATE_DIR}\` to that step first. Nothing was changed.`,
+    );
+  if (step.kind === "seen")
+    return `ℹ️  ${COMMIT_STEP_FLAG} is not needed here: every commit step in .github/workflows/ is seen to stage ${STATE_DIR}/.`;
+  if (commitStepAcknowledged(rootDir))
+    return `ℹ️  ${STATE_DIR}/commit-step.json already says the commit step stages ${STATE_DIR}/.`;
+  const path = commitStepFilePath(rootDir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(
+    path,
+    `${JSON.stringify({ stagesStateFolder: true }, null, 2)}\n`,
+  );
+  return `✍️  Wrote ${STATE_DIR}/commit-step.json: you said the commit step stages ${STATE_DIR}/. Commit it together with the move.`;
+}
+
+/**
+ * Move one org's engine files into state/<org>/. Only `npm run migrate` calls
+ * this, after stateMoveRead says the move is open. Returns what moved.
+ *
+ * Each committed file moves by one rename, so the full state is always in
+ * exactly one of the two places. Throws StateLayoutError before changing
+ * anything when both places hold a file and they disagree.
+ */
+export function stateMove(rootDir: string, org: string): string[] {
+  const moved: string[] = [];
+  // Same content in both places: the old copy carries nothing.
+  for (const file of committedInBothPlaces(rootDir, org)) {
     unlinkSync(file.legacy);
     moved.push(file.legacyLabel);
   }
-  const pending = files.filter((file) => !existsSync(file.next));
-  const committedMoved = pending.length > 0 && !blocker;
-  if (committedMoved)
-    for (const file of pending) {
-      mkdirSync(dirname(file.next), { recursive: true });
-      renameSync(file.legacy, file.next);
-      moved.push(file.legacyLabel);
-    }
-  if (moved.length > 0)
-    notices.push(
-      `📦 Moved ${moved.join(", ")} into ${STATE_DIR}/${org}/.` +
-        (moved.some((label) => !label.endsWith("/"))
-          ? " Commit the removal together with the new folder."
-          : ""),
-    );
-  if (pending.length > 0 && blocker) {
-    const where = pending.map((file) => file.legacyLabel).join(" and ");
-    notices.push(
-      blocker.kind === "ci"
-        ? `ℹ️  ${where} stays where it is: a CI run never moves state. Run \`npm run migrate\` on your machine and commit the result to move it into ${STATE_DIR}/${org}/.`
-        : blocker.kind === "workflow"
-          ? `⚠️  ${where} stays where it is: ${blocker.file} stages .vapi-state.*.json but not ${STATE_DIR}/. Add \`git add -A -- ${STATE_DIR}\` to that step, then run \`npm run migrate\`.`
-          : `ℹ️  ${where} stays where it is: ${unseenReason(blocker.file)}. \`npm run migrate\` says what the commit step has to stage before it can move.`,
-    );
+  for (const file of committedFiles(rootDir, org)) {
+    if (!existsSync(file.legacy)) continue;
+    mkdirSync(dirname(file.next), { recursive: true });
+    renameSync(file.legacy, file.next);
+    moved.push(file.legacyLabel);
   }
-  return notices;
+  return [...moved, ...stateLocalMove(rootDir, org)];
 }

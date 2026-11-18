@@ -19,10 +19,11 @@ import {
   writeBaseline,
 } from "./hash-store.ts";
 import {
-  commitStepAcknowledge,
+  STATE_DIR,
   commitStepAsk,
   stateFileRead,
-  stateLayoutPrepare,
+  stateMove,
+  stateMoveRead,
   stateOrgsList,
 } from "./state-paths.ts";
 import { asResourceState, sortedKeysReplacer } from "./state-serialize.ts";
@@ -37,20 +38,13 @@ export interface OrgMigrationResult {
   seeded: number; // baselines written into the hash store
   skipped: number; // legacy hashes ignored because a baseline already existed
   slimmed: boolean; // whether the state file was rewritten to slim form
-  notices: string[]; // what moved into state/<org>/, or why it stayed
+  moved: string[]; // what moved into state/<org>/; empty when nothing did
 }
 
 export interface MigrationResult {
   orgs: OrgMigrationResult[];
-  /** What was written down when the person said their commit step stages state/. */
-  acknowledged?: string;
   /** Set when nothing moved: what the commit step has to stage first. */
   commitStepAsk?: string[];
-}
-
-export interface MigrationOptions {
-  /** The person says the step that commits state stages state/ (`--commit-step-stages-state`). */
-  commitStepStagesState?: boolean;
 }
 
 // A legacy entry is anything that isn't already exactly `{ uuid: string }`:
@@ -94,6 +88,7 @@ function isSection(value: unknown): value is Record<string, unknown> {
 async function migrateOne(
   baseDir: string,
   org: string,
+  move: boolean,
 ): Promise<OrgMigrationResult> {
   const stateFilePath = stateFileRead(baseDir, org);
   const raw = JSON.parse(readFileSync(stateFilePath, "utf-8")) as Record<
@@ -144,21 +139,15 @@ async function migrateOne(
   }
 
   // Slim first, in place, then move: each step leaves one complete state
-  // file. An explicit migrate moves state even in a CI run, because whoever
-  // runs it there commits the result; a commit step that would drop state/,
-  // or isn't seen to stage it, still stops the move.
-  const notices = stateLayoutPrepare(baseDir, org, {
-    ...process.env,
-    CI: "",
-    GITHUB_ACTIONS: "",
-  });
+  // file.
+  const moved = move ? stateMove(baseDir, org) : [];
   return {
     org,
     stateFile: relative(baseDir, stateFileRead(baseDir, org)),
     seeded,
     skipped,
     slimmed: needsSlim,
-    notices,
+    moved,
   };
 }
 
@@ -167,20 +156,30 @@ async function migrateOne(
 // engine files into `state/<org>/`. Idempotent — re-running on a migrated
 // repo seeds nothing, rewrites nothing and moves nothing.
 //
-// Where nothing is seen to stage state/ after a run, files are slimmed in
-// place and nothing moves until the person says their commit step stages it.
+// This is the only place committed state moves. It moves when every commit
+// step in .github/workflows/ is seen to stage state/, or when a person has
+// said theirs does (commitStepAcknowledge). Otherwise files are slimmed in
+// place and nothing moves.
 export async function migrateAll(
   baseDir: string = BASE_DIR,
-  options: MigrationOptions = {},
 ): Promise<MigrationResult> {
-  const acknowledged = options.commitStepStagesState
-    ? commitStepAcknowledge(baseDir)
-    : undefined;
+  const { open } = stateMoveRead(baseDir);
   const orgs: OrgMigrationResult[] = [];
   for (const org of stateOrgsList(baseDir)) {
-    orgs.push(await migrateOne(baseDir, org));
+    orgs.push(await migrateOne(baseDir, org, open));
   }
-  return { orgs, acknowledged, commitStepAsk: commitStepAsk(baseDir) };
+  return { orgs, commitStepAsk: commitStepAsk(baseDir) };
+}
+
+/** The line `npm run migrate` prints for what moved for one org. */
+export function migrateMovedLine(org: OrgMigrationResult): string | undefined {
+  if (org.moved.length === 0) return undefined;
+  return (
+    `📦 Moved ${org.moved.join(", ")} into ${STATE_DIR}/${org.org}/.` +
+    (org.moved.some((label) => !label.endsWith("/"))
+      ? " Commit the removal together with the new folder."
+      : "")
+  );
 }
 
 // Guard called at the entry of pull/push/apply. Throws if the given state file
