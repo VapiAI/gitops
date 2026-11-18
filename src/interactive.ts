@@ -2,8 +2,8 @@ import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { dirname, extname, join, relative } from "path";
-import { fileURLToPath } from "url";
+import { extname, join, relative } from "path";
+import { baseDir } from "./base-dir.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // slug-utils is config-free (no config.ts side effects) — safe to import in
 // the launcher, which runs before any org/token is selected.
@@ -16,8 +16,7 @@ import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 

@@ -2,14 +2,14 @@ import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
-import { dirname, join } from "path";
+import { join } from "path";
+import { baseDir } from "./base-dir.ts";
 import {
   stateFileLabel,
   stateFileLegacyPath,
   stateFileRead,
   stateOrgDir,
 } from "./state-paths.ts";
-import { fileURLToPath } from "url";
 import {
   API_KEY_VAR,
   API_KEYS_URL,
@@ -33,8 +33,7 @@ import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 const VAPI_REGIONS: Record<string, string> = {
   us: "https://api.vapi.ai",
   eu: "https://api.eu.vapi.ai",

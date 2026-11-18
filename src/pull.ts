@@ -51,7 +51,7 @@ import {
   stateWritePrepare,
   upsertState,
 } from "./state.ts";
-import { stateSavedStampPath } from "./state-paths.ts";
+import { engineFiles, stateSavedStampPath } from "./state-paths.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
 // Map resource types to their API endpoints
@@ -1356,9 +1356,14 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
 
   if (gitEnabled) {
     changedFiles = getLocallyChangedFiles();
-    // Only keep resource files — non-resource changes don't matter
+    // Only keep resource files — non-resource changes don't matter. Neither
+    // do the files the engine keeps in that folder itself (the org pin and
+    // its records in the older layout): a person didn't edit those, whether
+    // git shows them as new, changed, or deleted by `npm run migrate`.
+    const engineOwn = engineFiles(BASE_DIR, VAPI_ENV);
     for (const f of changedFiles) {
-      if (!f.startsWith(`resources/${VAPI_ENV}/`)) changedFiles.delete(f);
+      if (!f.startsWith(`resources/${VAPI_ENV}/`) || engineOwn.has(f))
+        changedFiles.delete(f);
     }
   }
 

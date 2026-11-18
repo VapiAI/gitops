@@ -1,6 +1,7 @@
 import { execSync } from "child_process";
-import { dirname, join, resolve } from "path";
+import { join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { baseDir } from "./base-dir.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
   stateFileRead,
@@ -18,8 +19,7 @@ import "./user-agent.ts";
 // 3. If conflicts, stop — user resolves, then runs push manually
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 

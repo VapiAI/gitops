@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { dirname } from "node:path";
-import test, { after } from "node:test";
+import test from "node:test";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tools are applied before assistants because assistants reference tools. But a
@@ -28,7 +26,6 @@ const {
   updateToolAssistantRefs,
 } = await import("../src/push.ts");
 
-import { deleteBaseline, hashStoreDir } from "../src/hash-store.ts";
 import type { ResourceFile, StateFile } from "../src/types.ts";
 
 const UUID = "8f14e45f-ceea-467a-9f1b-1a1b2c3d4e5f";
@@ -36,15 +33,8 @@ const UUID = "8f14e45f-ceea-467a-9f1b-1a1b2c3d4e5f";
 // updateToolAssistantRefs records a drift baseline for every PATCH it sends, and
 // the hash store resolves beside src/ — not under a temp dir — so remove the
 // one these tests write rather than leave it in the developer's real store.
-// The push under test records a baseline in this checkout's state/ folder.
-// Remove it and the folders it created, so a test run leaves state/ as it was.
-after(async () => {
-  await deleteBaseline("test-fixture-org", UUID);
-  rmSync(dirname(dirname(hashStoreDir("test-fixture-org"))), {
-    recursive: true,
-    force: true,
-  });
-});
+// The push under test records a baseline in the temporary directory the
+// engine works in under test (tests/no-vapi-api.ts).
 
 test("an unresolved assistant destination drops the whole destinations key", async () => {
   // Unresolved = resolution left the slug exactly as written, because the

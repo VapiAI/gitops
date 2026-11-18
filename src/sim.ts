@@ -6,8 +6,8 @@
 
 import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+import { baseDir } from "./base-dir.ts";
 import {
   simRunItemTerminal,
   simRunVerdict,
@@ -25,8 +25,7 @@ import {
   type VapiConnection,
 } from "./vapi-client.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 export interface SimEnv {
   env: string;
