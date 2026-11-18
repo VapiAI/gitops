@@ -149,6 +149,7 @@ tell it. Nothing changes inside the files.
 | --- | --- |
 | `.vapi-state.<org>.json` | `state/<org>/state.json` |
 | `resources/<org>/.vapi-org.json` | `state/<org>/org.json` |
+| `resources/<org>/.vapi-credential-providers.json` | `state/<org>/credential-providers.json` |
 | `.vapi-state-hash/<org>/` | `state/<org>/local/baselines/` |
 | `.vapi-state.<org>.snapshots/` | `state/<org>/local/snapshots/` |
 
@@ -296,6 +297,7 @@ for dir in state/*/; do
   org=$(basename "$dir")
   if [ -f "state/$org/state.json" ]; then mv "state/$org/state.json" ".vapi-state.$org.json"; fi
   if [ -f "state/$org/org.json" ]; then mv "state/$org/org.json" "resources/$org/.vapi-org.json"; fi
+  if [ -f "state/$org/credential-providers.json" ]; then mv "state/$org/credential-providers.json" "resources/$org/.vapi-credential-providers.json"; fi
   # This machine's baselines and snapshots. They are not in git, so everyone
   # who has pulled or pushed since the move runs these two on their machine.
   if [ -d "state/$org/local/baselines" ]; then mkdir -p .vapi-state-hash && mv "state/$org/local/baselines" ".vapi-state-hash/$org"; fi

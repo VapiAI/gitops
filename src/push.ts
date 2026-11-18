@@ -61,7 +61,10 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   "simulation suite": "simulationSuites",
 };
 
-import { credentialKindsRead } from "./credential-kinds.ts";
+import {
+  credentialKindsLabel,
+  credentialKindsRead,
+} from "./credential-kinds.ts";
 import {
   credentialForwardMap,
   credentialReverseMap,
@@ -1798,6 +1801,7 @@ async function main(): Promise<void> {
         org: VAPI_ENV,
         state,
         kinds: credentialKindsRead(BASE_DIR, VAPI_ENV),
+        kindsFile: credentialKindsLabel(BASE_DIR, VAPI_ENV),
         customerKeysOnly: orgPolicyRead(RESOURCES_DIR).customerKeysOnly,
       }),
     ];

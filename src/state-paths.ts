@@ -2,6 +2,7 @@
 //
 //   state/<org>/state.json          resource name → Vapi UUID (committed)
 //   state/<org>/org.json            the Vapi org this folder is pinned to (committed)
+//   state/<org>/<record>.json       what the engine records beside them (committed)
 //   state/<org>/local/baselines/    drift baselines, one file per UUID (this machine only)
 //   state/<org>/local/snapshots/    push snapshots for rollback (this machine only)
 //   state/commit-step.json          a person's word that their commit step stages state/ (committed)
@@ -184,6 +185,41 @@ export function orgPinFileRead(rootDir: string, org: string): string {
 /** The org pin to write: the one that is read. */
 export const orgPinFileWrite = orgPinFileRead;
 
+/** The records the engine keeps beside an org's state file, by name. */
+export const STATE_RECORDS = ["credential-providers"] as const;
+export type StateRecord = (typeof STATE_RECORDS)[number];
+
+function recordPath(rootDir: string, org: string, name: StateRecord): string {
+  return join(stateOrgDir(rootDir, org), `${name}.json`);
+}
+
+function recordLegacyPath(
+  rootDir: string,
+  org: string,
+  name: StateRecord,
+): string {
+  return join(rootDir, "resources", org, `.vapi-${name}.json`);
+}
+
+/**
+ * A record the engine keeps beside the state file: where it is, else where
+ * its first write goes. For an org in the old layout that is
+ * resources/<org>/.vapi-<name>.json, beside the old org pin, which a commit
+ * step from before state/ already stages with the folder.
+ */
+export function stateRecordPath(
+  rootDir: string,
+  org: string,
+  name: StateRecord,
+): string {
+  return fileInLayout(
+    recordPath(rootDir, org, name),
+    recordLegacyPath(rootDir, org, name),
+    rootDir,
+    org,
+  );
+}
+
 /** The state file as a person names it: its path from the repository root. */
 export function stateFileLabel(rootDir: string, org: string): string {
   return relative(rootDir, stateFileRead(rootDir, org)).replaceAll("\\", "/");
@@ -237,6 +273,12 @@ function committedFiles(rootDir: string, org: string): CommittedFile[] {
       legacyLabel: `resources/${org}/.vapi-org.json`,
       nextLabel: `${STATE_DIR}/${org}/org.json`,
     },
+    ...STATE_RECORDS.map((name) => ({
+      legacy: recordLegacyPath(rootDir, org, name),
+      next: recordPath(rootDir, org, name),
+      legacyLabel: `resources/${org}/.vapi-${name}.json`,
+      nextLabel: `${STATE_DIR}/${org}/${name}.json`,
+    })),
   ];
 }
 

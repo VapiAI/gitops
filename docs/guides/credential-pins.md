@@ -130,6 +130,12 @@ including `npm run pull -- <org> --bootstrap`, which changes no resource
 file. If the file is missing or older than the state file, the check reports
 `credential-pin-unchecked` and asks for that pull.
 
+In a repository whose state is still in the layout from before `state/`, the
+file is `resources/<org>/.vapi-credential-providers.json` instead, which the
+commit step that repository already has stages with the folder. `npm run
+migrate` moves it with the rest: see
+[Upgrading from an older version](commands.md#upgrading-from-an-older-version).
+
 Give every key a name in Vapi before the first pull. Two keys with no name
 and the same provider get the same name here, and only one is kept. Pull
 warns when that happens.

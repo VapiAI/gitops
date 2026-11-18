@@ -81,6 +81,7 @@ function check(
       Object.keys(files.tools ?? {}),
     ),
     kinds,
+    kindsFile: "state/clinic/credential-providers.json",
     customerKeysOnly: options.customerKeysOnly ?? false,
   }).map(
     (f) => `${f.severity} ${f.rule} ${f.type}/${f.resourceId}: ${f.message}`,

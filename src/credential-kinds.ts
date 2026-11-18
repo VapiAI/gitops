@@ -10,17 +10,23 @@
 // Config-free so validate, push and tests can read any org.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { stateOrgDir } from "./state-paths.ts";
+import { dirname, relative } from "node:path";
+import { stateRecordPath } from "./state-paths.ts";
 import { sortedKeysReplacer } from "./state-serialize.ts";
 
+// state/<org>/credential-providers.json, or
+// resources/<org>/.vapi-credential-providers.json while the org's state is
+// still in the old layout, where an older commit step stages it.
 export function credentialKindsPath(rootDir: string, org: string): string {
-  return join(stateOrgDir(rootDir, org), "credential-providers.json");
+  return stateRecordPath(rootDir, org, "credential-providers");
 }
 
 /** The file as a person names it: its path from the repository root. */
-export function credentialKindsLabel(org: string): string {
-  return `state/${org}/credential-providers.json`;
+export function credentialKindsLabel(rootDir: string, org: string): string {
+  return relative(rootDir, credentialKindsPath(rootDir, org)).replaceAll(
+    "\\",
+    "/",
+  );
 }
 
 export interface CredentialKind {

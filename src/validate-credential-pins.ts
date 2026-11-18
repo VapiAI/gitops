@@ -16,10 +16,7 @@
 // the org is customer-keys-only (a finding is then an error, else a warning).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import {
-  type CredentialKinds,
-  credentialKindsLabel,
-} from "./credential-kinds.ts";
+import type { CredentialKinds } from "./credential-kinds.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { referencesCollect } from "./resolver.ts";
 import type { LoadedResources, ResourceType, StateFile } from "./types.ts";
@@ -152,9 +149,11 @@ export function validateCredentialPins(args: {
   // What each saved credential is a key for; undefined before the first pull
   // that recorded it.
   kinds: CredentialKinds | undefined;
+  // The file the kinds are read from, as a person names it.
+  kindsFile: string;
   customerKeysOnly: boolean;
 }): ValidationFinding[] {
-  const { loaded, org, state, kinds, customerKeysOnly } = args;
+  const { loaded, org, state, kinds, kindsFile, customerKeysOnly } = args;
   const severity = customerKeysOnly ? "error" : "warn";
   const uuidToName = credentialReverseMap(state);
   const nameOf = (ref: string) => uuidToName.get(ref) ?? ref;
@@ -263,7 +262,7 @@ export function validateCredentialPins(args: {
       else if (!kindsReported)
         finding(
           "credential-pin-unchecked",
-          `${credentialKindsLabel(org)} ` +
+          `${kindsFile} ` +
             (kinds
               ? `has no entry for ${quoted(missingKinds)}`
               : "doesn't exist yet") +
