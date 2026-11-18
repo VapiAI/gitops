@@ -2248,7 +2248,9 @@ itself customer-keys-only so the report is an error there.
 ### Status
 
 **RESOLVED 2026-11-17.** Pull writes
-`state/<org>/credential-providers.json` and warns when two
+`state/<org>/credential-providers.json`
+(`resources/<org>/.vapi-credential-providers.json` while the org's state is
+in the older layout) and warns when two
 credentials collide on one name. `validate` has the
 `credential-pin-hides-key` rule, an error in an org whose
 `.vapi-policy.yml` sets `customerKeysOnly: true`. The promotion plan warns

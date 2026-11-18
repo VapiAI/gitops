@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import test from "node:test";
 import {
   credentialKindOf,
+  credentialKindsLabel,
   credentialKindsRead,
   credentialKindsWrite,
 } from "../src/credential-kinds.ts";
+import { migrateAll } from "../src/migrate-hash-store.ts";
 import { orgPolicyParse, orgPolicyRead } from "../src/org-policy.ts";
+import { commitStepAcknowledge } from "../src/state-paths.ts";
+import { stateFixturePath } from "./state-fixture.ts";
 
 test("a credential's kind is its provider, and whether a bucket is set", () => {
   assert.deepEqual(credentialKindOf({ provider: "11labs", apiKey: "…" }), {
@@ -35,6 +46,7 @@ test("a credential's kind is its provider, and whether a bucket is set", () => {
 test("the kinds file round-trips, holds nothing else, and isn't rewritten unchanged", () => {
   const dir = mkdtempSync(join(tmpdir(), "vapi-kinds-"));
   try {
+    writeFileSync(stateFixturePath(dir, "clinic"), "{}\n");
     assert.equal(credentialKindsRead(dir, "clinic"), undefined);
     const kinds = {
       recordings: { provider: "azure", bucket: true as const },
@@ -59,6 +71,42 @@ test("the kinds file round-trips, holds nothing else, and isn't rewritten unchan
     const written = statSync(file).mtimeMs;
     assert.equal(credentialKindsWrite(dir, "clinic", kinds), false);
     assert.equal(statSync(file).mtimeMs, written);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("while an org's state is in the older layout the kinds file sits where that layout's commit step stages it, and migrate moves it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vapi-kinds-"));
+  try {
+    writeFileSync(join(dir, ".vapi-state.clinic.json"), "{}\n");
+    const kinds = { elevenlabs: { provider: "11labs" } };
+    assert.equal(credentialKindsWrite(dir, "clinic", kinds), true);
+    const beside = join(
+      dir,
+      "resources/clinic/.vapi-credential-providers.json",
+    );
+    const inFolder = join(dir, "state/clinic/credential-providers.json");
+    assert.equal(credentialKindsLabel(dir, "clinic"), relative(dir, beside));
+    assert.equal(existsSync(beside), true);
+    // Nothing of this org's is under state/, which that step doesn't stage.
+    assert.equal(existsSync(join(dir, "state")), false);
+    assert.deepEqual(credentialKindsRead(dir, "clinic"), kinds);
+
+    commitStepAcknowledge(dir);
+    await migrateAll(dir);
+    assert.equal(existsSync(beside), false);
+    assert.equal(credentialKindsLabel(dir, "clinic"), relative(dir, inFolder));
+    assert.deepEqual(credentialKindsRead(dir, "clinic"), kinds);
+    // And the next write goes to the folder.
+    assert.equal(
+      credentialKindsWrite(dir, "clinic", {
+        deepgram: { provider: "deepgram" },
+      }),
+      true,
+    );
+    assert.equal(existsSync(beside), false);
+    assert.match(readFileSync(inFolder, "utf-8"), /deepgram/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

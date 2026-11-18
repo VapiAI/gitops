@@ -130,89 +130,120 @@ function run(dir: string, port: number, script: string, ...args: string[]) {
   });
 }
 
-test("pull records each key's provider, and validate catches a list that hides one", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "vapi-credential-pins-"));
-  cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
-  cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
-  symlinkSync(
-    join(REPO_ROOT, "node_modules"),
-    join(dir, "node_modules"),
-    "dir",
-  );
-  const orgDir = join(dir, "resources", ORG);
-  mkdirSync(join(orgDir, "assistants"), { recursive: true });
-  mkdirSync(join(orgDir, "squads"), { recursive: true });
-  writeFileSync(join(orgDir, "assistants", "triage.md"), TRIAGE);
-  const squadPath = join(orgDir, "squads", "front-desk.yml");
-  // The practice's model key, the transcriber key and the bucket: no voice key.
-  writeFileSync(squadPath, squad(["azure-south", "deepgram", "recordings"]));
+// Where the engine keeps the two files it writes, in each layout. A fresh
+// fork of this repository has a workflow that stages state/, so its state
+// starts there; a repository whose commit step can't be seen keeps the older
+// places, which that step already stages.
+const LAYOUTS = [
+  {
+    name: "state/<org>/",
+    workflows: true,
+    stateFile: `state/${ORG}/state.json`,
+    kindsFile: `state/${ORG}/credential-providers.json`,
+  },
+  {
+    name: "the older layout",
+    workflows: false,
+    stateFile: `.vapi-state.${ORG}.json`,
+    kindsFile: `resources/${ORG}/.vapi-credential-providers.json`,
+  },
+];
 
-  const { worker, port } = await startStub(CREDENTIALS);
-  try {
-    // Before any pull there is nothing to check the list against.
-    const before = run(dir, port, "validate-cmd.ts");
-    assert.equal(before.status, 0, before.stdout + before.stderr);
-    assert.match(before.stdout, /credential-pin-unchecked/);
-
-    const pull = run(dir, port, "pull.ts", "--bootstrap");
-    assert.equal(pull.status, 0, pull.stdout + pull.stderr);
-    assert.match(
-      pull.stdout + pull.stderr,
-      new RegExp(
-        `Credentials ${id(4)} and ${id(6)} are both named "deepgram"; only the second is kept`,
-      ),
+for (const layout of LAYOUTS)
+  test(`pull records each key's provider, and validate catches a list that hides one (${layout.name})`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vapi-credential-pins-"));
+    if (layout.workflows)
+      cpSync(join(REPO_ROOT, ".github"), join(dir, ".github"), {
+        recursive: true,
+      });
+    cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+    symlinkSync(
+      join(REPO_ROOT, "node_modules"),
+      join(dir, "node_modules"),
+      "dir",
     );
-    const kindsText = readFileSync(
-      join(dir, "state", ORG, "credential-providers.json"),
-      "utf-8",
-    );
-    assert.deepEqual(JSON.parse(kindsText), {
-      "azure-north": { provider: "azure-openai" },
-      "azure-south": { provider: "azure-openai" },
-      deepgram: { provider: "deepgram" },
-      elevenlabs: { provider: "11labs" },
-      recordings: { provider: "azure", bucket: true },
-    });
-    assert.doesNotMatch(kindsText, /secret/);
-    // The state file is still a name → UUID map and nothing else.
-    const state = JSON.parse(
-      readFileSync(join(dir, "state", ORG, "state.json"), "utf-8"),
-    );
-    assert.deepEqual(state.credentials.elevenlabs, { uuid: id(3) });
+    const orgDir = join(dir, "resources", ORG);
+    mkdirSync(join(orgDir, "assistants"), { recursive: true });
+    mkdirSync(join(orgDir, "squads"), { recursive: true });
+    writeFileSync(join(orgDir, "assistants", "triage.md"), TRIAGE);
+    const squadPath = join(orgDir, "squads", "front-desk.yml");
+    // The practice's model key, the transcriber key and the bucket: no voice key.
+    writeFileSync(squadPath, squad(["azure-south", "deepgram", "recordings"]));
 
-    // A warning by default: validate passes and says what is hidden.
-    const warned = run(dir, port, "validate-cmd.ts");
-    assert.equal(warned.status, 0, warned.stdout + warned.stderr);
-    assert.match(warned.stdout, /0 error\(s\), 1 warning\(s\)/);
-    assert.match(
-      warned.stdout,
-      /credential-pin-hides-key[\s\S]*the voice of member "triage" uses 11labs, and this org has "elevenlabs" saved for it/,
-    );
+    const { worker, port } = await startStub(CREDENTIALS);
+    try {
+      // Before any pull there is nothing to check the list against.
+      const before = run(dir, port, "validate-cmd.ts");
+      assert.equal(before.status, 0, before.stdout + before.stderr);
+      assert.match(before.stdout, /credential-pin-unchecked/);
+      assert.ok(
+        before.stdout.includes(`${layout.kindsFile} doesn't exist yet`),
+        before.stdout,
+      );
 
-    // An error once the org is marked customer-keys-only: validate fails,
-    // which is the step apply runs before it pulls or pushes anything.
-    writeFileSync(join(orgDir, ".vapi-policy.yml"), "customerKeysOnly: true\n");
-    const refused = run(dir, port, "validate-cmd.ts");
-    assert.equal(refused.status, 1, refused.stdout + refused.stderr);
-    assert.match(refused.stdout, /1 error\(s\), 0 warning\(s\)/);
-    assert.match(refused.stderr, /Validation failed with 1 error/);
+      const pull = run(dir, port, "pull.ts", "--bootstrap");
+      assert.equal(pull.status, 0, pull.stdout + pull.stderr);
+      assert.match(
+        pull.stdout + pull.stderr,
+        new RegExp(
+          `Credentials ${id(4)} and ${id(6)} are both named "deepgram"; only the second is kept`,
+        ),
+      );
+      const kindsText = readFileSync(join(dir, layout.kindsFile), "utf-8");
+      assert.deepEqual(JSON.parse(kindsText), {
+        "azure-north": { provider: "azure-openai" },
+        "azure-south": { provider: "azure-openai" },
+        deepgram: { provider: "deepgram" },
+        elevenlabs: { provider: "11labs" },
+        recordings: { provider: "azure", bucket: true },
+      });
+      assert.doesNotMatch(kindsText, /secret/);
+      // The state file is still a name → UUID map and nothing else.
+      const state = JSON.parse(
+        readFileSync(join(dir, layout.stateFile), "utf-8"),
+      );
+      assert.deepEqual(state.credentials.elevenlabs, { uuid: id(3) });
 
-    // Naming the voice key on the list clears it.
-    writeFileSync(
-      squadPath,
-      squad(["azure-south", "deepgram", "recordings", "elevenlabs"]),
-    );
-    const fixed = run(dir, port, "validate-cmd.ts");
-    assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
-    assert.match(fixed.stdout, /Validation passed/);
+      // A warning by default: validate passes and says what is hidden.
+      const warned = run(dir, port, "validate-cmd.ts");
+      assert.equal(warned.status, 0, warned.stdout + warned.stderr);
+      assert.match(warned.stdout, /0 error\(s\), 1 warning\(s\)/);
+      assert.match(
+        warned.stdout,
+        /credential-pin-hides-key[\s\S]*the voice of member "triage" uses 11labs, and this org has "elevenlabs" saved for it/,
+      );
 
-    // A misspelt policy key stops validate; it doesn't switch the rule off.
-    writeFileSync(join(orgDir, ".vapi-policy.yml"), "customerKeyOnly: true\n");
-    const typo = run(dir, port, "validate-cmd.ts");
-    assert.equal(typo.status, 1);
-    assert.match(typo.stderr, /unknown key "customerKeyOnly"/);
-  } finally {
-    worker.postMessage("shutdown");
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+      // An error once the org is marked customer-keys-only: validate fails,
+      // which is the step apply runs before it pulls or pushes anything.
+      writeFileSync(
+        join(orgDir, ".vapi-policy.yml"),
+        "customerKeysOnly: true\n",
+      );
+      const refused = run(dir, port, "validate-cmd.ts");
+      assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+      assert.match(refused.stdout, /1 error\(s\), 0 warning\(s\)/);
+      assert.match(refused.stderr, /Validation failed with 1 error/);
+
+      // Naming the voice key on the list clears it.
+      writeFileSync(
+        squadPath,
+        squad(["azure-south", "deepgram", "recordings", "elevenlabs"]),
+      );
+      const fixed = run(dir, port, "validate-cmd.ts");
+      assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
+      assert.match(fixed.stdout, /Validation passed/);
+
+      // A misspelt policy key stops validate; it doesn't switch the rule off.
+      writeFileSync(
+        join(orgDir, ".vapi-policy.yml"),
+        "customerKeyOnly: true\n",
+      );
+      const typo = run(dir, port, "validate-cmd.ts");
+      assert.equal(typo.status, 1);
+      assert.match(typo.stderr, /unknown key "customerKeyOnly"/);
+    } finally {
+      worker.postMessage("shutdown");
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
