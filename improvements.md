@@ -2104,23 +2104,40 @@ snapshots. `state/README.md` says the engine writes it and what breaks when a
 file goes missing. `resources/<org>/` now holds hand-written files only.
 `src/state-paths.ts` is the one module that knows both layouts.
 
-An older repository keeps working: every command reads the old places, and
-the next `pull`, `push` or `apply` on a person's machine moves the org with
-one rename per file and prints one line. The move fails closed: it happens
-only when a workflow is seen to stage `state/`, or when nothing in the
-repository commits state after a run. It is held back in a CI run, while a
-workflow stages `.vapi-state.*.json` but not `state/`, and while a commit
-step can't be read (a script, a commit action, a pipeline outside GitHub
-Actions) until a person says it stages `state/` with
-`npm run migrate -- --commit-step-stages-state`. A CI run stops before any
-request when it would write state where its commit step isn't seen to look.
-The promotion workflow stages both places. `tests/state-layout.test.ts`,
-`tests/state-layout-unseen-commit.test.ts` and
+An older repository keeps working exactly as it did: an org is in one layout,
+decided by where its committed state file is, and every command reads and
+writes the layout it finds, on a person's machine and in CI. No command moves
+committed state as a side effect. Only `npm run migrate` does, with one
+rename per file, after saying what the step that commits state after a run
+has to stage. It moves state when every commit step in `.github/workflows/`
+is seen to stage `state/`. It moves nothing while a workflow stages
+`.vapi-state.*.json` and nothing that could be `state/`, or while no commit
+step can be read (a script, a commit action, no workflow, a pipeline outside
+GitHub Actions), until a person says theirs stages `state/` with
+`npm run migrate -- --commit-step-stages-state`.
+
+The reader of commit steps (`src/commit-step.ts`) fails closed: a `git add`
+counts only as a plain command at the repository root that names `state` or
+stages everything. A CI run stops before any request when the workflow
+running it is seen not to commit what it would write. The promotion workflow
+stages both places. `tests/state-layout.test.ts`,
+`tests/state-layout-unseen-commit.test.ts`,
+`tests/state-move-second-round.test.ts` and
 `tests/promotion-workflow-commit.test.ts` cover each path.
 
-One limit remains. The flag is a person's word. If it is given and the commit
+Pull had one rule that depended on where the state file sat. With no baseline
+and nothing changed in git it kept a file only when the file was newer than
+the state file, and in a fresh clone that is the order git wrote the files
+in: every file was kept with state at the root, and every file would have
+been overwritten with state in `state/`. Pull now compares against the moment
+this machine's engine last saved state, kept beside the baselines, and a
+clone with no such save keeps every file.
+
+Two limits remain. The flag is a person's word: if it is given and the commit
 step does not stage `state/`, promotion runs pass while state is never
-committed. The engine can't see a step it can't read.
+committed. And the engine reads `.github/workflows/` only: a pipeline it has
+no file for is not read, which is why `migrate` always prints the two lines
+first.
 
 Two things stay where they were, on purpose. Dashboard backups
 (`<name>.<timestamp>.bkp.md`) stay beside the resource they shadow: a person

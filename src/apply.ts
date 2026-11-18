@@ -2,7 +2,11 @@ import { execSync } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
-import { stateFileRead, stateLayoutPrepare } from "./state-paths.ts";
+import {
+  stateFileRead,
+  stateLayoutPrepare,
+  stateNoticesPrint,
+} from "./state-paths.ts";
 // Pins this command's User-Agent label for the pull and push it spawns.
 import "./user-agent.ts";
 
@@ -33,11 +37,12 @@ export async function runApply(): Promise<void> {
   const allArgs = process.argv.slice(3);
   const hasForce = allArgs.includes("--force");
 
-  // Move an old-layout state file into state/<org>/ once, here, and fail fast
-  // with one clear message if it is still in the legacy format, rather than
-  // letting the spawned pull/push subprocess surface either later.
+  // Check the org's state layout once, here, and fail fast with one clear
+  // message if the state file is still in the legacy format, rather than
+  // letting the spawned pull/push subprocess surface either later. What is
+  // printed here is not printed again by the pull and push below.
   if (env && SLUG_RE.test(env)) {
-    for (const line of stateLayoutPrepare(BASE_DIR, env)) console.log(line);
+    stateNoticesPrint(stateLayoutPrepare(BASE_DIR, env));
     assertStateMigrated(stateFileRead(BASE_DIR, env));
   }
 

@@ -18,19 +18,28 @@
 import { existsSync } from "fs";
 import { mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { snapshotsDir, snapshotsLegacyDir } from "./state-paths.ts";
+import {
+  snapshotsDir,
+  snapshotsLegacyDir,
+  snapshotsWriteDir,
+} from "./state-paths.ts";
 import { sortedKeysReplacer } from "./state-serialize.ts";
 
+// Where snapshots are written: state/<org>/local/snapshots/, or
+// .vapi-state.<org>.snapshots/ while the org's state is in the old layout.
 export function snapshotsRoot(baseDir: string, env: string): string {
-  return snapshotsDir(baseDir, env);
+  return snapshotsWriteDir(baseDir, env);
 }
 
-// Snapshots written before state/ existed stay readable until the next pull,
-// push or apply moves them, so a rollback right after upgrading still works.
+// Snapshots are read from both places, so a rollback still works on a machine
+// whose snapshots have not moved yet.
 function snapshotRoots(baseDir: string, env: string): string[] {
-  return [snapshotsDir(baseDir, env), snapshotsLegacyDir(baseDir, env)].filter(
-    (root) => existsSync(root),
-  );
+  const roots = new Set([
+    snapshotsRoot(baseDir, env),
+    snapshotsDir(baseDir, env),
+    snapshotsLegacyDir(baseDir, env),
+  ]);
+  return [...roots].filter((root) => existsSync(root));
 }
 
 let activeRunDir: string | null = null;

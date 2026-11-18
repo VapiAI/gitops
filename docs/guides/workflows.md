@@ -142,10 +142,13 @@ fresh-clone workflows:
 2. **Git-tracked changes** — when no baseline exists yet, files that show up
    in `git status` (modified, deleted, or individually untracked) are
    preserved.
-3. **mtime fallback** — if git can't help (no commits yet, the resource tree
-   isn't tracked at all, or git just had nothing to say), files that are
-   newer than `state/<org>/state.json` are still preserved. This is the safety
-   net for the "fresh clone, edit a file, run pull again" case.
+3. **Last-save fallback** — if git can't help (no commits yet, the resource
+   tree isn't tracked at all, or git just had nothing to say), a file is
+   still preserved unless the engine has saved this org's state on this
+   machine since the file was last written. A fresh clone has no such save
+   yet, so its first pull keeps every file: a change merged in git and not
+   yet on the platform is not overwritten, whatever order the checkout wrote
+   the files in.
 
 Interactive `npm run pull` is local-first too: it asks
 `Overwrite locally modified files?` (default `No`). Pass `--force` (or answer

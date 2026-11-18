@@ -135,7 +135,9 @@ test("a missing state file is a warning, not an error", async () => {
     assert.deepEqual(
       [
         result.code,
-        result.out.includes("⚠️  no state/parity/state.json"),
+        // Named where its first write would go: with no state anywhere and
+        // no commit step seen to stage state/, that is the repository root.
+        result.out.includes("⚠️  no .vapi-state.parity.json"),
         existsSync(join(root, "tmp")),
       ],
       [0, true, false],

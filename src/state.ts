@@ -1,12 +1,15 @@
-import { existsSync, mkdirSync, readFileSync } from "fs";
-import { rename, writeFile } from "fs/promises";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { copyFile, rename, writeFile } from "fs/promises";
 import { dirname } from "path";
 import { BASE_DIR, VAPI_ENV } from "./config.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
+  stateFileLeftover,
   stateFileRead,
   stateFileWrite,
   stateLayoutPrepare,
+  stateNoticesPrint,
+  stateSavedStampPath,
 } from "./state-paths.ts";
 import {
   asResourceState,
@@ -71,15 +74,14 @@ export function createEmptyState(): StateFile {
 }
 
 /**
- * Run at the start of a command that writes state, before any request: move
- * the old layout into state/<org>/ when that is safe (state-paths.ts), then
- * refuse a state file still in the legacy per-resource-hash format.
+ * Run at the start of a command that writes state, before any request: stop
+ * when the org's state can't be written safely where it is (state-paths.ts),
+ * then refuse a state file still in the legacy per-resource-hash format.
  */
 export function stateWritePrepare(options: { dryRun?: boolean } = {}): void {
-  // A dry run writes nothing, so it leaves the old layout where it is.
+  // A dry run writes nothing, so there is nothing to check or say.
   if (!options.dryRun)
-    for (const line of stateLayoutPrepare(BASE_DIR, VAPI_ENV))
-      console.log(line);
+    stateNoticesPrint(stateLayoutPrepare(BASE_DIR, VAPI_ENV));
   assertStateMigrated(stateFileRead(BASE_DIR, VAPI_ENV));
 }
 
@@ -146,5 +148,12 @@ export async function saveState(state: StateFile): Promise<void> {
   const tmpPath = `${statePath}.tmp`;
   await writeFile(tmpPath, JSON.stringify(state, sortedKeysReplacer, 2) + "\n");
   await rename(tmpPath, statePath);
+  // An old copy left beside it is kept identical until migrate removes it.
+  const leftover = stateFileLeftover(BASE_DIR, VAPI_ENV);
+  if (leftover) await copyFile(statePath, leftover);
+  // Pull compares a file against this moment when it has no baseline for it.
+  const stamp = stateSavedStampPath(BASE_DIR, VAPI_ENV);
+  mkdirSync(dirname(stamp), { recursive: true });
+  writeFileSync(stamp, `${new Date().toISOString()}\n`);
   console.log(`💾 Saved state file: ${statePath}`);
 }

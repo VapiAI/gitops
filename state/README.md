@@ -23,6 +23,6 @@ Everything under `resources/<org>/`, including `resources/<org>/.vapi-ignore`, i
 
 ## Repositories created before this folder existed
 
-The same files used to sit elsewhere: `.vapi-state.<org>.json` and `.vapi-state.<org>.snapshots/` at the repository root, `.vapi-state-hash/<org>/`, and `resources/<org>/.vapi-org.json`. The engine still reads them there. The next `npm run pull`, `npm run push` or `npm run apply` on your machine moves them here and says so in one line. Commit the removal of the old file together with the new folder. `npm run migrate` moves every org at once.
+The same files used to sit elsewhere: `.vapi-state.<org>.json` and `.vapi-state.<org>.snapshots/` at the repository root, `.vapi-state-hash/<org>/`, and `resources/<org>/.vapi-org.json`. The engine keeps reading and writing them there, on your machine and in CI, for as long as you leave them.
 
-A CI run never moves them, and no command does while the engine can't see that the step committing state after a run stages this folder. See [Upgrading from an older version](../docs/guides/commands.md#upgrading-from-an-older-version).
+Only `npm run migrate` moves them here. Before it moves anything it says what the step that commits state after a run has to stage, and it moves nothing while it can't see that step stage this folder, unless you tell it yours does. Commit the removal of the old files together with the new folder. See [Upgrading from an older version](../docs/guides/commands.md#upgrading-from-an-older-version).

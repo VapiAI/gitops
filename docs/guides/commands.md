@@ -109,7 +109,13 @@ The test-call CLI cleans its terminal output for the developer loop:
 
 ## Upgrading from an older version
 
-`npm run migrate` brings an older repository up to date. It needs no org and
+Upgrading the engine does not change where your state is kept. A repository
+with `.vapi-state.<org>.json` at its root keeps it there: `pull`, `push`,
+`apply` and `promote` read and write it in place, on your machine and in CI,
+for as long as you like. Each of those commands prints one line saying the
+newer layout exists.
+
+`npm run migrate` is the only command that moves state. It needs no org and
 no API key, and it's safe to run more than once:
 
 ```bash
@@ -118,10 +124,25 @@ git add -A -- state ':(glob).vapi-state.*.json' resources
 git commit -m "chore: move engine state into state/"
 ```
 
-It does two things.
+It does three things.
 
-**Moves engine files into `state/<org>/`.** They used to sit under dot-names
-in three places. Nothing changes inside the files.
+**Says what your commit step has to stage, before it moves anything.** A
+promotion or apply run in CI writes the state file and leaves committing it
+to a later step. If that step stages only the old file, moved state drops out
+of git: every run still passes, and the next one creates every resource
+again. Once state is in `state/`, whatever commits state after a run has to
+stage both of these:
+
+```bash
+git add -A -- state                          # the new folder
+git add -A -- ':(glob).vapi-state.*.json'    # the old files, so their removal is committed
+```
+
+A commit action or a script needs the same two paths. Upstream's
+`.github/workflows/promotion.yml` has both.
+
+**Moves engine files into `state/<org>/`,** when it can see that step or you
+tell it. Nothing changes inside the files.
 
 | Before | Now |
 | --- | --- |
@@ -130,38 +151,17 @@ in three places. Nothing changes inside the files.
 | `.vapi-state-hash/<org>/` | `state/<org>/local/baselines/` |
 | `.vapi-state.<org>.snapshots/` | `state/<org>/local/snapshots/` |
 
-You don't have to run it for this: the engine keeps reading the old places,
-and the next `pull`, `push` or `apply` on your machine moves that org and
-says so in one line. Either way, commit the removal of the old file together
-with the new folder.
+What it does depends on what it reads in `.github/workflows/`:
 
-**State moves only when the engine can see it will still be committed.** A
-promotion run in CI writes the state file and leaves committing it to a later
-step. If that step stages only the old file, a move takes the UUID map out of
-git: every run still passes, and the next one creates every resource again.
-So the move is held back in three cases, and the command tells you which:
-
-- **In a CI run.** State stays where it is and is updated in place. Run
-  `npm run migrate` on your machine and commit the result.
-- **When a workflow under `.github/workflows/` stages `.vapi-state.*.json` but
-  not `state/`.** That workflow would commit the old file's removal without
-  the new one. Take upstream's `promotion.yml` workflow, or add
-  `git add -A -- state` to your own commit step, then run `npm run migrate`.
-- **When something may commit state and the engine can't see it stage
-  `state/`.** That is a workflow that can write to the repository and has no
-  `git add` line for `state` (it stages through a script, a commit action or
-  a variable), or a root `promotion.yml` with no workflow in the repository
-  that stages `state/` (the pipeline runs somewhere the engine can't read).
-  `npm run migrate` then moves nothing and prints what the commit step has to
-  stage:
-
-  ```bash
-  git add -A -- state                          # the new folder
-  git add -A -- ':(glob).vapi-state.*.json'    # the old files, so their removal is committed
-  ```
-
-  A commit action or a script needs the same two paths. When your step
-  stages both, say so:
+- **Every commit step there stages `state/`.** It moves every org.
+- **A step stages `.vapi-state.*.json` and nothing that could be `state/`.**
+  It moves nothing and names the workflow. Take upstream's `promotion.yml`
+  workflow, or add `git add -A -- state` to your own commit step, then run
+  `npm run migrate` again.
+- **Anything else.** A step that stages through a script, a commit action or
+  a variable, a repository with no workflow, or a pipeline in another CI
+  system. It moves nothing and asks you. When your step stages both paths,
+  say so:
 
   ```bash
   npm run migrate -- --commit-step-stages-state
@@ -170,19 +170,6 @@ So the move is held back in three cases, and the command tells you which:
   That writes `state/commit-step.json` and moves every org. Commit it with
   the move.
 
-What counts as seen: a `git add` line in a workflow file that names `state`
-(or `state/`, `state/**`), or one that stages everything (`git add -A`,
-`git add .`). A workflow whose `permissions` keep `contents` read-only, and
-that never runs `git commit` or `git push`, is not a commit step, so
-upstream's `ci.yml` and `vapi-checks.yml` hold nothing back.
-
-A CI run also stops, before it sends any request, when it would write state
-in a place its commit step isn't seen to stage: state already in `state/`
-under a step that stages only the old file or can't be read, or state still
-at the root under a step that stages only `state/`. In GitHub Actions the
-engine checks the workflow that is running it. Anywhere else it checks every
-workflow in the repository.
-
 > **`--commit-step-stages-state` is your word, and the engine can't check
 > it.** If you pass it and your commit step does not stage `state/`,
 > promotion runs pass while `state/<org>/state.json` is never committed, and
@@ -190,28 +177,79 @@ workflow in the repository.
 > a workflow is plainly seen to stage the old file alone. To take it back,
 > delete `state/commit-step.json`.
 
-If both the old and the new file exist for an org and they disagree, every
-writing command stops before it changes anything and names the two files.
-
 **Rewrites a legacy-format state file.** Repositories created before the
 state-file format changed carry per-resource hashes in the state file, and
 `pull`, `push` and `apply` refuse to run until they're gone. `migrate`
 rewrites each file to the current `{ "name": { "uuid": … } }` format and
 seeds this machine's drift baselines from the old file.
 
+### What the engine reads as a commit step
+
+The engine reads the workflow files in `.github/workflows/` and nothing else.
+It counts a `git add` as staging `state/` only where it can tell what the
+command stages:
+
+- It is a command of its own in a `run:` step that runs `bash` or `sh` at
+  the repository root.
+- It names `state` (also `state/` or `state/**`), or it stages everything:
+  `git add -A`, `git add --all`, `git add .`.
+- An `if` around it is fine when it names `state`, because that is how a step
+  guards a folder that may not exist yet.
+
+Everything else counts for nothing: a `git add` after a `cd`, in a step with
+a `working-directory`, after `||`, inside a loop, a function or a quoted
+string, with `-u`, with a variable or an exclusion in its paths, or a
+`git add -A` inside an `if`. A step like that may well work. The engine just
+can't tell, so `migrate` asks for the flag.
+
+Every job that shows a commit step has to pass, in every workflow file. A job
+shows none when its `permissions` keep `contents` read-only and it runs no
+`git add`, `git commit` or `git push`, so upstream's `ci.yml` and
+`vapi-checks.yml` don't get in the way.
+
+A pipeline the engine has no file for is never read: another CI system, or a
+script that commits with its own token. Check it yourself against the two
+lines above before you run `migrate`.
+
+### When a CI run stops
+
+A CI run stops, before it sends any request, when the workflow running it is
+seen not to commit what it would write:
+
+- State is in `state/`, and the commit step stages only the old file.
+- State is in `state/`, the commit step can't be read, and there is no
+  `state/commit-step.json`.
+- State is still at the root, and the commit step stages only `state/`.
+
+In GitHub Actions the engine checks the workflow that is running it. Anywhere
+else it checks every workflow in the repository.
+
+If both the old and the new file exist for an org and they disagree, every
+writing command stops before it changes anything and names the two files. If
+they hold the same content, the engine reads the one in `state/`, keeps the
+old copy identical, and says that `npm run migrate` removes it.
+
 ### What you'll see after upgrading
 
-- **`📦 Moved … into state/<org>/`**, once per org, on the first `pull`,
-  `push` or `apply` on your machine.
-- **`📦 1 locally modified file(s) will be preserved`** on the first `pull`
-  after the move. The file is the old org pin,
+- **`ℹ️  Engine state here is in the older layout …`**, one line per writing
+  command, until you run `npm run migrate`. Nothing else changes.
+
+After `npm run migrate`:
+
+- **`📦 Moved … into state/<org>/`**, once per org, from `migrate` itself.
+- **`📦 1 locally modified file(s) will be preserved`** on a `pull` before you
+  commit the move. The file is the old org pin,
   `resources/<org>/.vapi-org.json`. It moved to `state/<org>/org.json`, so git
   shows it as deleted until you commit. Pull does nothing differently because
   of it.
-- **`… stays where it is: …`** on every writing command while the move is
-  held back. The line says why.
+- **`📦 Moved .vapi-state-hash/<org>/ … into state/<org>/local/`**, once, on
+  each teammate's machine after they pull your commit. Those are that
+  machine's own baselines and snapshots, which are not in git.
 
 ### Going back to an older engine
+
+A repository that never ran `npm run migrate` has nothing to move back: its
+state is where an older engine looks for it.
 
 An engine from before `state/` doesn't read the folder. If you revert the
 engine after state has moved, it finds no state file: `pull` adopts every
