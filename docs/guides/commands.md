@@ -135,15 +135,60 @@ and the next `pull`, `push` or `apply` on your machine moves that org and
 says so in one line. Either way, commit the removal of the old file together
 with the new folder.
 
-The move is held back in two cases, and the command tells you which:
+**State moves only when the engine can see it will still be committed.** A
+promotion run in CI writes the state file and leaves committing it to a later
+step. If that step stages only the old file, a move takes the UUID map out of
+git: every run still passes, and the next one creates every resource again.
+So the move is held back in three cases, and the command tells you which:
 
-- **In a CI run.** State stays where it is and is updated in place. Only a
-  workflow that commits both places can record a move, so run
+- **In a CI run.** State stays where it is and is updated in place. Run
   `npm run migrate` on your machine and commit the result.
 - **When a workflow under `.github/workflows/` stages `.vapi-state.*.json` but
   not `state/`.** That workflow would commit the old file's removal without
   the new one. Take upstream's `promotion.yml` workflow, or add
   `git add -A -- state` to your own commit step, then run `npm run migrate`.
+- **When something may commit state and the engine can't see it stage
+  `state/`.** That is a workflow that can write to the repository and has no
+  `git add` line for `state` (it stages through a script, a commit action or
+  a variable), or a root `promotion.yml` with no workflow in the repository
+  that stages `state/` (the pipeline runs somewhere the engine can't read).
+  `npm run migrate` then moves nothing and prints what the commit step has to
+  stage:
+
+  ```bash
+  git add -A -- state                          # the new folder
+  git add -A -- ':(glob).vapi-state.*.json'    # the old files, so their removal is committed
+  ```
+
+  A commit action or a script needs the same two paths. When your step
+  stages both, say so:
+
+  ```bash
+  npm run migrate -- --commit-step-stages-state
+  ```
+
+  That writes `state/commit-step.json` and moves every org. Commit it with
+  the move.
+
+What counts as seen: a `git add` line in a workflow file that names `state`
+(or `state/`, `state/**`), or one that stages everything (`git add -A`,
+`git add .`). A workflow whose `permissions` keep `contents` read-only, and
+that never runs `git commit` or `git push`, is not a commit step, so
+upstream's `ci.yml` and `vapi-checks.yml` hold nothing back.
+
+A CI run also stops, before it sends any request, when it would write state
+in a place its commit step isn't seen to stage: state already in `state/`
+under a step that stages only the old file or can't be read, or state still
+at the root under a step that stages only `state/`. In GitHub Actions the
+engine checks the workflow that is running it. Anywhere else it checks every
+workflow in the repository.
+
+> **`--commit-step-stages-state` is your word, and the engine can't check
+> it.** If you pass it and your commit step does not stage `state/`,
+> promotion runs pass while `state/<org>/state.json` is never committed, and
+> a later run creates the same resources again. The flag is refused only when
+> a workflow is plainly seen to stage the old file alone. To take it back,
+> delete `state/commit-step.json`.
 
 If both the old and the new file exist for an org and they disagree, every
 writing command stops before it changes anything and names the two files.
@@ -153,3 +198,40 @@ state-file format changed carry per-resource hashes in the state file, and
 `pull`, `push` and `apply` refuse to run until they're gone. `migrate`
 rewrites each file to the current `{ "name": { "uuid": … } }` format and
 seeds this machine's drift baselines from the old file.
+
+### What you'll see after upgrading
+
+- **`📦 Moved … into state/<org>/`**, once per org, on the first `pull`,
+  `push` or `apply` on your machine.
+- **`📦 1 locally modified file(s) will be preserved`** on the first `pull`
+  after the move. The file is the old org pin,
+  `resources/<org>/.vapi-org.json`. It moved to `state/<org>/org.json`, so git
+  shows it as deleted until you commit. Pull does nothing differently because
+  of it.
+- **`… stays where it is: …`** on every writing command while the move is
+  held back. The line says why.
+
+### Going back to an older engine
+
+An engine from before `state/` doesn't read the folder. If you revert the
+engine after state has moved, it finds no state file: `pull` adopts every
+resource again under a new file name, and promotion creates each resource a
+second time. Move the state files back first, in the same commit as the
+revert:
+
+```bash
+for dir in state/*/; do
+  org=$(basename "$dir")
+  if [ -f "state/$org/state.json" ]; then mv "state/$org/state.json" ".vapi-state.$org.json"; fi
+  if [ -f "state/$org/org.json" ]; then mv "state/$org/org.json" "resources/$org/.vapi-org.json"; fi
+  # This machine's baselines and snapshots. They are not in git, so everyone
+  # who has pulled or pushed since the move runs these two on their machine.
+  if [ -d "state/$org/local/baselines" ]; then mkdir -p .vapi-state-hash && mv "state/$org/local/baselines" ".vapi-state-hash/$org"; fi
+  if [ -d "state/$org/local/snapshots" ]; then mv "state/$org/local/snapshots" ".vapi-state.$org.snapshots"; fi
+done
+git add -A -- state ':(glob).vapi-state.*.json' resources
+```
+
+Then revert the engine and commit. The older engine ignores whatever is left
+under `state/`. A commit step that was changed to stage only `state/` has to
+stage `.vapi-state.*.json` again.
