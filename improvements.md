@@ -2300,7 +2300,8 @@ prompts and `$include` in mappings, looked up in `resources/<org>/templates/`
 then `templates/`, expanded in the loader. Pull never writes a file that uses
 blocks and saves the dashboard version beside it instead. Push records the
 block content each resource went up with in
-`state/<org>/blocks.json`; `npm run sync-blocks` and the promotion
+`state/<org>/blocks.json` (`resources/<org>/.vapi-blocks.json` while the
+org's state is in the older layout); `npm run sync-blocks` and the promotion
 plan (`sync` entries) read it to find resources a block edit has not reached.
 
 ### Status

@@ -29,6 +29,6 @@ Everything under `resources/<org>/`, including `resources/<org>/.vapi-ignore` an
 
 The same files used to sit elsewhere: `.vapi-state.<org>.json` and `.vapi-state.<org>.snapshots/` at the repository root, `.vapi-state-hash/<org>/`, and `resources/<org>/.vapi-org.json`. The engine keeps reading and writing them there, on your machine and in CI, for as long as you leave them.
 
-While an org's state is there, the engine writes its credential providers record to `resources/<org>/.vapi-credential-providers.json`, where the commit step such a repository already has stages it.
+While an org's state is there, the engine writes its credential providers record to `resources/<org>/.vapi-credential-providers.json` and its blocks record to `resources/<org>/.vapi-blocks.json`, where the commit step such a repository already has stages them.
 
 Only `npm run migrate` moves them here. Before it moves anything it says what the step that commits state after a run has to stage, and it moves nothing while it can't see that step stage this folder, unless you tell it yours does. Commit the removal of the old files together with the new folder. See [Upgrading from an older version](../docs/guides/commands.md#upgrading-from-an-older-version).
