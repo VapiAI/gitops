@@ -75,6 +75,12 @@ function repoReset(
     `version: 1\norgs:\n${orgs.map((org) => `  ${org}: {}`).join("\n")}\npipelines:\n${pipelineYaml}\n`,
   );
   for (const org of orgs) write(`state/${org}/state.json`, "{}\n");
+  // The repository carries the workflow whose commit step runs here: the
+  // engine moves state only under a commit step it can see stages state/.
+  write(
+    ".github/workflows/promotion.yml",
+    readFileSync(join(REPO, ".github/workflows/promotion.yml"), "utf8"),
+  );
   write(".gitignore", "tmp/\n.env.*\n");
   for (const [path, content] of Object.entries(files)) write(path, content);
   git(CLONE, "add", "-A");
@@ -369,6 +375,70 @@ test("the step from before state/ can't commit a moved repository, so the engine
     ],
     [128, head, "stopped"],
     `${old.stdout}${old.stderr}`,
+  );
+});
+
+// A repository whose own commit step stages the old state file through a
+// script. The engine can't read that, so it must leave state where that
+// script looks for it, on a person's machine and in the run.
+const HELPER_COMMIT_STEP = [
+  "set -euo pipefail",
+  "./scripts/stage-state.sh",
+  "git add -A -- resources",
+  'git commit -qm "chore: record promoted Vapi state [skip promotion]"',
+  "git push -q origin main",
+].join("\n");
+
+test("under a commit step the engine can't read, state stays at the root and keeps being committed", async () => {
+  repoResetOldLayout();
+  write(
+    ".github/workflows/promotion.yml",
+    `jobs:\n  promote:\n    steps:\n      - run: |\n${HELPER_COMMIT_STEP.replace(/^/gm, "          ")}\n`,
+  );
+  write(
+    "scripts/stage-state.sh",
+    "#!/bin/bash\ngit add -A -- ':(glob).vapi-state.*.json'\n",
+  );
+  spawnSync("chmod", ["+x", join(CLONE, "scripts/stage-state.sh")]);
+  git(CLONE, "add", "-A");
+  git(CLONE, "commit", "-qm", "ci: our own commit step");
+  git(CLONE, "push", "-q", "origin", "main");
+  // A command on a person's machine, then the run in CI.
+  const local = ["a", "b"].flatMap((org) => stateLayoutPrepare(CLONE, org, {}));
+  const run = ["a", "b"].flatMap((org) =>
+    stateLayoutPrepare(CLONE, org, { CI: "true" }),
+  );
+  const failure = await promote(undefined, OLD_STATE);
+  const step = spawnSync(
+    "bash",
+    [
+      "-e",
+      "-c",
+      `git config user.name t && git config user.email t@example.com\n${HELPER_COMMIT_STEP}`,
+    ],
+    { cwd: CLONE, encoding: "utf8" },
+  );
+  assert.deepEqual(
+    {
+      held: [...local, ...run].every((line) => /stays where it is/.test(line)),
+      notices: [local.length, run.length],
+      failure,
+      code: step.status,
+      b: originFile(OLD_STATE("b")),
+      folder: originFile("state/b/state.json"),
+      // Nothing the run wrote is left uncommitted.
+      leftovers: git(CLONE, "status", "--porcelain"),
+    },
+    {
+      held: true,
+      notices: [2, 2],
+      failure: undefined,
+      code: 0,
+      b: '{"assistants":{"intake":{"uuid":"uuid-b"}}}\n',
+      folder: undefined,
+      leftovers: "",
+    },
+    `${step.stdout}${step.stderr}`,
   );
 });
 

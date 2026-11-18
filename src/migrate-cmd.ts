@@ -7,10 +7,15 @@
 // does not import `config.ts` (which would force an org + token at load).
 //
 // Idempotent: re-running after migration seeds nothing and rewrites nothing.
+//
+// `--commit-step-stages-state` is a person's word that whatever commits state
+// after a run stages state/. It is only needed where the engine can't see
+// that for itself, and without it nothing moves there.
 
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 import { migrateAll } from "./migrate-hash-store.ts";
+import { COMMIT_STEP_FLAG } from "./state-paths.ts";
 
 async function main(): Promise<void> {
   console.log(
@@ -21,7 +26,17 @@ async function main(): Promise<void> {
     "═══════════════════════════════════════════════════════════════\n",
   );
 
-  const result = await migrateAll();
+  const args = process.argv.slice(2);
+  const unknown = args.filter((arg) => arg !== COMMIT_STEP_FLAG);
+  if (unknown.length > 0)
+    throw new Error(
+      `Unrecognized argument: ${unknown.join(" ")}. The only option is ${COMMIT_STEP_FLAG}.`,
+    );
+
+  const result = await migrateAll(undefined, {
+    commitStepStagesState: args.includes(COMMIT_STEP_FLAG),
+  });
+  if (result.acknowledged) console.log(`   ${result.acknowledged}\n`);
 
   if (result.orgs.length === 0) {
     console.log("   No state files found — nothing to migrate.");
@@ -46,6 +61,7 @@ async function main(): Promise<void> {
     `\n✅ Migration complete: ${result.orgs.length} org(s), ` +
       `${totalSlimmed} state file(s) slimmed, ${totalSeeded} baseline(s) seeded.`,
   );
+  if (result.commitStepAsk) console.log(`\n${result.commitStepAsk.join("\n")}`);
 }
 
 const isMainModule =

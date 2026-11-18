@@ -19,6 +19,8 @@ import {
   writeBaseline,
 } from "./hash-store.ts";
 import {
+  commitStepAcknowledge,
+  commitStepAsk,
   stateFileRead,
   stateLayoutPrepare,
   stateOrgsList,
@@ -40,6 +42,15 @@ export interface OrgMigrationResult {
 
 export interface MigrationResult {
   orgs: OrgMigrationResult[];
+  /** What was written down when the person said their commit step stages state/. */
+  acknowledged?: string;
+  /** Set when nothing moved: what the commit step has to stage first. */
+  commitStepAsk?: string[];
+}
+
+export interface MigrationOptions {
+  /** The person says the step that commits state stages state/ (`--commit-step-stages-state`). */
+  commitStepStagesState?: boolean;
 }
 
 // A legacy entry is anything that isn't already exactly `{ uuid: string }`:
@@ -134,8 +145,8 @@ async function migrateOne(
 
   // Slim first, in place, then move: each step leaves one complete state
   // file. An explicit migrate moves state even in a CI run, because whoever
-  // runs it there commits the result; a workflow that would drop state/ from
-  // its commit still stops the move.
+  // runs it there commits the result; a commit step that would drop state/,
+  // or isn't seen to stage it, still stops the move.
   const notices = stateLayoutPrepare(baseDir, org, {
     ...process.env,
     CI: "",
@@ -155,14 +166,21 @@ async function migrateOne(
 // from legacy hashes, rewrite the file to slim form, then move the org's
 // engine files into `state/<org>/`. Idempotent — re-running on a migrated
 // repo seeds nothing, rewrites nothing and moves nothing.
+//
+// Where nothing is seen to stage state/ after a run, files are slimmed in
+// place and nothing moves until the person says their commit step stages it.
 export async function migrateAll(
   baseDir: string = BASE_DIR,
+  options: MigrationOptions = {},
 ): Promise<MigrationResult> {
+  const acknowledged = options.commitStepStagesState
+    ? commitStepAcknowledge(baseDir)
+    : undefined;
   const orgs: OrgMigrationResult[] = [];
   for (const org of stateOrgsList(baseDir)) {
     orgs.push(await migrateOne(baseDir, org));
   }
-  return { orgs };
+  return { orgs, acknowledged, commitStepAsk: commitStepAsk(baseDir) };
 }
 
 // Guard called at the entry of pull/push/apply. Throws if the given state file

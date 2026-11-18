@@ -2125,11 +2125,21 @@ file goes missing. `resources/<org>/` now holds hand-written files only.
 
 An older repository keeps working: every command reads the old places, and
 the next `pull`, `push` or `apply` on a person's machine moves the org with
-one rename per file and prints one line. The move is held back in a CI run
-and while a workflow stages `.vapi-state.*.json` but not `state/`, because
-either would commit the old file's removal without the new file. The
-promotion workflow stages both places. `tests/state-layout.test.ts` and
+one rename per file and prints one line. The move fails closed: it happens
+only when a workflow is seen to stage `state/`, or when nothing in the
+repository commits state after a run. It is held back in a CI run, while a
+workflow stages `.vapi-state.*.json` but not `state/`, and while a commit
+step can't be read (a script, a commit action, a pipeline outside GitHub
+Actions) until a person says it stages `state/` with
+`npm run migrate -- --commit-step-stages-state`. A CI run stops before any
+request when it would write state where its commit step isn't seen to look.
+The promotion workflow stages both places. `tests/state-layout.test.ts`,
+`tests/state-layout-unseen-commit.test.ts` and
 `tests/promotion-workflow-commit.test.ts` cover each path.
+
+One limit remains. The flag is a person's word. If it is given and the commit
+step does not stage `state/`, promotion runs pass while state is never
+committed. The engine can't see a step it can't read.
 
 Two things stay where they were, on purpose. Dashboard backups
 (`<name>.<timestamp>.bkp.md`) stay beside the resource they shadow: a person
