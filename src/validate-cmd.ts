@@ -14,7 +14,10 @@ import {
   RESOURCES_DIR,
   VAPI_ENV,
 } from "./config.ts";
-import { credentialKindsRead } from "./credential-kinds.ts";
+import {
+  credentialKindsLabel,
+  credentialKindsRead,
+} from "./credential-kinds.ts";
 import { orgPolicyRead } from "./org-policy.ts";
 import { loadResources } from "./resources.ts";
 import { createEmptyState, loadState } from "./state.ts";
@@ -78,6 +81,7 @@ async function main(): Promise<void> {
       org: VAPI_ENV,
       state,
       kinds: credentialKindsRead(BASE_DIR, VAPI_ENV),
+      kindsFile: credentialKindsLabel(BASE_DIR, VAPI_ENV),
       customerKeysOnly: policy.customerKeysOnly,
     }),
   ];
