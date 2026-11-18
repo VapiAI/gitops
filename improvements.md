@@ -2150,7 +2150,26 @@ the state file, and in a fresh clone that is the order git wrote the files
 in: every file was kept with state at the root, and every file would have
 been overwritten with state in `state/`. Pull now compares against the moment
 this machine's engine last saved state, kept beside the baselines, and a
-clone with no such save keeps every file.
+clone with no such save keeps every file. The same rule is off whenever git
+shows a change under `resources/<org>/`, and the engine keeps files of its own
+there in the older layout. Pull leaves those out (`engineFiles` in
+`src/state-paths.ts`, built from the list `migrate` moves), so a file the
+engine wrote, or one `migrate` moved and git shows as deleted, is never
+counted as a person's edit.
+
+A repository with no state at all, whose commit step can't be read, gets its
+first state file at the root. A step that stages only `state/` would never
+commit it, and the engine can't tell, so the command prints one line: where
+the file goes, why, what has to stage it, and how to start in `state/`
+instead.
+
+The test suite never works in the repository it runs in. Every module takes
+the engine's directory from `src/base-dir.ts`, `tests/no-vapi-api.ts` points
+it at a temporary directory and makes every `node:fs` change inside the
+repository throw, and a test started without that file is refused.
+`tests/suite-leaves-the-repository.test.ts` runs the whole suite inside a
+copy of a customer-shaped repository in each layout and compares every file,
+tracked, untracked and ignored, before and after.
 
 Two limits remain. The flag is a person's word: if it is given and the commit
 step does not stage `state/`, promotion runs pass while state is never

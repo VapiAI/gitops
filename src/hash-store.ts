@@ -20,8 +20,8 @@
 
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+import { baseDir } from "./base-dir.ts";
 import {
   baselinesDir,
   baselinesLegacyDir,
@@ -29,7 +29,7 @@ import {
 } from "./state-paths.ts";
 
 // Same expression as config.ts: the repo root is one level up from src/.
-const BASE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
+const BASE_DIR = baseDir();
 
 // Exported so the migration works on the same repository root.
 export const HASH_STORE_BASE_DIR = BASE_DIR;

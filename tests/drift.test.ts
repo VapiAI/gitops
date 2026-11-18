@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { dirname } from "node:path";
 import test from "node:test";
 import {
   checkPronunciationDictDrop,
@@ -9,12 +8,9 @@ import {
 import type { ResourceState } from "../src/types.ts";
 import {
   deleteBaseline,
-  hashStoreDir,
   readBaseline,
   writeBaseline,
 } from "../src/hash-store.ts";
-import { rmSync } from "node:fs";
-import { after } from "node:test";
 
 // Stack G — drift unit tests.
 // `checkDriftForUpdate` itself fires GET against the Vapi platform; a unit
@@ -108,17 +104,10 @@ function driftState(
   } as Record<string, Record<string, { uuid: string }>>;
 }
 
-// Drift baselines live in the hash store (state/<org>/local/baselines/<uuid>), which
-// resolves beside src/ rather than under a temp dir. Seed them under an org slug
-// no real checkout uses, and remove the whole folder when the file finishes.
+// Drift baselines live in the hash store, in the temporary directory the
+// engine works in under test (tests/no-vapi-api.ts), which is removed whole
+// when this file's process exits.
 const HASH_STORE_TEST_ENV = `drift-test-${process.pid}`;
-after(() => {
-  // state/<org>/local/baselines → state/<org>
-  rmSync(dirname(dirname(hashStoreDir(HASH_STORE_TEST_ENV))), {
-    recursive: true,
-    force: true,
-  });
-});
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {
   const prior = {

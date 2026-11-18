@@ -13,6 +13,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseDir } from "./base-dir.ts";
 import type { CheckJob } from "./check-build.ts";
 import { checkJobsBuild, checkTargetLabel } from "./check-build.ts";
 import type { CheckDefinition, ChecksConfig } from "./check-config.ts";
@@ -399,8 +400,7 @@ async function checksRun(
 export async function checkCommandRun(
   args = process.argv.slice(2),
   root = resolve(
-    process.env.VAPI_GITOPS_ROOT ??
-      fileURLToPath(new URL("..", import.meta.url)),
+    process.env.VAPI_GITOPS_ROOT ?? baseDir(),
   ),
 ): Promise<number> {
   let parsed: CheckArgs;

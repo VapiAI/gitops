@@ -240,6 +240,21 @@ function committedFiles(rootDir: string, org: string): CommittedFile[] {
   ];
 }
 
+/**
+ * Every committed file the engine writes for an org, in both layouts, as
+ * paths from the repository root. The engine wrote them, so a change git
+ * reports in one of them is never a person's edit. Built from the list
+ * `npm run migrate` moves, so a file added there is covered here.
+ */
+export function engineFiles(rootDir: string, org: string): Set<string> {
+  return new Set(
+    committedFiles(rootDir, org).flatMap((file) => [
+      file.legacyLabel,
+      file.nextLabel,
+    ]),
+  );
+}
+
 export class StateLayoutError extends Error {}
 
 function jsonStable(value: unknown): unknown {
@@ -311,6 +326,25 @@ function notSeenReason(file: string | undefined): string {
   return file
     ? `${file} can commit to this repository and is not seen to stage ${STATE_DIR}/`
     : `no workflow in .github/workflows/ is seen to stage ${STATE_DIR}/`;
+}
+
+const NO_STATE_YET = "ℹ️  No engine state in this repository yet";
+
+/**
+ * The line a command prints instead of the older-layout one when it is about
+ * to write a repository's first state file at the root: where the file goes,
+ * why, and what has to stage it. A commit step the engine can't read may
+ * stage only state/, and then this file would never be committed.
+ */
+function firstStateNotice(rootDir: string, org: string): string {
+  const step = commitStepRead(rootDir, {});
+  const file = `.vapi-state.${org}.json`;
+  if (step.kind === "stale")
+    return `${NO_STATE_YET}: it goes to ${file} at the repository root, which ${step.file} stages.`;
+  return (
+    `${NO_STATE_YET}: it goes to ${file} at the repository root, because ${notSeenReason(step.kind === "unseen" ? step.file : undefined)}. ` +
+    `Whatever commits state after a run has to stage .vapi-state.*.json. If it stages ${STATE_DIR}/ instead, run \`npm run migrate -- ${COMMIT_STEP_FLAG}\` first and commit ${STATE_DIR}/commit-step.json, so state starts in ${STATE_DIR}/.`
+  );
 }
 
 /** The one line a command prints while an org's state is still in the old layout. */
@@ -410,7 +444,14 @@ export function stateLayoutPrepare(
       );
   }
 
-  if (layout === "root") return [...notices, OLD_LAYOUT_NOTICE];
+  if (layout === "root")
+    return [
+      ...notices,
+      stateOrgsList(rootDir).length === 0 &&
+      !existsSync(orgPinFileLegacyPath(rootDir, org))
+        ? firstStateNotice(rootDir, org)
+        : OLD_LAYOUT_NOTICE,
+    ];
 
   const moved = stateLocalMove(rootDir, org);
   if (moved.length > 0)
@@ -433,7 +474,7 @@ export function stateNoticesPrint(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   for (const notice of notices) {
-    if (notice === OLD_LAYOUT_NOTICE) {
+    if (notice === OLD_LAYOUT_NOTICE || notice.startsWith(NO_STATE_YET)) {
       if (env.VAPI_GITOPS_OLD_LAYOUT_NOTICE === "shown") continue;
       env.VAPI_GITOPS_OLD_LAYOUT_NOTICE = "shown";
     }

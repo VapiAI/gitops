@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseDir } from "./base-dir.ts";
 import type { CheckDefinition } from "./check-config.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import {
@@ -41,9 +42,7 @@ interface PromotionTransition {
   definition: PromotionPipeline;
 }
 
-const ROOT_DIR = resolve(
-  process.env.VAPI_GITOPS_ROOT ?? fileURLToPath(new URL("..", import.meta.url)),
-);
+const ROOT_DIR = resolve(process.env.VAPI_GITOPS_ROOT ?? baseDir());
 
 // Files that transitions which finished applying left changed, one
 // `<blob>\t<path>` line each: the content as it stood when that transition

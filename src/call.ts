@@ -2,9 +2,10 @@ import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
-import { dirname, join, resolve } from "path";
+import { join, resolve } from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "url";
+import { baseDir } from "./base-dir.ts";
 import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { Environment, StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
@@ -15,8 +16,7 @@ const require = createRequire(import.meta.url);
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 type ResourceType = "assistant" | "squad";
 

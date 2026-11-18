@@ -313,19 +313,45 @@ writing command stops before it changes anything and names the two files. If
 they hold the same content, the engine reads the one in `state/`, keeps the
 old copy identical, and says that `npm run migrate` removes it.
 
+### A repository with no state yet
+
+A new repository starts in `state/` when a workflow in `.github/workflows/`
+is seen to stage it, as upstream's `promotion.yml` does, or when
+`state/commit-step.json` says your commit step does. Otherwise the first state
+file is written at the root, as `.vapi-state.<org>.json`, where every older
+commit step looks for it, and the command says so in one line:
+
+```
+ℹ️  No engine state in this repository yet: it goes to .vapi-state.<org>.json at the repository root, because … Whatever commits state after a run has to stage .vapi-state.*.json. …
+```
+
+If your commit step stages only `state/` and the engine can't read it (a
+script, a commit action, another CI system), that file would never be
+committed. Before the first `pull`, either make the step stage
+`.vapi-state.*.json` as well, or tell the engine the step stages `state/` and
+commit the file it writes:
+
+```bash
+npm run migrate -- --commit-step-stages-state
+git add state/commit-step.json
+```
+
 ### What you'll see after upgrading
 
 - **`ℹ️  Engine state here is in the older layout …`**, one line per writing
   command, until you run `npm run migrate`. Nothing else changes.
+- **A dashboard edit can arrive one pull late, once.** On a machine with no
+  baselines yet, the first `pull` after upgrading keeps every local file, and
+  an edit made in the dashboard comes down on the next `pull`. Nothing is
+  lost.
 
 After `npm run migrate`:
 
 - **`📦 Moved … into state/<org>/`**, once per org, from `migrate` itself.
-- **`📦 1 locally modified file(s) will be preserved`** on a `pull` before you
-  commit the move. The file is the old org pin,
-  `resources/<org>/.vapi-org.json`. It moved to `state/<org>/org.json`, so git
-  shows it as deleted until you commit. Pull does nothing differently because
-  of it.
+- **Nothing new from `pull` before you commit the move.** Git shows the old
+  org pin, `resources/<org>/.vapi-org.json`, as deleted until you commit. Pull
+  doesn't count that, or any other file the engine writes, as an edit of
+  yours, so it does nothing differently because of it.
 - **`📦 Moved .vapi-state-hash/<org>/ … into state/<org>/local/`**, once, on
   each teammate's machine after they pull your commit. Those are that
   machine's own baselines and snapshots, which are not in git.
