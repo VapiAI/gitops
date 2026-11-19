@@ -75,6 +75,11 @@ Push adds two more: `⏭️` (conflict prompt → kept dashboard, push skipped) 
 
 Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull), `📝` is the engine doing routine file I/O.
 
+The pull summary's updated count includes an existing resource only when
+the serialized file content differs from what is on disk. The normal pull
+path still writes the file when its content is identical; the file-write
+icon describes that write, while the count describes content changes.
+
 ## Listing completeness
 
 Vapi list endpoints cap a response at 100 items and expose no page cursor — only `createdAt` comparison filters. The engine pages backwards through `createdAt` until it gets a short page, so pull, push's invalid-mapping detection, `delete`'s orphan sweep, `audit`, and the credential reverse-map all see the whole type instead of the first hundred. When completeness cannot be proven — an endpoint that ignores the cursor params, a payload with no `createdAt`, or the page-count backstop — the engine says so on stderr. Treat that warning as "do not infer deletion from absence for this type".
