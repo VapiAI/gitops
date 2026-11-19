@@ -1,6 +1,6 @@
 import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   mkdirSync,
@@ -135,28 +135,18 @@ test("an engine test started by hand, without the preload npm test adds, still w
   );
 });
 
-// Whether this is the engine's own repository: on a runner by its name, on a
-// person's machine by where origin points, over https or ssh. Anywhere else a
-// test file without the import is that repository's own test.
-function engineRepository(): boolean {
-  const named = process.env.GITHUB_REPOSITORY;
-  if (named) return named.toLowerCase() === "vapiai/gitops";
-  try {
-    const origin = execFileSync(
-      "git",
-      ["config", "--get", "remote.origin.url"],
-      { cwd: REPO, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-    return /[/:]vapiai\/gitops(\.git)?\/?$/i.test(origin);
-  } catch {
-    return false;
-  }
+// Whether this is CI for the engine's own repository, by the name GitHub
+// gives the runner. Anywhere else, a person's machine included, a test file
+// without the import is that repository's own test, whatever origin says: a
+// repository cloned straight from the engine's keeps its origin.
+function engineRepositoryCi(): boolean {
+  return process.env.GITHUB_REPOSITORY?.toLowerCase() === "vapiai/gitops";
 }
 
-test("in the engine's own repository, every test file imports the sandbox first", {
-  skip: engineRepository()
+test("in CI for the engine's own repository, every test file imports the sandbox first", {
+  skip: engineRepositoryCi()
     ? false
-    : "not the engine's own repository: a test file without the import is this repository's own",
+    : "not CI for the engine's own repository: a test file without the import is this repository's own",
 }, () => {
   const other = [
     ...testFiles(join(REPO, "tests")).other,
@@ -167,7 +157,7 @@ test("in the engine's own repository, every test file imports the sandbox first"
   assert.deepEqual(
     other,
     [],
-    `Every engine test file starts with ${SANDBOX} (${SANDBOX_FROM_FOLDER} under tests/repository/) and these don't: ${other.join(", ")}. This is asked because origin is VapiAI/gitops; in a repository of your own, with its own origin, a test of your own is left alone.`,
+    `Every engine test file starts with ${SANDBOX} (${SANDBOX_FROM_FOLDER} under tests/repository/) and these don't: ${other.join(", ")}. This is asked because GITHUB_REPOSITORY is VapiAI/gitops; anywhere else a test file without the import is left alone.`,
   );
 });
 

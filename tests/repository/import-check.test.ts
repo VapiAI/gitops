@@ -15,10 +15,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 // tests/engine-sandbox.test.ts fails when a test file doesn't import the
-// sandbox first, in the engine's own repository and in no other: anywhere
-// else such a file is that repository's own test. Each case below asks that
-// check in a small repository that holds one test file without the import,
-// named each way a repository can be.
+// sandbox first, in CI for the engine's own repository and nowhere else:
+// anywhere else such a file is that repository's own test. That includes a
+// person's clone of the engine's repository, which keeps its origin and may
+// hold a test of its owner's. Each case below asks that check in a small
+// repository that holds one test file without the import, named each way a
+// repository can be.
 
 const REPO = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -78,7 +80,7 @@ function importCheckIn(named: { runner?: string; origin?: string }): string {
   }
 }
 
-test("the import check is asked in the engine's own repository, however it is named, and in no other", () => {
+test("the import check is asked in CI for the engine's own repository, and nowhere else", () => {
   const fork = "acme/voice-agents";
   assert.deepEqual(
     {
@@ -86,40 +88,42 @@ test("the import check is asked in the engine's own repository, however it is na
         runner: "VapiAI/gitops",
         origin: "https://github.com/VapiAI/gitops",
       }),
-      "a clone over https": importCheckIn({
+      "a runner in the engine's repository, named in lower case": importCheckIn(
+        { runner: "vapiai/gitops", origin: "https://github.com/vapiai/gitops" },
+      ),
+      "a clone of the engine's repository over https": importCheckIn({
         origin: "https://github.com/VapiAI/gitops.git",
       }),
-      "a clone over https, typed in lower case and without .git": importCheckIn(
-        { origin: "https://github.com/vapiai/gitops" },
-      ),
-      "a clone over ssh": importCheckIn({
+      "a clone of the engine's repository over ssh": importCheckIn({
         origin: "git@github.com:VapiAI/gitops.git",
       }),
       "a runner in a fork": importCheckIn({
         runner: fork,
         origin: `https://github.com/${fork}`,
       }),
-      "a clone of a fork over https": importCheckIn({
-        origin: `https://github.com/${fork}.git`,
+      "a runner in a repository that kept the engine's origin": importCheckIn({
+        runner: fork,
+        origin: "https://github.com/VapiAI/gitops.git",
       }),
-      "a clone of a fork over ssh": importCheckIn({
-        origin: `git@github.com:${fork}.git`,
-      }),
-      "a fork that kept the name": importCheckIn({
+      "a runner in a fork that kept the name": importCheckIn({
+        runner: "acme/gitops",
         origin: "https://github.com/acme/gitops.git",
+      }),
+      "a clone of a fork": importCheckIn({
+        origin: `git@github.com:${fork}.git`,
       }),
       "a repository with no origin": importCheckIn({}),
     },
     {
       "a runner in the engine's repository": "own.test.ts lacks the import",
-      "a clone over https": "own.test.ts lacks the import",
-      "a clone over https, typed in lower case and without .git":
+      "a runner in the engine's repository, named in lower case":
         "own.test.ts lacks the import",
-      "a clone over ssh": "own.test.ts lacks the import",
+      "a clone of the engine's repository over https": "not asked",
+      "a clone of the engine's repository over ssh": "not asked",
       "a runner in a fork": "not asked",
-      "a clone of a fork over https": "not asked",
-      "a clone of a fork over ssh": "not asked",
-      "a fork that kept the name": "not asked",
+      "a runner in a repository that kept the engine's origin": "not asked",
+      "a runner in a fork that kept the name": "not asked",
+      "a clone of a fork": "not asked",
       "a repository with no origin": "not asked",
     },
   );
