@@ -28,8 +28,10 @@ learnings are all welcome.
    `node:test` and live in `tests/`; they never call the real Vapi API.
    Start every new test file with `import "./engine-sandbox.ts";`, before
    any other import. It gives the engine a temporary directory to work in
-   and stops the test changing files in the repository. `npm test` fails
-   here when a test file is missing it.
+   and stops the test changing files in the repository. CI on your pull
+   request fails when a test file is missing it; `npm test` on your machine
+   doesn't ask, so that a test of your own in a clone is left alone. To ask
+   locally, run `GITHUB_REPOSITORY=VapiAI/gitops npm test`.
 4. Run `npm run build` and `npm test` again, then open a pull request.
    If you changed a test, or code that writes or removes files, also run
    `npm run test:repository`. It runs the suite inside copies of a

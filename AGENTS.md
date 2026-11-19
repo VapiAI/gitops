@@ -331,7 +331,8 @@ For changes under `src/`, `tests/` or `.github/`:
   makes the engine work in a temporary directory and stops the test changing
   files in the repository. A test of your own, for your own repository,
   leaves it out and works in the repository as before. The suite asks for
-  the import only where `origin` is `VapiAI/gitops` itself.
+  the import only in CI for `VapiAI/gitops` itself, so a clone on your
+  machine is never asked.
 - A test that starts a test runner of its own goes in `tests/repository/`
   and runs with `npm run test:repository`, not with `npm test`.
 - Changing a command's flags or behaviour? Update

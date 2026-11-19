@@ -2150,7 +2150,9 @@ module takes the engine's directory from `src/base-dir.ts`
 engine test file imports `tests/engine-sandbox.ts` first, which points the
 engine at a temporary directory and makes every `node:fs` change inside the
 repository throw, so the protection holds however the file is started. In
-the engine's own repository a test file without that import fails the suite.
+CI for the engine's own repository a test file without that import fails the
+suite; on a person's machine that check is skipped, so a clone that holds a
+test of its owner's behaves as it did before.
 `tests/repository/suite-leaves-the-repository.test.ts` runs the engine's
 whole suite inside a copy of a customer-shaped repository in each layout and
 compares every file, tracked, untracked and ignored, before and after. It
