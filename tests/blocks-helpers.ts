@@ -167,6 +167,8 @@ export function cliRun(
   script: string,
   args: string[],
   port: number,
+  // One command's worth. A call that starts further commands passes more.
+  timeoutMs = 60_000,
 ): { code: number | null; output: string } {
   const result = spawnSync(
     process.execPath,
@@ -179,7 +181,7 @@ export function cliRun(
         VAPI_BASE_URL: `http://127.0.0.1:${port}`,
       },
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: timeoutMs,
     },
   );
   return { code: result.status, output: `${result.stdout}\n${result.stderr}` };
