@@ -1,11 +1,19 @@
 // The directory the engine works in: the repository that holds src/.
 //
-// Every module takes it from here, so the test suite can give the engine a
-// temporary directory instead. tests/no-vapi-api.ts names the repository the
-// suite runs in and a temporary directory to use in its place. Then nothing
-// a test does through the engine, and no path a test derives from it, can
-// reach that repository. A CLI a test starts from a copy of src/ elsewhere
-// keeps working in its own copy.
+// Every module takes it from here. tests/base-dir.test.ts fails when one
+// works it out for itself; src/user-agent.ts alone reads a file from where
+// it sits, the engine's own package.json, and says why.
+//
+// The engine's own tests each import tests/engine-sandbox.ts first, which
+// names the repository they run in and a temporary directory to use in its
+// place. Then nothing such a test does through the engine, and no path it
+// derives from it, can reach that repository. A command a test starts from
+// a copy of src/ elsewhere keeps working in its own copy.
+//
+// Nothing else changes the answer. In particular the engine never asks
+// whether a test runner is somewhere above it: a command run as a command,
+// from a test of yours or anywhere else, works in the repository that holds
+// its src/.
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +21,5 @@ import { fileURLToPath } from "node:url";
 export function baseDir(): string {
   const own = join(dirname(fileURLToPath(import.meta.url)), "..");
   const sandbox = process.env.VAPI_GITOPS_TEST_ROOT;
-  if (sandbox) return own === process.env.VAPI_GITOPS_TEST_REPO ? sandbox : own;
-  // Node's test runner sets this for every test file it runs. Without the
-  // sandbox a test would read and write the real repository: refuse.
-  if (process.env.NODE_TEST_CONTEXT)
-    throw new Error(
-      "The engine was loaded by a test without tests/no-vapi-api.ts, so it would work in this repository instead of a temporary directory. Run tests with `npm test` or `node --import tsx --import ./tests/no-vapi-api.ts --test <file>`.",
-    );
-  return own;
+  return sandbox && own === process.env.VAPI_GITOPS_TEST_REPO ? sandbox : own;
 }

@@ -327,6 +327,13 @@ For changes under `src/`, `tests/` or `.github/`:
 - Run `npm run build` (type-checks `src/` and `tests/`) and `npm test` before
   you finish. Tests use `node:test` and must never call the real Vapi API —
   use a local HTTP stub, as the existing tests do.
+- An engine test file's first import is `import "./engine-sandbox.ts";`. It
+  makes the engine work in a temporary directory and stops the test changing
+  files in the repository. A test of your own, for your own repository,
+  leaves it out and works in the repository as before. The suite asks for
+  the import only where `origin` is `VapiAI/gitops` itself.
+- A test that starts a test runner of its own goes in `tests/repository/`
+  and runs with `npm run test:repository`, not with `npm test`.
 - Changing a command's flags or behaviour? Update
   [`docs/guides/commands.md`](docs/guides/commands.md) and the README command
   table in the same change.

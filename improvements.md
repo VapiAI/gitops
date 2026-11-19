@@ -2144,13 +2144,25 @@ commit it, and the engine can't tell, so the command prints one line: where
 the file goes, why, what has to stage it, and how to start in `state/`
 instead.
 
-The test suite never works in the repository it runs in. Every module takes
-the engine's directory from `src/base-dir.ts`, `tests/no-vapi-api.ts` points
-it at a temporary directory and makes every `node:fs` change inside the
-repository throw, and a test started without that file is refused.
-`tests/suite-leaves-the-repository.test.ts` runs the whole suite inside a
-copy of a customer-shaped repository in each layout and compares every file,
-tracked, untracked and ignored, before and after.
+The engine's test suite never works in the repository it runs in. Every
+module takes the engine's directory from `src/base-dir.ts`
+(`tests/base-dir.test.ts` fails when one works it out for itself). Every
+engine test file imports `tests/engine-sandbox.ts` first, which points the
+engine at a temporary directory and makes every `node:fs` change inside the
+repository throw, so the protection holds however the file is started. In
+the engine's own repository a test file without that import fails the suite.
+`tests/repository/suite-leaves-the-repository.test.ts` runs the engine's
+whole suite inside a copy of a customer-shaped repository in each layout and
+compares every file, tracked, untracked and ignored, before and after. It
+and the other tests that start a test runner of their own are not part of
+`npm test`, which takes about as long as it did before them: they run with
+`npm run test:repository` and as a CI job in the engine's own repository.
+
+The engine itself never asks whether a test runner is above it. A test that
+doesn't import the sandbox, such as one a repository built from this one
+keeps under `tests/`, is untouched: the commands it starts and the modules
+it imports work in that repository, and it writes where it likes
+(`tests/repository/own-tests-as-before.test.ts`).
 
 Two limits remain. The flag is a person's word: if it is given and the commit
 step does not stage `state/`, promotion runs pass while state is never

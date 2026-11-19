@@ -1,5 +1,6 @@
+import "../engine-sandbox.ts";
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -8,33 +9,35 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { testFiles } from "../engine-tests.ts";
 
 // Running the test suite must not change the repository it runs in: not a
 // tracked file, not an untracked one, not an ignored one, not .git.
 //
 // Each case below builds a repository shaped like a customer's (resources, a
-// gitignored .env file with a key in it, engine state, this machine's
-// baselines and snapshots, a commit), runs the whole suite inside it, and
-// compares every file and folder before and after. The three cases are the
-// three places engine state can be: the layout from before state/, state/,
-// and nowhere yet.
+// gitignored .env file with a key in it, a test of their own, engine state,
+// this machine's baselines and snapshots, a commit), runs the engine's whole
+// suite inside it, and compares every file and folder before and after. The
+// three cases are the three places engine state can be: the layout from
+// before state/, state/, and nowhere yet.
 //
 // The copies live in temporary directories of their own, so a suite that did
 // remove its repository would remove a copy.
+//
+// This file is not part of `npm test`. It runs the suite three more times,
+// which is slow, and a suite inside a suite reaches the time limits some
+// tests give a command sooner. `npm run test:repository` runs it, by itself,
+// and so does a CI job in the engine's own repository.
 
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
-// The suite run inside a copy includes this file. It must not start again.
-const NESTED = "VAPI_GITOPS_SUITE_IN_A_COPY";
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 const STATE = `${JSON.stringify({ assistants: { riley: { uuid: UUID } } }, null, 2)}\n`;
@@ -46,6 +49,10 @@ const CUSTOMER: Record<string, string> = {
   "resources/acme/.vapi-ignore": "assistants/scratch-*\n",
   // Gitignored, and the one file here a person can't get back from git.
   ".env.acme": "VAPI_PRIVATE_API_KEY=not-a-real-key\n",
+  // A test of the customer's own. It is not the engine's, so the run below
+  // leaves it out; if it ran, the report it writes would show up as a change.
+  "tests/own-report.test.ts":
+    'import { mkdirSync, writeFileSync } from "node:fs";\nimport test from "node:test";\n\ntest("writes a report", () => {\n  mkdirSync("tmp", { recursive: true });\n  writeFileSync("tmp/own-report.json", "{}\\n");\n});\n',
 };
 
 const LAYOUTS: Record<string, Record<string, string>> = {
@@ -161,11 +168,15 @@ async function suiteRunIn(state: Record<string, string>) {
     const before = tree(root);
     // A test runner started from inside another one runs nothing unless
     // NODE_TEST_CONTEXT is cleared.
-    const env: NodeJS.ProcessEnv = { ...process.env, [NESTED]: "1" };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      // The copy is a customer's repository, on a runner too.
+      GITHUB_REPOSITORY: "acme/voice-agents",
+    };
     delete env.NODE_TEST_CONTEXT;
-    const files = readdirSync(join(root, "tests"))
-      .filter((name) => name.endsWith(".test.ts"))
-      .map((name) => `tests/${name}`);
+    const files = testFiles(join(root, "tests")).engine.map(
+      (name) => `tests/${name}`,
+    );
     const child = spawn(
       process.execPath,
       [
@@ -174,6 +185,9 @@ async function suiteRunIn(state: Record<string, string>) {
         "--import",
         "./tests/no-vapi-api.ts",
         "--test",
+        // Half the cores: the copy's suite is not the only thing running,
+        // and its tests give a command twenty seconds to answer.
+        `--test-concurrency=${Math.max(1, Math.floor(availableParallelism() / 2))}`,
         ...files,
       ],
       { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] },
@@ -196,12 +210,10 @@ async function suiteRunIn(state: Record<string, string>) {
   }
 }
 
-test("the whole suite, run inside a customer's repository, leaves every file as it was", {
-  skip: process.env[NESTED] === "1",
-}, async () => {
+test("the whole suite, run inside a customer's repository, leaves every file as it was", async () => {
   const names = Object.keys(LAYOUTS);
-  // One copy at a time. Three suites at once, beside the one running this
-  // test, starve the tests that give a CLI twenty seconds to answer.
+  // One copy at a time. Three suites at once starve the tests that give a
+  // CLI twenty seconds to answer.
   const results: Awaited<ReturnType<typeof suiteRunIn>>[] = [];
   for (const name of names) results.push(await suiteRunIn(LAYOUTS[name]!));
   assert.deepEqual(
@@ -212,80 +224,5 @@ test("the whole suite, run inside a customer's repository, leaves every file as 
         { exit: 0, passed: true, failed: [], changes: [] },
       ]),
     ),
-  );
-});
-
-// Two things keep a test out of the repository before that comparison has
-// anything to find. tests/no-vapi-api.ts gives the engine a temporary
-// directory to work in and makes every node:fs change inside the repository
-// throw; src/base-dir.ts refuses to work in a test that was started without
-// it.
-
-test("a test can't create, change or remove anything in the repository it runs in", async () => {
-  const inside = /inside the repository it runs in/;
-  assert.throws(() => writeFileSync(join(REPO, "x.txt"), "x"), inside);
-  assert.throws(() => mkdirSync(join(REPO, "tmp")), inside);
-  assert.throws(() => rmSync(REPO, { recursive: true, force: true }), inside);
-  assert.throws(
-    () => rmSync(join(REPO, "src", ".."), { recursive: true, force: true }),
-    inside,
-  );
-  assert.throws(
-    () => renameSync(join(REPO, "package.json"), join(tmpdir(), "p.json")),
-    inside,
-  );
-  assert.throws(
-    () => cpSync(join(REPO, "package.json"), join(REPO, "copy.json")),
-    inside,
-  );
-  await assert.rejects(async () => writeFile(join(REPO, "x.txt"), "x"), inside);
-  await assert.rejects(
-    async () => rm(join(REPO, "src"), { recursive: true }),
-    inside,
-  );
-  // Reading is fine, and so is anything under a temporary directory.
-  assert.ok(readFileSync(join(REPO, "package.json"), "utf8").length > 0);
-  const own = mkdtempSync(join(tmpdir(), "suite-guard-"));
-  writeFileSync(join(own, "a"), "a");
-  rmSync(own, { recursive: true });
-});
-
-test("the engine works in the temporary directory a test run gives it, and refuses a test run that gives it none", () => {
-  const where = (change: (env: NodeJS.ProcessEnv) => void) => {
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    change(env);
-    const run = spawnSync(
-      process.execPath,
-      [
-        "--import",
-        "tsx",
-        "--input-type=module",
-        "-e",
-        'import { baseDir } from "./src/base-dir.ts"; console.log(baseDir());',
-      ],
-      { cwd: REPO, env, encoding: "utf8" },
-    );
-    return run.status === 0 ? run.stdout.trim() : run.stderr;
-  };
-  const sandbox = process.env.VAPI_GITOPS_TEST_ROOT;
-  assert.ok(sandbox && !sandbox.startsWith(REPO));
-  assert.deepEqual(
-    [
-      // In a test run: the temporary directory.
-      where(() => {}),
-      // Outside one: the repository that holds src/.
-      where((env) => {
-        delete env.VAPI_GITOPS_TEST_ROOT;
-        delete env.NODE_TEST_CONTEXT;
-      }),
-      // A test started without tests/no-vapi-api.ts.
-      /without tests\/no-vapi-api\.ts/.test(
-        where((env) => {
-          delete env.VAPI_GITOPS_TEST_ROOT;
-          env.NODE_TEST_CONTEXT = "child-v8";
-        }),
-      ),
-    ],
-    [sandbox, REPO, true],
   );
 });
