@@ -434,7 +434,7 @@ For changes under `src/`, `tests/` or `.github/`:
 | --- | --- |
 | Every resource setting, with examples | [Resource reference](docs/guides/resource-reference.md) |
 | Minimal tested files | [File formats](docs/guides/file-formats.md), [`examples/starter/`](examples/starter/README.md) |
-| Shared prompt text and config | [Blocks](docs/guides/blocks.md), [`examples/blocks/`](examples/blocks/README.md) |
+| Shared prompt text and config | [Blocks](docs/guides/blocks.md), [`examples/blocks/`](examples/blocks/README.md), [many locations walk-through](docs/guides/many-locations.md) |
 | System prompts | [Writing system prompts](docs/guides/writing-prompts.md), [Vapi Prompt Optimization Guide](docs/Vapi%20Prompt%20Optimization%20Guide.md) |
 | Commands, flags, test-call output | [Commands](docs/guides/commands.md) |
 | Sync, conflicts, drift, output icons | [How the engine works](docs/guides/how-it-works.md), [sync behavior](docs/learnings/sync-behavior.md) |
