@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {

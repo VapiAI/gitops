@@ -26,8 +26,16 @@ learnings are all welcome.
 
 3. Make your change, with tests for any behaviour change. Tests use
    `node:test` and live in `tests/`; they never call the real Vapi API.
-4. Run `npx biome check <changed files>`, `npm run build` and `npm test`, then
-   open a pull request.
+   Start every new test file with `import "./engine-sandbox.ts";`, before
+   any other import. It gives the engine a temporary directory to work in
+   and stops the test changing files in the repository. `npm test` fails
+   here when a test file is missing it.
+4. Run `npx biome check <changed files>`, `npm run build` and `npm test`, then open a pull request.
+   If you changed a test, or code that writes or removes files, also run
+   `npm run test:repository`. It runs the suite inside copies of a
+   repository and checks that no file in them changed. It takes a few
+   minutes, so it is not part of `npm test`; CI runs it on every pull
+   request here.
 
 Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`fix(pull): …`, `feat(check): …`, `docs: …`).

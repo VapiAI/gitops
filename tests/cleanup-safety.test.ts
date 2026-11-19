@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

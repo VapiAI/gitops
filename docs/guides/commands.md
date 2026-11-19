@@ -23,6 +23,7 @@ The other commands are direct only.
 | `npm run promote` | `npm run promote -- --pipeline <p> --from <org> --to <org> [--apply]` | Plan, or apply, a [promotion](promotion.md) between orgs. |
 | `npm run build` | `npm run build` | Type-check the code and tests. |
 | `npm test` | `npm test` | Run the test suite. |
+| `npm run test:repository` | `npm run test:repository` | For work on the engine itself: run the test suite inside copies of a repository and check that no file in them changed. Takes a few minutes. |
 
 Pull and push never automatically rename UUID-suffixed state keys to match
 local files. A local file without a UUID mapping remains subject to the
