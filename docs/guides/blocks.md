@@ -30,6 +30,10 @@ Every snippet below is a file from [`examples/blocks/`](../../examples/blocks/),
 two clinics that share a red-flags block and a voice. CI checks that the
 snippets match the files and that the example passes `validate`.
 
+This page is the reference. For the whole job in order, from pasted copies
+to an edit rolled out through a pull request, see
+[Running many locations from one set of prompts](many-locations.md).
+
 ## Prompt blocks
 
 Put the shared text in a Markdown file:
@@ -311,9 +315,25 @@ to yours, which git and the engine ignore. To resolve a dashboard edit:
 2. If the change is in text that comes from your file, make the same change
    in your file. If it is in text that comes from a block, change the block
    (every resource that uses it changes too) or give this org its own block.
-   To discard the dashboard edit, change nothing.
+   To discard a dashboard edit to a value your file sets, change nothing.
 3. Run `npm run apply -- <org> --resolve=ours <file>`. It pushes your
    version over the dashboard's.
+
+The push carries only the fields your file sets (see
+[PATCH semantics](../learnings/assistants.md#patch-assistantid-semantics-shallow-replacement-at-the-top-level-field)),
+so what it undoes depends on the field. This was seen on a local stand-in
+for the API, not on a live org:
+
+- **A value your file sets is put back.** A greeting changed in the dashboard
+  went back to the greeting in the file.
+- **A field your file does not set stays as the dashboard left it.** A
+  greeting added in the dashboard to an assistant whose file has no
+  `firstMessage` was still there after the push, and the next `pull` no
+  longer reported a dashboard edit.
+- **To clear such a field, name it in your file.** Give it the value you
+  want. With `firstMessage: null` in the file, the engine sent the `null` and
+  the stand-in cleared the greeting. Whether Vapi accepts `null` for a given
+  field was not tried, so open the assistant after the push and check.
 
 ## Limits
 

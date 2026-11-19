@@ -40,3 +40,7 @@ npm run sync-blocks
 
 Both commands only read files. Deploying is `npm run apply -- <your-org>`,
 which changes a live org.
+
+[Running many locations from one set of prompts](../../docs/guides/many-locations.md)
+walks through these files step by step: the first deploy, one clinic's own
+wording and settings, and a block edit from branch to rollout.
