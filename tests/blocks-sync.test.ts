@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -266,6 +267,10 @@ test("--apply pushes through the drift check: an untouched resource is updated, 
         "src/sync-blocks-cmd.ts",
         ["--org", ORG, "--apply"],
         stub.port,
+        // sync-blocks starts apply, which starts a pull and a push: four
+        // commands' start-up in one call, on a machine running the rest of
+        // the suite beside it.
+        240_000,
       );
       const patched = (await stub.requests()).filter((request) =>
         request.startsWith("PATCH /assistant/"),

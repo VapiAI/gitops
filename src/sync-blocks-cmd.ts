@@ -15,6 +15,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseDir } from "./base-dir.ts";
 import { blocksChanged, blocksRecordRead } from "./blocks.ts";
 import { FOLDER_MAP, orgResourcesRead } from "./resource-parse.ts";
 
@@ -96,10 +97,7 @@ export async function syncBlocksRun(
 ): Promise<number> {
   const rootDir =
     overrides.rootDir ??
-    resolve(
-      process.env.VAPI_GITOPS_ROOT ??
-        fileURLToPath(new URL("..", import.meta.url)),
-    );
+    resolve(process.env.VAPI_GITOPS_ROOT ?? baseDir());
   const deploy =
     overrides.applyRun ??
     ((org: string, paths: string[]) => applyRun(rootDir, org, paths));
