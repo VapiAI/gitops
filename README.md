@@ -210,7 +210,7 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | Command | What it does |
 | --- | --- |
 | `npm run setup` | Connect an org: create `.env.<org>` and `resources/<org>/` |
-| `npm run validate -- <org> [--strict]` | Check resource files offline, including undefined squad variables (`variable-undefined`); `--strict` blocks on that warning |
+| `npm run validate -- <org> [--strict]` | Check resource files offline, including undefined squad variables (`variable-undefined`); `--strict` blocks on that warning. `transfer-number-liquid` always errors on Liquid in transfer destination numbers; use per-practice literal numbers (see `examples/nhs-shared-squads`). |
 | `npm run apply -- <org>` | Deploy: pull, merge, then push (the default) |
 | `npm run pull -- <org>` | Sync platform changes down without overwriting local edits |
 | `npm run push -- <org>` | Push without pulling first (prefer `apply`) |

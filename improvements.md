@@ -2349,6 +2349,27 @@ unchecked because their values may arrive when a call is created.
 
 ---
 
+## 44. Liquid transfer destination numbers passed offline validation
+
+### Problem
+
+The API rejects Liquid in transfer number destinations: the default E.164
+validator rejects it, and disabling that check still requires alphanumeric
+characters with an optional leading plus. Runtime template support does not
+make these tool payloads API-valid. A push could therefore fail partway through.
+
+### Current behavior and mitigation
+
+`transfer-number-liquid` reports an error before deployment for standalone and
+inline transfer tools, including member/squad appended tools. Use literal
+per-practice numbers in inline squad overrides; see `examples/nhs-shared-squads`.
+
+### Status
+
+**Implemented.** Covered by `tests/validate-transfer-numbers.test.ts`.
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally
