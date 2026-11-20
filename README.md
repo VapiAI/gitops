@@ -207,9 +207,9 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | --- | --- |
 | `npm run setup` | Connect an org: create `.env.<org>` and `resources/<org>/` |
 | `npm run validate -- <org>` | Check resource files offline before deploying |
-| `npm run apply -- <org>` | Deploy: pull, merge, then push (the default) |
+| `npm run apply -- <org>` | Deploy: pull, merge, then preflight and push (the default) |
 | `npm run pull -- <org>` | Sync platform changes down without overwriting local edits |
-| `npm run push -- <org>` | Push without pulling first (prefer `apply`) |
+| `npm run push -- <org>` | Preflight the write plan, then push without pulling first (prefer `apply`); `--strict` also blocks validation errors outside the plan |
 | `npm run rollback -- <org>` | Restore a pre-deploy snapshot |
 | `npm run cleanup -- <org>` | Find, and optionally delete, platform resources with no file |
 | `npm run audit -- <org>` | Report drift between files, state and the platform |

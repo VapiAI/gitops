@@ -2,9 +2,10 @@
 // Client-side validators — fail-fast schema / lockstep / shape checks
 //
 // Designed to catch the classes of errors that would otherwise only surface
-// when the Vapi API returns a 400 mid-push. The push pipeline runs these in
-// warning-only mode by default; `--strict` promotes warnings to blocking
-// errors that abort before any API call.
+// when the Vapi API returns a 400 mid-push. Push blocks error-severity findings
+// in its write plan (including auto-applied dependencies) before any remote
+// mutation, also in dry-run. `--strict` additionally blocks errors outside
+// the plan; warning-severity findings remain advisory.
 //
 // Sources for each check are documented in `improvements.md`:
 //   - Name length cap (40 chars)              → improvements #18
