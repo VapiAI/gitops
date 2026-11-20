@@ -2334,6 +2334,21 @@ have a bootstrap pull leave existing baselines alone.
 
 ---
 
+## 43. Missing practice variables reached live prompts literally
+
+Shared assistants can run in many practice squads, each supplying practice
+details through variableValues. A missing value stayed as `{{name}}` on a call.
+`variable-undefined` now checks each squad member's expanded prompts and attached
+tools against squad/member values, Vapi built-ins and runtime assignments. It
+warns by default and blocks with `--strict`. Standalone assistants remain
+unchecked because their values may arrive when a call is created.
+
+### Status
+
+**Implemented.** Covered by `tests/validate-variables.test.ts`.
+
+---
+
 ## Out of scope (intentionally not improvements)
 
 - **State file is identity-only and not git-ignored.** It's intentionally

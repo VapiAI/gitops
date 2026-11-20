@@ -1837,7 +1837,11 @@ async function main(): Promise<void> {
     } else {
       console.log("   ✅ No validation issues.");
     }
-    const errorCount = findings.filter((f) => f.severity === "error").length;
+    const errorCount = findings.filter(
+      (f) =>
+        f.severity === "error" ||
+        (STRICT_VALIDATION && f.rule === "variable-undefined"),
+    ).length;
     if (errorCount > 0) {
       if (STRICT_VALIDATION) {
         console.error(

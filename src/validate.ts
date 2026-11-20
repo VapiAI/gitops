@@ -18,6 +18,7 @@ import { matchesIgnore } from "./config.ts";
 import { RESOURCE_TYPES_WITH_REFS, referencesCollect } from "./resolver.ts";
 import { FOLDER_MAP } from "./resources.ts";
 import type { LoadedResources, ResourceFile, ResourceType } from "./types.ts";
+import { validateVariables } from "./validate-variables.ts";
 
 export type ValidationSeverity = "warn" | "error";
 
@@ -545,6 +546,7 @@ export function validateResources(
     ...checkMaxTokensFloor(resources),
     ...checkVoiceSchemas(resources),
     ...checkIgnoredSharing(resources),
+    ...validateVariables(resources),
   ];
 }
 

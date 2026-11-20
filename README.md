@@ -210,7 +210,7 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | Command | What it does |
 | --- | --- |
 | `npm run setup` | Connect an org: create `.env.<org>` and `resources/<org>/` |
-| `npm run validate -- <org>` | Check resource files offline before deploying |
+| `npm run validate -- <org> [--strict]` | Check resource files offline, including undefined squad variables (`variable-undefined`); `--strict` blocks on that warning |
 | `npm run apply -- <org>` | Deploy: pull, merge, then push (the default) |
 | `npm run pull -- <org>` | Sync platform changes down without overwriting local edits |
 | `npm run push -- <org>` | Push without pulling first (prefer `apply`) |
