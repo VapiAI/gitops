@@ -3,6 +3,18 @@ members:
   - assistantId: nhs-test-reception
   - assistantId: nhs-test-appointments
 membersOverrides:
+  'tools:append':
+    - type: transferCall
+      function:
+        name: nhs-test-transfer
+        description: Demonstration only. Do not invoke; these Ofcom drama numbers are not working clinical services.
+      destinations:
+        - type: number
+          number: '+442079460201'
+          description: Example urgent reception destination, not for emergencies or dialing in this demonstration.
+        - type: number
+          number: '+442079460202'
+          description: Example administrative reception destination, not for dialing in this demonstration.
   variableValues:
     practice_name: Example Rowan GP Practice
     practice_mailbox: rowan.demo@example.nhs.uk

@@ -4,7 +4,6 @@ name: nhs-test-reception
 firstMessage: Hello, this is the fictional {{practice_name}} reception demo. Please use made-up details only. How can I help?
 model:
   toolIds:
-    - nhs-test-transfer
     - nhs-test-appointments-handoff
 ---
 

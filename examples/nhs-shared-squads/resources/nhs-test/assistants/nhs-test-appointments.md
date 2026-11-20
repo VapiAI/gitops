@@ -1,9 +1,6 @@
 ---
 $include: nhs-test-assistant
 name: nhs-test-appointments
-model:
-  toolIds:
-    - nhs-test-transfer
 ---
 
 # Identity and purpose
