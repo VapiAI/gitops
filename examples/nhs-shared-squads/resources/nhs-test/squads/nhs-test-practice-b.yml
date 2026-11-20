@@ -1,0 +1,11 @@
+name: nhs-test-practice-b
+members:
+  - assistantId: nhs-test-reception
+  - assistantId: nhs-test-appointments
+membersOverrides:
+  variableValues:
+    practice_name: Example Rowan GP Practice
+    practice_mailbox: rowan.demo@example.nhs.uk
+    opening_hours: Monday to Thursday, 08:30 to 18:00; Friday, 08:30 to 17:00 UK local time
+    urgent_handover_number: '+442079460201'
+    admin_handover_number: '+442079460202'
