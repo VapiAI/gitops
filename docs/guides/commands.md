@@ -98,11 +98,11 @@ adoption before dependency resolution to take one over instead.
 ## Interactive Mode
 
 Assistant pushes (including the push phase of `apply`) derive
-`metadata.gitops.folderPath` from the first folder under `assistants/`, preserving
+`metadata.gitops.folderPath` from the full subfolder path under `assistants/`, preserving
 other authored metadata and sibling `gitops` keys:
 `assistants/support/intake.yml` groups under `support`.
-Dashboard folders are one level deep; deeper paths group under the first folder
-and print a warning, not an error. Root files send
+Nested paths are preserved: `assistants/support/intake/b.yml` groups under
+`support/intake`. Root files send
 `metadata.gitops.folderPath: null` to clear grouping.
 Pull omits this derived key, dropping empty `gitops`/`metadata` objects, and drift
 comparisons ignore it. Top-level `metadata.folderPath` is a user key, left

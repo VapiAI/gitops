@@ -51,7 +51,7 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
       const data = { name: 'Intake', metadata: { team: 'support', folderPath: 'user', gitops: { owner: 'repo' } } };
       await applyAssistant({ resourceId: 'support/tier2/intake', filePath: '', data }, state);
       assert.equal(requests[0].method, 'POST');
-      assert.deepEqual(requests[0].body.metadata, { ...data.metadata, gitops: { owner: 'repo', folderPath: 'support' } });
+      assert.deepEqual(requests[0].body.metadata, { ...data.metadata, gitops: { owner: 'repo', folderPath: 'support/tier2' } });
       assert.deepEqual(state.assistants['support/tier2/intake'], { uuid: 'uuid', origin: 'pushed' });
       assert.equal(readBaseline('folder-test', 'uuid'), hashPayload(data));
       requests.length = 0;
@@ -95,13 +95,6 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
       },
     );
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.equal(
-      result.stderr.split(
-        'dashboard folders are one level deep; grouped under "support".',
-      ).length - 1,
-      1,
-      result.stderr,
-    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -121,7 +114,7 @@ test("folder payloads preserve user metadata and override derived values", () =>
     metadata: {
       team: "support",
       folderPath: "user",
-      gitops: { owner: "repo", folderPath: "support" },
+      gitops: { owner: "repo", folderPath: "support/tier2" },
     },
   });
   assert.equal(data.metadata.gitops.folderPath, "old");

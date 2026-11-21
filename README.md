@@ -185,10 +185,10 @@ To test every pull request automatically, set up [PR checks](docs/guides/pr-chec
 - **Assistant subfolders group the dashboard.** Pushing
   `assistants/support/intake.yml` sets `metadata.gitops.folderPath` to
   `support`, preserving other authored metadata and sibling `gitops` keys.
-  A top-level `metadata.folderPath` remains a user-authored key. Dashboard folders
-  are one level deep: deeper paths also group under `support`, with a warning on
-  push. Root assistants send `metadata.gitops.folderPath: null` to clear any
-  previous folder. This derived key is omitted
+  A top-level `metadata.folderPath` remains a user-authored key. The full
+  subfolder path is preserved: `assistants/support/intake/b.yml` sets
+  `metadata.gitops.folderPath` to `support/intake`. Root assistants send
+  `metadata.gitops.folderPath: null` to clear any previous folder. This derived key is omitted
   on pull and ignored for drift; do not author it in YAML. Moving files still
   requires explicit `--adopt <new-resourceId>=<uuid>` to retain the same platform
   resource; an unlinked file otherwise creates a new one. `apply` uses the same

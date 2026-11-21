@@ -32,7 +32,7 @@ export function withAssistantFolder(
   resourceId: string,
 ): Record<string, unknown> {
   const normalized = resourceId.replace(/\\/g, "/");
-  const slash = normalized.indexOf("/");
+  const slash = normalized.lastIndexOf("/");
   const metadata = data.metadata;
   if (
     metadata != null &&
@@ -44,11 +44,6 @@ export function withAssistantFolder(
     ?.gitops;
   if (metadata && Object.hasOwn(metadata, "gitops") && !isPlainObject(gitops)) {
     throw new Error("Assistant metadata.gitops must be a plain object");
-  }
-  if (slash >= 0 && normalized.indexOf("/", slash + 1) >= 0) {
-    console.warn(
-      `  ⚠️  ${resourceId}: dashboard folders are one level deep; grouped under "${normalized.slice(0, slash)}".`,
-    );
   }
   return {
     ...data,
