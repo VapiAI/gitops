@@ -53,6 +53,9 @@ Safe to run without asking: `npm run validate`, `npm run audit`,
 plain `npm run pull` (it never overwrites local edits), `npm run push -- <org>
 --dry-run`, `npm run build`, `npm test`.
 
+- `variable-undefined`: set squad members' `{{vars}}` in squad/member `variableValues`; `--strict` blocks missing values.
+- `transfer-number-liquid`: transfer destination numbers must be literal; put per-squad numbers in an inline `transferCall` in `membersOverrides["tools:append"]`.
+
 **2. Never handle API keys.** Don't ask the human to paste a key into chat,
 don't print or read out `.env.*` files, never pass a key as a command-line
 argument, and never commit `.env.*`. Keys live in `.env.<org>` (gitignored)
@@ -151,6 +154,8 @@ precisely.
    never ask for a real key just to validate. Don't weaken the check or the
    workflow to get past it, and never edit the state file, `.vapi-ignore` or
    `state/<org>/org.json` to make a reference resolve: fix the name, or pull.
+   - `variable-undefined`: set squad members' `{{vars}}` in squad/member `variableValues`; `--strict` blocks this warning in validate and push.
+   - `transfer-number-liquid`: use literal transfer numbers; append a per-squad inline `transferCall` in the squad's `membersOverrides["tools:append"]`.
 4. **Build PR checks offline** if `vapi-checks.yml` exists:
    `npm run check -- --all --dry-run`. Fix anything it reports.
 5. **Review the dry-run Name collisions list**, then **deploy only with a yes**

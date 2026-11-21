@@ -12,6 +12,7 @@ import {
   BASE_DIR,
   loadIgnorePatterns,
   RESOURCES_DIR,
+  STRICT_VALIDATION,
   VAPI_ENV,
 } from "./config.ts";
 import {
@@ -96,7 +97,11 @@ async function main(): Promise<void> {
     }
   }
 
-  const errorCount = findings.filter((f) => f.severity === "error").length;
+  const errorCount = findings.filter(
+    (f) =>
+      f.severity === "error" ||
+      (STRICT_VALIDATION && f.rule === "variable-undefined"),
+  ).length;
   if (errorCount > 0) {
     console.error(
       `❌ Validation failed with ${errorCount} error(s). Fix the issues above before pushing.`,
