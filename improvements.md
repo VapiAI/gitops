@@ -31,6 +31,25 @@
 
 ---
 
+## Push write-plan preflight [RESOLVED 2026-11-20]
+
+- **Problem:** Push is not atomic: a 400 on a later payload can leave earlier
+  resources applied and the org partially updated.
+- **Current behavior:** Verified in `src/push.ts`: validation now gates all
+  selected writes and local auto-applied dependencies before orphan deletion
+  or POST/PATCH. `src/push-plan.ts` computes this plan without API calls.
+- **Risk:** Previously, known error-severity findings only warned unless
+  `--strict` was set. Unknown API-side errors can still leave partial writes;
+  this is preflight validation, not a remote transaction.
+- **Current mitigation:** Default preflight (also in dry-run) blocks planned
+  errors and unresolved credential names. `--strict` also blocks errors in
+  unrelated local resources. Bootstrap pulls before the gate only read remote
+  state.
+- **Possible fix:** Extend offline validators as new API rejection cases are
+  discovered; true atomicity would require platform transaction support.
+- **Status:** Resolved for known validation findings; covered by local HTTP
+  stub tests in `tests/push-preflight.test.ts` asserting zero remote mutations.
+
 ## How to read this file
 
 Sections are ordered by **severity / blast radius**, not by date discovered.
