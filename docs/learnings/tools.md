@@ -163,7 +163,7 @@ If the schema doesn't meet these requirements, `strict` may be silently disabled
 
 **Cause:** The API requires E.164 by default; `numberE164CheckEnabled: false` still enforces `^\+?[a-zA-Z0-9]+$`, which rejects Liquid syntax.
 
-**Fix:** Use literal numbers. For shared assistants, put per-squad numbers in an inline `transferCall` in the squad's `membersOverrides["tools:append"]`. `transfer-number-liquid` reports an error before deployment. See [shared squad variables](squads.md#shared-assistants-speak-unresolved-practice-variables) and the [NHS example](../../examples/nhs-shared-squads/).
+**Fix:** Use literal numbers. For shared assistants, put per-squad numbers in an inline `transferCall` in the squad's `membersOverrides["tools:append"]`. `transfer-number-liquid` reports an error before deployment. See [shared squad variables](squads.md#shared-assistants-speak-unresolved-practice-variables) and the [NHS example (PR #100)](https://github.com/VapiAI/gitops/pull/100).
 
 ### Forwarding numbers from the assistant are auto-injected
 
