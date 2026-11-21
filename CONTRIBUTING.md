@@ -26,7 +26,8 @@ learnings are all welcome.
 
 3. Make your change, with tests for any behaviour change. Tests use
    `node:test` and live in `tests/`; they never call the real Vapi API.
-4. Run `npm run build` and `npm test` again, then open a pull request.
+4. Run `npx biome check <changed files>`, `npm run build` and `npm test`, then
+   open a pull request.
 
 Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`fix(pull): …`, `feat(check): …`, `docs: …`).

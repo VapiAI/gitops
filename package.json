@@ -26,6 +26,7 @@
     "test": "node --import tsx --import ./tests/no-vapi-api.ts --test tests/*.test.ts"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@types/node": "^22.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
