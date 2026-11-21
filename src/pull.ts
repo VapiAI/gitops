@@ -22,7 +22,6 @@ import {
   loadIgnorePatterns,
   matchesIgnore,
   RESOURCES_DIR,
-  STATE_FILE_PATH,
   VAPI_BASE_URL,
   VAPI_ENV,
   VAPI_TOKEN,
@@ -34,7 +33,6 @@ import {
   formatDriftLabel,
 } from "./drift.ts";
 import { readBaseline, writeBaseline } from "./hash-store.ts";
-import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
   FOLDER_MAP,
   hashLocalResource,
@@ -42,7 +40,14 @@ import {
   resolvePullScopeFromFilePaths,
 } from "./resources.ts";
 import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
-import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
+import {
+  hashPayload,
+  loadState,
+  saveState,
+  stateWritePrepare,
+  upsertState,
+} from "./state.ts";
+import { engineFiles, stateSavedStampPath } from "./state-paths.ts";
 import type { ResourceState, ResourceType, StateFile } from "./types.ts";
 
 // Map resource types to their API endpoints
@@ -861,7 +866,7 @@ export async function pullResourceType(
           // The drift baseline now lives in the hash store, NOT in the state
           // section that gets wholesale-replaced at end-of-loop. So the
           // preserve branches just write the `{ uuid }` mapping and leave the
-          // `.vapi-state-hash/<org>/<uuid>` file untouched — the baseline
+          // `state/<org>/local/baselines/<uuid>` file untouched — the baseline
           // survives by construction, no carry-forward needed.
           if (direction === "both-diverged") {
             bothDiverged?.push({
@@ -954,7 +959,11 @@ export async function pullResourceType(
       }
     }
 
-    // Skip locally edited files even without git (mtime-based detection).
+    // With no baseline and nothing changed in git, keep the file unless this
+    // machine's engine has saved state since the file was last written. That
+    // moment comes from the engine's own stamp, never from the state file's
+    // timestamp: after a clone or a checkout that is only the order git wrote
+    // the files in. A fresh clone has no stamp, so it keeps every file.
     if (
       !skipLegacyPreserveChecks &&
       !bootstrap &&
@@ -969,19 +978,18 @@ export async function pullResourceType(
         join(dir, `${resourceId}.yaml`),
       ].find((p) => existsSync(p));
       if (localFile) {
-        const stateFilePath = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
-        if (existsSync(stateFilePath)) {
-          const localMtime = statSync(localFile).mtimeMs;
-          const stateMtime = statSync(stateFilePath).mtimeMs;
-          if (localMtime > stateMtime) {
-            console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-            upsertState(newStateSection, resourceId, {
-              uuid: resource.id,
-              origin: "pulled",
-            });
-            skipped++;
-            continue;
-          }
+        const stamp = stateSavedStampPath(BASE_DIR, VAPI_ENV);
+        if (
+          !existsSync(stamp) ||
+          statSync(localFile).mtimeMs > statSync(stamp).mtimeMs
+        ) {
+          console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
+          upsertState(newStateSection, resourceId, {
+            uuid: resource.id,
+            origin: "pulled",
+          });
+          skipped++;
+          continue;
         }
       }
     }
@@ -1243,7 +1251,7 @@ function printDriftSummary(counts: DriftDirectionCounts): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function runPull(options: PullOptions = {}): Promise<PullResult> {
-  assertStateMigrated(STATE_FILE_PATH);
+  stateWritePrepare();
   const force = options.force ?? process.argv.includes("--force");
   const bootstrap = options.bootstrap ?? BOOTSTRAP_SYNC;
   const bindingsOnly =
@@ -1315,9 +1323,14 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
 
   if (gitEnabled) {
     changedFiles = getLocallyChangedFiles();
-    // Only keep resource files — non-resource changes don't matter
+    // Only keep resource files — non-resource changes don't matter. Neither
+    // do the files the engine keeps in that folder itself (the org pin and
+    // its records in the older layout): a person didn't edit those, whether
+    // git shows them as new, changed, or deleted by `npm run migrate`.
+    const engineOwn = engineFiles(BASE_DIR, VAPI_ENV);
     for (const f of changedFiles) {
-      if (!f.startsWith(`resources/${VAPI_ENV}/`)) changedFiles.delete(f);
+      if (!f.startsWith(`resources/${VAPI_ENV}/`) || engineOwn.has(f))
+        changedFiles.delete(f);
     }
   }
 

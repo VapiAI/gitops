@@ -70,7 +70,7 @@ export interface AuditOptions {
   // DI seam: swap the network call. When supplied, `fetchRemote` is implied
   // true and the default `fetchAllResources` is not used.
   remoteFetcher?: (t: ResourceType) => Promise<VapiResource[]>;
-  // DI seam: swap state loading (default reads .vapi-state.<env>.json).
+  // DI seam: swap state loading (default reads state/<org>/state.json).
   stateLoader?: () => StateFile;
   // DI seam: swap local-file enumeration (default walks resources/<env>/<type>/).
   listLocalIds?: (t: ResourceType) => string[];
@@ -80,7 +80,7 @@ export interface AuditOptions {
   // is accepted so tests can keep their fixtures plain-object.
   readAssistantTools?: (resourceId: string) => unknown[] | Promise<unknown[]>;
   // DI seam: swap the drift-baseline lookup. Defaults to the per-developer
-  // hash store (.vapi-state-hash/<env>/<uuid>), which resolves beside src/
+  // hash store (state/<org>/local/baselines/<uuid>), which resolves beside src/
   // rather than under any temp dir — so in-process tests must inject this
   // instead of seeding baseline files.
   baselineReader?: (uuid: string) => string | undefined;

@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";

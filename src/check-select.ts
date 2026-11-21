@@ -40,6 +40,7 @@ export function checkPatterns(check: CheckDefinition): string[] {
     ...ENGINE_PATTERNS,
     ...orgs.flatMap((org) => [
       `resources/${org}/**`,
+      `state/${org}/**`,
       `.vapi-state.${org}.json`,
     ]),
     ...check.paths,

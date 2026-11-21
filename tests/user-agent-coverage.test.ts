@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -74,7 +75,9 @@ test("api.ts requests carry the command's User-Agent", async () => {
   delete process.env.GITHUB_ACTIONS;
   try {
     const { vapiGet } = await import("../src/api.ts");
-    const { userAgentGet, vapiClientGet } = await import("../src/user-agent.ts");
+    const { userAgentGet, vapiClientGet } = await import(
+      "../src/user-agent.ts"
+    );
     await vapiGet("/assistant");
     assert.deepEqual(seen, [userAgentGet()]);
     assert.match(seen[0] ?? "", /^vapi-gitops-apply\/[^ ]+$/);

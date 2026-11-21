@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
@@ -16,8 +17,9 @@ import test from "node:test";
 // file; each test resets it.
 const ROOT = mkdtempSync(join(tmpdir(), "promote-cmd-"));
 process.env.VAPI_GITOPS_ROOT = ROOT;
-const { APPLIED_PATHS_FILE, promotionCommandRun } =
-  await import("../src/promote-cmd.ts");
+const { APPLIED_PATHS_FILE, promotionCommandRun } = await import(
+  "../src/promote-cmd.ts"
+);
 
 function git(...args: string[]): string {
   return execFileSync(
@@ -40,7 +42,7 @@ function fixtureReset(): void {
     "version: 1\norgs:\n  a: {}\n  b: {}\n  c: {}\npipelines:\n  release:\n    orgs: [a, b, c]\n    resources: ['**/*']\n",
   );
   write("resources/a/assistants/intake.yml", "name: Intake\n");
-  for (const org of ["a", "b", "c"]) write(`.vapi-state.${org}.json`, "{}\n");
+  for (const org of ["a", "b", "c"]) write(`state/${org}/state.json`, "{}\n");
   write(".gitignore", "tmp/\n.env.*\n");
   git("init", "-q", "-b", "main");
   git("add", "-A");

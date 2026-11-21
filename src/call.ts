@@ -1,10 +1,12 @@
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
-import { dirname, join, resolve } from "path";
+import { join, resolve } from "path";
 import * as readline from "readline";
 import { fileURLToPath } from "url";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
+import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { Environment, StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
@@ -14,8 +16,7 @@ const require = createRequire(import.meta.url);
 // Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 type ResourceType = "assistant" | "squad";
 
@@ -268,10 +269,10 @@ function askUserConfirmation(question: string): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function loadState(env: Environment): StateFile {
-  const stateFilePath = join(BASE_DIR, `.vapi-state.${env}.json`);
+  const stateFilePath = stateFileRead(BASE_DIR, env);
 
   if (!existsSync(stateFilePath)) {
-    console.error(`❌ State file not found: .vapi-state.${env}.json`);
+    console.error(`❌ State file not found: ${stateFileLabel(BASE_DIR, env)}`);
     console.error(
       "   Run 'npm run apply -- " + env + "' first to create resources",
     );

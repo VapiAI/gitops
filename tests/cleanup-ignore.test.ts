@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
@@ -14,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // `npm run cleanup` deletes platform resources that aren't in the state
 // file. Resources excluded by .vapi-ignore are never written to state, so
@@ -66,7 +68,7 @@ async function cleanupRun(
     symlinkSync(join(REPO, "node_modules"), join(dir, "node_modules"), "dir");
     writeFileSync(join(dir, `.env.${ORG}`), "VAPI_TOKEN=fake-token-not-used\n");
     writeFileSync(
-      join(dir, `.vapi-state.${ORG}.json`),
+      stateFixturePath(dir, ORG),
       JSON.stringify({ assistants: { "front-desk": { uuid: TRACKED } } }),
     );
     mkdirSync(join(dir, "resources", ORG), { recursive: true });
@@ -99,58 +101,54 @@ async function cleanupRun(
   }
 }
 
-test(
-  "a destructive cleanup deletes only true orphans and keeps .vapi-ignore matches",
-  { timeout: 60_000 },
-  async () => {
-    const result = await cleanupRun(["--force", "--confirm", ORG]);
-    assert.deepEqual(
-      {
-        code: result.code,
-        deletes: result.deletes,
-        retainedAssistant: result.output.includes(
-          "Legacy Bot retained (matched .vapi-ignore: assistants/legacy-*)",
-        ),
-        retainedTool: result.output.includes(
-          "legacy_lookup retained (matched .vapi-ignore: tools/legacy-*)",
-        ),
-      },
-      {
-        code: 0,
-        deletes: [`/assistant/${ORPHAN}`],
-        retainedAssistant: true,
-        retainedTool: true,
-      },
-    );
-  },
-);
+test("a destructive cleanup deletes only true orphans and keeps .vapi-ignore matches", {
+  timeout: 60_000,
+}, async () => {
+  const result = await cleanupRun(["--force", "--confirm", ORG]);
+  assert.deepEqual(
+    {
+      code: result.code,
+      deletes: result.deletes,
+      retainedAssistant: result.output.includes(
+        "Legacy Bot retained (matched .vapi-ignore: assistants/legacy-*)",
+      ),
+      retainedTool: result.output.includes(
+        "legacy_lookup retained (matched .vapi-ignore: tools/legacy-*)",
+      ),
+    },
+    {
+      code: 0,
+      deletes: [`/assistant/${ORPHAN}`],
+      retainedAssistant: true,
+      retainedTool: true,
+    },
+  );
+});
 
-test(
-  "a dry run lists ignored resources as kept, not as orphans",
-  { timeout: 60_000 },
-  async () => {
-    const result = await cleanupRun([]);
-    assert.deepEqual(
-      {
-        code: result.code,
-        deletes: result.deletes,
-        orphanListed: result.output.includes(
-          `assistants: Old Experiment (${ORPHAN})`,
-        ),
-        ignoredListed:
-          result.output.includes(IGNORED_ASSISTANT) &&
-          result.output.includes("🗑️  assistants: Legacy Bot"),
-        keptSummary: result.output.includes(
-          "2 resource(s) not in state were kept because they match .vapi-ignore",
-        ),
-      },
-      {
-        code: 0,
-        deletes: [],
-        orphanListed: true,
-        ignoredListed: false,
-        keptSummary: true,
-      },
-    );
-  },
-);
+test("a dry run lists ignored resources as kept, not as orphans", {
+  timeout: 60_000,
+}, async () => {
+  const result = await cleanupRun([]);
+  assert.deepEqual(
+    {
+      code: result.code,
+      deletes: result.deletes,
+      orphanListed: result.output.includes(
+        `assistants: Old Experiment (${ORPHAN})`,
+      ),
+      ignoredListed:
+        result.output.includes(IGNORED_ASSISTANT) &&
+        result.output.includes("🗑️  assistants: Legacy Bot"),
+      keptSummary: result.output.includes(
+        "2 resource(s) not in state were kept because they match .vapi-ignore",
+      ),
+    },
+    {
+      code: 0,
+      deletes: [],
+      orphanListed: true,
+      ignoredListed: false,
+      keptSummary: true,
+    },
+  );
+});

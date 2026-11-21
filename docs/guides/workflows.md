@@ -70,7 +70,7 @@ README's quick start), then run a plain pull before your first deploy:
 npm run pull -- <org>
 ```
 
-This seeds your local drift baselines (`.vapi-state-hash/`, per developer and
+This seeds your local drift baselines (`state/<org>/local/baselines/`, per developer and
 gitignored), so later pulls and deploys can tell your edits from changes made
 in the dashboard.
 
@@ -85,7 +85,7 @@ npm run validate -- <org>
 npm run apply -- <org>
 ```
 
-On a fresh org, `apply`'s pull phase creates `.vapi-state.<org>.json` from
+On a fresh org, `apply`'s pull phase creates `state/<org>/state.json` from
 the empty dashboard before pushing your new resources.
 
 ## Create new resources after the first deploy
@@ -160,7 +160,7 @@ Detection works in three layers, so it covers both day-to-day and
 fresh-clone workflows:
 
 1. **Content baseline (primary)** — each resource's last-seen platform hash
-   lives in the per-developer `.vapi-state-hash/<org>/<uuid>` store
+   lives in the per-developer `state/<org>/local/baselines/<uuid>` store
    (gitignored). Comparing local / baseline / dashboard hashes classifies
    every resource as clean, local-ahead (preserved ⬆️), dashboard-ahead
    (synced down ⬇️ — local was unchanged, nothing to lose), or both-diverged
@@ -169,10 +169,13 @@ fresh-clone workflows:
 2. **Git-tracked changes** — when no baseline exists yet, files that show up
    in `git status` (modified, deleted, or individually untracked) are
    preserved.
-3. **mtime fallback** — if git can't help (no commits yet, the resource tree
-   isn't tracked at all, or git just had nothing to say), files that are
-   newer than `.vapi-state.<org>.json` are still preserved. This is the safety
-   net for the "fresh clone, edit a file, run pull again" case.
+3. **Last-save fallback** — if git can't help (no commits yet, the resource
+   tree isn't tracked at all, or git just had nothing to say), a file is
+   still preserved unless the engine has saved this org's state on this
+   machine since the file was last written. A fresh clone has no such save
+   yet, so its first pull keeps every file: a change merged in git and not
+   yet on the platform is not overwritten, whatever order the checkout wrote
+   the files in.
 
 Interactive `npm run pull` is local-first too: it asks
 `Overwrite locally modified files?` (default `No`). Pass `--force` (or answer
@@ -188,7 +191,7 @@ npm run pull -- <org> --bootstrap
 npm run pull -- <org> --type squads --id <squad-uuid>
 ```
 
-`--bootstrap` refreshes `.vapi-state.<org>.json`, credential mappings, and the
+`--bootstrap` refreshes `state/<org>/state.json`, credential mappings, and the
 generated credential and phone-number block in `.env.<org>`, and leaves
 `resources/<org>/` untouched. Setup and ordinary pulls do the same binding
 refresh, and `push` runs it automatically when the state looks empty or
@@ -229,7 +232,7 @@ npm run cleanup -- <org> --force --confirm <org>
 ```
 
 Cleanup treats every platform resource that isn't in
-`.vapi-state.<org>.json` as unmanaged, except those matched by
+`state/<org>/state.json` as unmanaged, except those matched by
 `resources/<org>/.vapi-ignore`: it lists those as retained and never deletes
 them. Still read the dry-run list before a destructive run.
 

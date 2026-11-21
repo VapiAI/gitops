@@ -4,28 +4,28 @@
 // triggering the CLI argument parser in `config.ts`. Env-loading is inlined
 // here (rather than importing from `config.ts`) for the same reason.
 
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
 import {
-  simRunItemTerminal,
-  simRunVerdict,
   type SimRun,
   type SimRunItem,
   type SimRunItemCounts,
   type SimRunVerdict,
+  simRunItemTerminal,
+  simRunVerdict,
 } from "./sim-result.ts";
+import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   VapiApiError,
-  vapiFetchJson,
   type VapiConnection,
+  vapiFetchJson,
 } from "./vapi-client.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 export interface SimEnv {
   env: string;
@@ -113,10 +113,10 @@ export function loadEnvFile(env: string): SimEnv {
 }
 
 export function loadStateFile(env: string): StateFile {
-  const stateFile = join(BASE_DIR, `.vapi-state.${env}.json`);
+  const stateFile = stateFileRead(BASE_DIR, env);
   if (!existsSync(stateFile)) {
     throw new Error(
-      `State file not found: .vapi-state.${env}.json. Run 'npm run pull -- ${env} --bootstrap' first.`,
+      `State file not found: ${stateFileLabel(BASE_DIR, env)}. Run 'npm run pull -- ${env} --bootstrap' first.`,
     );
   }
   const state = JSON.parse(readFileSync(stateFile, "utf-8")) as StateFile;

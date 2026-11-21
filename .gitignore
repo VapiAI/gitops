@@ -23,13 +23,19 @@ Thumbs.db
 
 tmp/
 
-# Local snapshots written by `npm run push` for `npm run rollback` recovery.
-# Operator-local; not shared.
-.vapi-state.*.snapshots/
+# Engine state lives in state/<org>/ and is committed (see state/README.md),
+# except what each machine keeps for itself under state/<org>/local/:
+#   baselines/  "the last platform state I saw" per resource, for drift
+#               detection. Committing it would make one developer's baseline
+#               everyone's.
+#   snapshots/  copies written by `npm run push` for `npm run rollback`.
+state/*/local/
 
-# Per-developer drift baseline store (.vapi-state-hash/<org>/<uuid>).
-# Holds "the last platform state I saw" per resource. Local, not shared —
-# committing it would make one developer's baseline everyone's.
+# The same two stores where they sit while a repository's state is still in
+# the layout from before state/ existed. For an org whose state is in state/
+# the engine moves them on the next pull, push or apply; either way they
+# stay out of git.
+.vapi-state.*.snapshots/
 .vapi-state-hash/
 
 # Dashboard-backup copies written by the push conflict prompt for manual

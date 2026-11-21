@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveSelection, resolveTarget } from "../src/sim.ts";
@@ -123,8 +124,7 @@ test("resolveTarget: still accepts a legacy bare-string state value", () => {
   // `loadStateFile` reads the state JSON without migrating it, so a legacy
   // file can still hold `name → "uuid"`. The resolver accepts both shapes.
   const state = makeState();
-  (state.assistants as Record<string, unknown>)["legacy-agent"] =
-    "uuid-legacy";
+  (state.assistants as Record<string, unknown>)["legacy-agent"] = "uuid-legacy";
   const target = resolveTarget(state, { assistant: "legacy-agent" });
   assert.equal(target.id, "uuid-legacy");
 });

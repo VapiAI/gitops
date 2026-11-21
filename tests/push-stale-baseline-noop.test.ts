@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -13,6 +14,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Regression: a STALE `lastPulledHash` (written in an older hash basis) must
@@ -119,7 +121,11 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
 
   cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
   cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
-  symlinkSync(join(REPO_ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+  symlinkSync(
+    join(REPO_ROOT, "node_modules"),
+    join(dir, "node_modules"),
+    "dir",
+  );
 
   const assistantsDir = join(dir, "resources", ENV, "assistants");
   mkdirSync(assistantsDir, { recursive: true });
@@ -129,12 +135,12 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
   // engine runs from the copied src/, so its store resolves under `dir`.
   // It is deliberately stale: it equals neither the local file's hash nor
   // the canonicalized dashboard hash.
-  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  const hashStore = baselinesDir(dir, ENV);
   mkdirSync(hashStore, { recursive: true });
   writeFileSync(join(hashStore, UUID), "stale-older-basis-hash\n");
 
   writeFileSync(
-    join(dir, `.vapi-state.${ENV}.json`),
+    stateFixturePath(dir, ENV),
     JSON.stringify(
       {
         // A non-empty credentials section keeps push from treating state as
@@ -160,16 +166,26 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
 
   // Route order matters: the by-id GET must match before the list GET.
   const { worker, port } = await startStub([
-    { method: "GET", pathStartsWith: `/assistant/${UUID}`, body: dashboardBody() },
-    { method: "PATCH", pathStartsWith: `/assistant/${UUID}`, body: dashboardBody() },
+    {
+      method: "GET",
+      pathStartsWith: `/assistant/${UUID}`,
+      body: dashboardBody(),
+    },
+    {
+      method: "PATCH",
+      pathStartsWith: `/assistant/${UUID}`,
+      body: dashboardBody(),
+    },
     { method: "GET", pathStartsWith: "/assistant", body: [dashboardBody()] },
   ]);
 
   writeFileSync(
     join(dir, `.env.${ENV}`),
-    ["VAPI_TOKEN=fake-token-not-used", `VAPI_BASE_URL=http://127.0.0.1:${port}`, ""].join(
-      "\n",
-    ),
+    [
+      "VAPI_TOKEN=fake-token-not-used",
+      `VAPI_BASE_URL=http://127.0.0.1:${port}`,
+      "",
+    ].join("\n"),
   );
 
   try {
@@ -195,11 +211,7 @@ test("push: stale lastPulledHash does not block when local and dashboard agree",
     );
 
     const out = `${res.stdout}\n${res.stderr}`;
-    assert.equal(
-      res.status,
-      0,
-      `push must exit 0 (no phantom block)\n${out}`,
-    );
+    assert.equal(res.status, 0, `push must exit 0 (no phantom block)\n${out}`);
     assert.doesNotMatch(
       out,
       /Bootstrap state sync required/,

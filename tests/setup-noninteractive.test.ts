@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -93,7 +94,10 @@ test("readEnvValue handles quotes, export, comments, and missing keys", () => {
     "OTHER=1",
   ].join("\n");
   assert.equal(readEnvValue(content, "VAPI_TOKEN"), "abc-123");
-  assert.equal(readEnvValue(content, "VAPI_BASE_URL"), "https://api.eu.vapi.ai");
+  assert.equal(
+    readEnvValue(content, "VAPI_BASE_URL"),
+    "https://api.eu.vapi.ai",
+  );
   assert.equal(readEnvValue(content, "MISSING"), undefined);
   assert.equal(readEnvValue("VAPI_TOKEN=\n", "VAPI_TOKEN"), undefined);
 });
@@ -109,25 +113,37 @@ function sandbox(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "vapi-setup-test-"));
   cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
   cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
-  symlinkSync(join(REPO_ROOT, "node_modules"), join(dir, "node_modules"), "dir");
+  symlinkSync(
+    join(REPO_ROOT, "node_modules"),
+    join(dir, "node_modules"),
+    "dir",
+  );
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-function runSetup(cwd: string, args: string[], env: Record<string, string> = {}) {
+function runSetup(
+  cwd: string,
+  args: string[],
+  env: Record<string, string> = {},
+) {
   const baseEnv = { ...process.env };
   delete baseEnv.VAPI_TOKEN;
   delete baseEnv.VAPI_PRIVATE_API_KEY;
   delete baseEnv.VAPI_BASE_URL;
   for (const name of Object.keys(baseEnv))
     if (name.startsWith("VAPI_PRIVATE_API_KEY_")) delete baseEnv[name];
-  const result = spawnSync("node", ["--import", "tsx", "src/setup.ts", ...args], {
-    cwd,
-    env: { ...baseEnv, ...env },
-    // stdin is a pipe, not a TTY — exactly what an agent's shell looks like.
-    input: "",
-    encoding: "utf-8",
-    timeout: 20_000,
-  });
+  const result = spawnSync(
+    "node",
+    ["--import", "tsx", "src/setup.ts", ...args],
+    {
+      cwd,
+      env: { ...baseEnv, ...env },
+      // stdin is a pipe, not a TTY — exactly what an agent's shell looks like.
+      input: "",
+      encoding: "utf-8",
+      timeout: 20_000,
+    },
+  );
   return {
     code: result.status,
     output: `${result.stdout || ""}${result.stderr || ""}`,
@@ -180,7 +196,9 @@ test("direct setup refuses to touch an org that already exists locally", () => {
   const fx = sandbox();
   try {
     mkdirSync(join(fx.dir, "resources", "my-org"), { recursive: true });
-    const res = runSetup(fx.dir, ["my-org"], { VAPI_PRIVATE_API_KEY: "fake-not-used" });
+    const res = runSetup(fx.dir, ["my-org"], {
+      VAPI_PRIVATE_API_KEY: "fake-not-used",
+    });
     assert.equal(res.code, 1);
     assert.match(res.output, /already set up locally/);
     assert.match(res.output, /npm run pull -- my-org/);
@@ -198,8 +216,13 @@ test("direct setup refuses to touch an org that already exists locally", () => {
 test("direct setup refuses a generic exported key that differs from .env.<org>", () => {
   const fx = sandbox();
   try {
-    writeFileSync(join(fx.dir, ".env.my-org"), "VAPI_PRIVATE_API_KEY=my-org-key\n");
-    const res = runSetup(fx.dir, ["my-org"], { VAPI_PRIVATE_API_KEY: "other-org-key" });
+    writeFileSync(
+      join(fx.dir, ".env.my-org"),
+      "VAPI_PRIVATE_API_KEY=my-org-key\n",
+    );
+    const res = runSetup(fx.dir, ["my-org"], {
+      VAPI_PRIVATE_API_KEY: "other-org-key",
+    });
     assert.equal(res.code, 1);
     assert.match(res.output, /not the different key in \.env\.my-org/);
     assert.match(res.output, /VAPI_PRIVATE_API_KEY_MY_ORG/);
@@ -213,8 +236,13 @@ test("direct setup refuses a generic exported key that differs from .env.<org>",
 test("direct setup refuses a key another org's .env file already holds", () => {
   const fx = sandbox();
   try {
-    writeFileSync(join(fx.dir, ".env.acme-dev"), "VAPI_PRIVATE_API_KEY=dev-key\n");
-    const res = runSetup(fx.dir, ["acme-prod"], { VAPI_PRIVATE_API_KEY: "dev-key" });
+    writeFileSync(
+      join(fx.dir, ".env.acme-dev"),
+      "VAPI_PRIVATE_API_KEY=dev-key\n",
+    );
+    const res = runSetup(fx.dir, ["acme-prod"], {
+      VAPI_PRIVATE_API_KEY: "dev-key",
+    });
     assert.equal(res.code, 1);
     assert.match(res.output, /already the key in \.env\.acme-dev/);
     assert.doesNotMatch(res.output, /Validating against/);
@@ -226,7 +254,10 @@ test("direct setup refuses a key another org's .env file already holds", () => {
 test("direct setup uses the org's own variable over a generic key and the file", () => {
   const fx = sandbox();
   try {
-    writeFileSync(join(fx.dir, ".env.my-org"), "VAPI_PRIVATE_API_KEY=stale-key\n");
+    writeFileSync(
+      join(fx.dir, ".env.my-org"),
+      "VAPI_PRIVATE_API_KEY=stale-key\n",
+    );
     const res = runSetup(fx.dir, ["my-org"], {
       VAPI_PRIVATE_API_KEY: "other-org-key",
       VAPI_PRIVATE_API_KEY_MY_ORG: "my-org-key",

@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mergeScoped, type TouchedSets } from "../src/state-merge.ts";

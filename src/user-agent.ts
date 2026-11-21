@@ -32,6 +32,10 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The engine's own package.json, for its version. Deliberately not
+// baseDir() (src/base-dir.ts): in an engine test that is a temporary
+// directory with no package.json, and the version sent has to be the real
+// one. This is the one module that finds a file from its own location.
 const PACKAGE_JSON_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",

@@ -15,8 +15,8 @@ function of which of them exist and whether their contents agree.
 | Artifact | Where | Committed? | Meaning |
 |---|---|---|---|
 | **Local file** (`L`) | `resources/<org>/<type>/<name>.md\|yml` | yes | The declarative source of truth you edit |
-| **State entry** (`S`) | `.vapi-state.<org>.json` → `{ "<name>": { "uuid": … } }` | yes | The ONLY thing state stores: which platform UUID a local name is bound to |
-| **Baseline** (`B`) | `.vapi-state-hash/<org>/<uuid>` | **no** (per-developer, gitignored) | sha256 of the last platform content *you* saw (last pull or push) |
+| **State entry** (`S`) | `state/<org>/state.json` → `{ "<name>": { "uuid": … } }` | yes | The ONLY thing state stores: which platform UUID a local name is bound to |
+| **Baseline** (`B`) | `state/<org>/local/baselines/<uuid>` | **no** (per-developer, gitignored) | sha256 of the last platform content *you* saw (last pull or push) |
 | **Dashboard resource** (`D`) | Vapi platform | n/a | What's live |
 
 **One letter per artifact — the same letter for the thing and for its hash.**
@@ -194,7 +194,7 @@ sweep, which consume the resources today without consuming the verdict.
 
 | Command | Behavior |
 |---|---|
-| `pull` | direction unknown (`no-baseline`) → falls back to git/mtime modified-detection: modified files ✏️ preserved; unmodified files 📝 rewritten — and the baseline is seeded. **Run a plain pull first on any fresh clone.** |
+| `pull` | direction unknown (`no-baseline`) → falls back to git modified-detection, then to the last-save rule: a file is ✏️ preserved unless the engine has saved this org's state on this machine since the file was written. A fresh clone has no save yet, so its first pull preserves every file; after that, an untouched file is 📝 rewritten and its baseline seeded. **Run a plain pull first on any fresh clone.** |
 | `push` (without pulling first) | drift check skipped with a warning, PATCH proceeds, baseline seeded from the response. Risk window: this one push cannot detect dashboard drift. |
 | `audit` | `no-baseline` info findings (do not block CI) |
 
@@ -202,8 +202,8 @@ sweep, which consume the resources today without consuming the verdict.
 
 `pull`, `push`, and `apply` all **hard-refuse** with
 `Run \`npm run migrate\` first.` The migration (no org argument, no token
-needed) slims every `.vapi-state.<org>.json` to `name → { uuid }` and seeds
-each org's `.vapi-state-hash/` from the legacy hashes. Idempotent.
+needed) slims every `state/<org>/state.json` to `name → { uuid }` and seeds
+each org's `state/<org>/local/baselines/` from the legacy hashes. Idempotent.
 
 ### G. Local file renamed
 
@@ -232,7 +232,7 @@ does not deploy the source org itself. A safe deletion therefore has two
 separate lifecycles:
 
 1. Delete the source resource file in a reviewed Git change, but retain its
-   `.vapi-state.<source>.json` entry. The entry is the deletion tombstone.
+   `state/<source>/state.json` entry. The entry is the deletion tombstone.
 2. Review `npm run promote` and merge or apply it. Only matching destination
    paths are removed, in reverse dependency order.
 3. An automatic `--all --apply` run carries that authorization through every

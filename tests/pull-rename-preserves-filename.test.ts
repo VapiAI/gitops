@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -16,6 +17,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Regression test: a dashboard RENAME of an already-tracked resource must NOT
@@ -136,12 +138,12 @@ test("pull: dashboard rename of tracked resource preserves the local filename (n
 
   // The drift baseline lives in the hash store, not the state file. The
   // engine runs from the copied src/, so its store resolves under `dir`.
-  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  const hashStore = baselinesDir(dir, ENV);
   mkdirSync(hashStore, { recursive: true });
   writeFileSync(join(hashStore, UUID_X), "stale-hash-X\n");
 
   writeFileSync(
-    join(dir, `.vapi-state.${ENV}.json`),
+    stateFixturePath(dir, ENV),
     JSON.stringify(
       {
         credentials: {},
@@ -230,7 +232,7 @@ test("pull: dashboard rename of tracked resource preserves the local filename (n
 
     // State must remain keyed by the original slug → X.
     const finalState = JSON.parse(
-      readFileSync(join(dir, `.vapi-state.${ENV}.json`), "utf-8"),
+      readFileSync(stateFixturePath(dir, ENV), "utf-8"),
     );
     assert.equal(
       finalState.assistants[TRACKED_SLUG]?.uuid,

@@ -1,19 +1,17 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  deleteBaseline,
+  readBaseline,
+  writeBaseline,
+} from "../src/hash-store.ts";
 import {
   checkPronunciationDictDrop,
   hashPayload,
   upsertState,
 } from "../src/state-serialize.ts";
 import type { ResourceState } from "../src/types.ts";
-import {
-  deleteBaseline,
-  hashStoreDir,
-  readBaseline,
-  writeBaseline,
-} from "../src/hash-store.ts";
-import { rmSync } from "node:fs";
-import { after } from "node:test";
 
 // Stack G — drift unit tests.
 // `checkDriftForUpdate` itself fires GET against the Vapi platform; a unit
@@ -64,27 +62,27 @@ process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 const driftModule = await import("../src/drift.ts");
 const { classifyDrift, formatDriftLabel, checkDriftForUpdate } =
   driftModule as unknown as {
-  classifyDrift?: (input: {
-    localHash: string;
-    lastPulledHash?: string;
-    platformHash: string;
-  }) => string;
-  formatDriftLabel?: (direction: string) => string;
-  checkDriftForUpdate?: (options: {
-    endpoint: string;
-    resourceLabel: string;
-    resourceType: string;
-    resourceId: string;
-    state: Record<string, Record<string, { uuid: string }>>;
-    env: string;
-    overwrite: boolean;
-  }) => Promise<{
-    ok: boolean;
-    reason: string;
-    message?: string;
-    platformHash?: string;
-  }>;
-};
+    classifyDrift?: (input: {
+      localHash: string;
+      lastPulledHash?: string;
+      platformHash: string;
+    }) => string;
+    formatDriftLabel?: (direction: string) => string;
+    checkDriftForUpdate?: (options: {
+      endpoint: string;
+      resourceLabel: string;
+      resourceType: string;
+      resourceId: string;
+      state: Record<string, Record<string, { uuid: string }>>;
+      env: string;
+      overwrite: boolean;
+    }) => Promise<{
+      ok: boolean;
+      reason: string;
+      message?: string;
+      platformHash?: string;
+    }>;
+  };
 
 // Full StateFile shape (all sections present) — `canonicalizeForHash` walks
 // every resource-type section via buildReverseMap and `credentialReverseMap`
@@ -107,13 +105,10 @@ function driftState(
   } as Record<string, Record<string, { uuid: string }>>;
 }
 
-// Drift baselines live in the hash store (.vapi-state-hash/<org>/<uuid>), which
-// resolves beside src/ rather than under a temp dir. Seed them under an org slug
-// no real checkout uses, and remove the whole folder when the file finishes.
+// Drift baselines live in the hash store, in the temporary directory the
+// engine works in under test (tests/no-vapi-api.ts), which is removed whole
+// when this file's process exits.
 const HASH_STORE_TEST_ENV = `drift-test-${process.pid}`;
-after(() => {
-  rmSync(hashStoreDir(HASH_STORE_TEST_ENV), { recursive: true, force: true });
-});
 
 test("checkPronunciationDictDrop: warns when prior had ID and new lost it", () => {
   const prior = {
@@ -516,7 +511,11 @@ test("checkDriftForUpdate: drift-blocked message includes a bracketed direction 
   // dashboard-ahead (local clean, platform moved).
   const remote = { name: "intake-bot", systemPrompt: "hello" };
   // A baseline that cannot equal the canonicalized platform hash → drift.
-  await writeBaseline(HASH_STORE_TEST_ENV, "test-uuid", "stale-baseline-hash-deadbeef");
+  await writeBaseline(
+    HASH_STORE_TEST_ENV,
+    "test-uuid",
+    "stale-baseline-hash-deadbeef",
+  );
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = makeFetchStub(remote) as typeof globalThis.fetch;
@@ -581,7 +580,11 @@ test("checkDriftForUpdate: canonicalizes the platform payload (tool UUID → res
     name: "intake-bot",
     model: { provider: "openai", toolIds: ["my-tool-abc12345"] },
   };
-  await writeBaseline(HASH_STORE_TEST_ENV, "assistant-uuid", hashPayload(canonicalForm));
+  await writeBaseline(
+    HASH_STORE_TEST_ENV,
+    "assistant-uuid",
+    hashPayload(canonicalForm),
+  );
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = makeFetchStub(remoteRaw) as typeof globalThis.fetch;
@@ -692,7 +695,11 @@ test("canonicalizeForHash: applies _platformDefault when orgId === null", () => 
     emptyState,
     emptyCredReverse,
   );
-  assert.equal(result._platformDefault, true, "_platformDefault marker must be injected for null orgId");
+  assert.equal(
+    result._platformDefault,
+    true,
+    "_platformDefault marker must be injected for null orgId",
+  );
 });
 
 test("canonicalizeForHash: applies _platformDefault when orgId is undefined", () => {
@@ -728,8 +735,12 @@ test("canonicalizeForHash: deterministic — same input produces same hash", () 
     voice: { provider: "11labs", voiceId: "v1" },
     model: { provider: "openai", model: "gpt-4" },
   };
-  const a = hashPayload(canonicalizeForHash!(input, emptyState, emptyCredReverse));
-  const b = hashPayload(canonicalizeForHash!(input, emptyState, emptyCredReverse));
+  const a = hashPayload(
+    canonicalizeForHash!(input, emptyState, emptyCredReverse),
+  );
+  const b = hashPayload(
+    canonicalizeForHash!(input, emptyState, emptyCredReverse),
+  );
   assert.equal(a, b, "canonicalizeForHash must be deterministic");
 });
 

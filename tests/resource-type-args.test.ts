@@ -1,9 +1,7 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  resolveResourceTypes,
-  typeArgFor,
-} from "../src/resource-type-args.ts";
+import { resolveResourceTypes, typeArgFor } from "../src/resource-type-args.ts";
 import { VALID_RESOURCE_TYPES } from "../src/types.ts";
 
 // The setup wizard downloads what you pick one type at a time, with
