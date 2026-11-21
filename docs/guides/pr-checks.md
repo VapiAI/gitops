@@ -101,6 +101,8 @@ In GitHub → Settings → Secrets and variables → Actions:
   `{"my-org":"<private key>"}` (several orgs, or a CI org).
 - Variable `VAPI_CHECKS_ENABLED=true`.
 
+A check is affected by changes to its org's files, to shared
+[blocks](blocks.md) under `templates/`, to the engine, and to its own `paths`.
 `.github/workflows/vapi-checks.yml` then runs every affected check on each
 PR push. It asks for `statuses: write` only to post the direct links.
 

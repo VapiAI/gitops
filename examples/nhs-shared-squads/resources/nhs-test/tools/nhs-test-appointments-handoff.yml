@@ -1,0 +1,8 @@
+type: handoff
+function:
+  name: nhs-test-appointments-handoff
+  description: Pass fictional appointment booking, change or cancellation enquiries to the demo appointments assistant. This does not book anything.
+destinations:
+  - type: assistant
+    assistantName: nhs-test-appointments
+    description: Explains fictional appointment administration without accessing records or making bookings.

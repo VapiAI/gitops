@@ -70,7 +70,8 @@ manual runs:
 5. For a controlled single transition, run the workflow manually and provide
    `pipeline`, `from`, and `to`.
 
-Automatic runs watch committed changes to `promotion.yml` and `resources/**`.
+Automatic runs watch committed changes to `promotion.yml`, `resources/**` and
+`templates/**` (shared [blocks](blocks.md#with-promotion)).
 A manual run with no inputs reconciles every adjacent transition; supplying
 inputs requires all three values and reconciles only that transition.
 
@@ -83,6 +84,22 @@ baselines.
 For a complete fake dev → staging → production fixture, see the
 [dummy multi-org example](../../examples/cross-org-promotion/README.md). Nothing under
 `examples/` is loaded by the engine.
+
+## Blocks
+
+A resource that includes a [block](blocks.md) can need a push when none of its
+files changed, because the block did. The plan lists those destination
+resources as `sync`, with the block that changed:
+
+```text
+release: dev → prod
+  sync   assistants/triage.md (block changed: blocks/red-flags.md)
+```
+
+`--apply` pushes them like any other planned file. Shared blocks under
+`templates/` are never copied, since every org reads the same folder, and an
+org's own blocks under `resources/<org>/templates/` stay in that org. The
+plan fails if a promoted file includes a block the destination can't find.
 
 ## Source-org and deletion boundary
 

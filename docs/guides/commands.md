@@ -10,10 +10,10 @@ The other commands are direct only.
 | Command | Usage | What it does |
 | --- | --- | --- |
 | `npm run setup` | `npm run setup [-- <org>]` | Connect an org: creates `.env.<org>` and `resources/<org>/`. |
-| `npm run validate` | `npm run validate -- <org>` | Check resource files offline: API shape rules, and that every reference names a file or a state entry. `apply` runs it first. On GitHub Actions, findings are also shown on the files in the pull request. |
+| `npm run validate` | `npm run validate -- <org> [--strict]` | Check resource files offline: API shape rules, references, and undefined squad variables. `variable-undefined` warns once per squad member, listing missing root names and where to define them; `--strict` makes this warning blocking in validate and push. `transfer-number-liquid` is always an error: the API rejects Liquid in transfer destination numbers, even with `numberE164CheckEnabled:false`; use per-practice literal numbers, e.g. inline in squad `membersOverrides['tools:append']` (see `examples/nhs-shared-squads`). Covers standalone tools, inline model tools and member/squad appended tools. `apply` runs validation first. On GitHub Actions, findings are also shown on the files in the pull request. |
 | `npm run apply` | `npm run apply -- <org> [types or paths] [--adopt <id>[=<uuid>]]` | **The default deploy:** pull, merge, then push. The push preflight below runs before remote writes. See [workflows](workflows.md). |
 | `npm run pull` | `npm run pull -- <org> [--force] [--bootstrap]` | Sync platform changes down; never overwrites local edits unless `--force`. |
-| `npm run push` | `npm run push -- <org> [--dry-run] [--json] [--strict] [--adopt <id>[=<uuid>]]` | Push without pulling first. Prefer `apply`. Preflight blocks validation errors and unresolved credential names in the write plan (selected resources plus auto-applied dependencies) before any remote mutation, including deletions. `--dry-run` uses the same gate. `--strict` additionally blocks error-severity findings outside the plan; warnings remain advisory. Bootstrap reads may run before preflight. |
+| `npm run push` | `npm run push -- <org> [--dry-run] [--json] [--strict] [--adopt <id>[=<uuid>]]` | Push without pulling first. Prefer `apply`. Preflight blocks validation errors and unresolved credential names in the write plan (selected resources plus auto-applied dependencies) before any remote mutation, including deletions. `--dry-run` uses the same gate. `--strict` additionally blocks error-severity findings outside the plan; `variable-undefined` warnings also block under `--strict`; other warnings remain advisory. Bootstrap reads may run before preflight. |
 | `npm run rollback` | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore a pre-deploy snapshot from `state/<org>/local/snapshots/`. |
 | `npm run cleanup` | `npm run cleanup -- <org> [--force --confirm <org>]` | List platform resources with no file; delete them only with both flags. |
 | `npm run audit` | `npm run audit -- <org> [--type <type>]` | Report drift between files, state and the platform. Exits 1 on any finding, so it can run in CI. |
@@ -21,6 +21,7 @@ The other commands are direct only.
 | `npm run sim` | `npm run sim -- <org> --suite <name> --target <name>` | Run a simulation suite against deployed resources. Exits 0 passed, 1 failed, 3 incomplete. |
 | `npm run check` | `npm run check -- <check>` or `--all`, `[--dry-run]` | Run [PR checks](pr-checks.md) against local files, nothing deployed. Exits 0 passed, 1 failed, 2 config or build error, 3 incomplete. |
 | `npm run promote` | `npm run promote -- --pipeline <p> --from <org> --to <org> [--apply]` | Plan, or apply, a [promotion](promotion.md) between orgs. |
+| `npm run sync-blocks` | `npm run sync-blocks [-- --org <org>] [--apply]` | List the resources, in every org, that a [block](blocks.md) edit has not reached yet. `--apply` deploys them through `apply`. Exits 1 if any is left behind. |
 | `npm run build` | `npm run build` | Type-check the code and tests. |
 | `npm test` | `npm test` | Run the test suite. |
 | `npm run test:repository` | `npm run test:repository` | For work on the engine itself: run the test suite inside copies of a repository and check that no file in them changed. Takes a few minutes. |
@@ -234,6 +235,7 @@ tell it. Nothing changes inside the files.
 | `.vapi-state.<org>.json` | `state/<org>/state.json` |
 | `resources/<org>/.vapi-org.json` | `state/<org>/org.json` |
 | `resources/<org>/.vapi-credential-providers.json` | `state/<org>/credential-providers.json` |
+| `resources/<org>/.vapi-blocks.json` | `state/<org>/blocks.json` |
 | `.vapi-state-hash/<org>/` | `state/<org>/local/baselines/` |
 | `.vapi-state.<org>.snapshots/` | `state/<org>/local/snapshots/` |
 
@@ -382,6 +384,7 @@ for dir in state/*/; do
   if [ -f "state/$org/state.json" ]; then mv "state/$org/state.json" ".vapi-state.$org.json"; fi
   if [ -f "state/$org/org.json" ]; then mv "state/$org/org.json" "resources/$org/.vapi-org.json"; fi
   if [ -f "state/$org/credential-providers.json" ]; then mv "state/$org/credential-providers.json" "resources/$org/.vapi-credential-providers.json"; fi
+  if [ -f "state/$org/blocks.json" ]; then mv "state/$org/blocks.json" "resources/$org/.vapi-blocks.json"; fi
   # This machine's baselines and snapshots. They are not in git, so everyone
   # who has pulled or pushed since the move runs these two on their machine.
   if [ -d "state/$org/local/baselines" ]; then mkdir -p .vapi-state-hash && mv "state/$org/local/baselines" ".vapi-state-hash/$org"; fi

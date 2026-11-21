@@ -186,7 +186,7 @@ export function orgPinFileRead(rootDir: string, org: string): string {
 export const orgPinFileWrite = orgPinFileRead;
 
 /** The records the engine keeps beside an org's state file, by name. */
-export const STATE_RECORDS = ["credential-providers"] as const;
+export const STATE_RECORDS = ["credential-providers", "blocks"] as const;
 export type StateRecord = (typeof STATE_RECORDS)[number];
 
 function recordPath(rootDir: string, org: string, name: StateRecord): string {

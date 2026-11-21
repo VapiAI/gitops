@@ -1,0 +1,10 @@
+model:
+  provider: openai
+  model: gpt-4.1-mini
+  temperature: 0.2
+  maxTokens: 400
+voice:
+  provider: vapi
+  voiceId: Elliot
+maxDurationSeconds: 180
+backgroundSound: 'off'

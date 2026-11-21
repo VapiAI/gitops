@@ -221,10 +221,10 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | Command | What it does |
 | --- | --- |
 | `npm run setup` | Connect an org: create `.env.<org>` and `resources/<org>/` |
-| `npm run validate -- <org>` | Check resource files offline before deploying |
+| `npm run validate -- <org> [--strict]` | Check resource files offline, including undefined squad variables (`variable-undefined`); `--strict` blocks on that warning. `transfer-number-liquid` always errors on Liquid in transfer destination numbers; use per-practice literal numbers (see `examples/nhs-shared-squads`). |
 | `npm run apply -- <org>` | Deploy: pull, merge, then preflight and push (the default) |
 | `npm run pull -- <org>` | Sync platform changes down without overwriting local edits; unknown UUIDs get separate files, never name-linked |
-| `npm run push -- <org>` | Preflight the write plan, then push without pulling first (prefer `apply`); `--strict` also blocks validation errors outside the plan. Review `--dry-run` Name collisions, and use `--adopt <id>[=<uuid>]` only with explicit approval to take over a resource; unchanged alias files are removed, edited/unbaselined copies need review. Push/apply support `--json` for one grouped link-preflight report (exit 1 on blockers); see [Running in CI](docs/guides/commands.md#running-in-ci). |
+| `npm run push -- <org>` | Preflight the write plan, then push without pulling first (prefer `apply`); `--strict` also blocks validation errors outside the plan and `variable-undefined` warnings. Review `--dry-run` Name collisions, and use `--adopt <id>[=<uuid>]` only with explicit approval to take over a resource; unchanged alias files are removed, edited/unbaselined copies need review. Push/apply support `--json` for one grouped link-preflight report (exit 1 on blockers); see [Running in CI](docs/guides/commands.md#running-in-ci). |
 | `npm run rollback -- <org>` | Restore a pre-deploy snapshot |
 | `npm run cleanup -- <org>` | Find, and optionally delete, platform resources with no file |
 | `npm run audit -- <org>` | Report drift between files, state and the platform |
@@ -232,6 +232,7 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | `npm run sim -- <org>` | Run a simulation suite against deployed resources |
 | `npm run check` | Run PR simulation checks against local files |
 | `npm run promote` | Promote resources from one org to the next |
+| `npm run sync-blocks` | List, and optionally deploy, the resources a shared block edit reaches |
 
 `setup`, `apply`, `pull`, `push`, `cleanup` and `call` prompt interactively
 when run without arguments. Full flags and examples:
@@ -243,6 +244,7 @@ when run without arguments. Full flags and examples:
 | --- | --- |
 | [Everyday workflows](docs/guides/workflows.md) | Deploy, pull safely, recover from a bad deploy, clean up |
 | [File formats](docs/guides/file-formats.md) | Write assistants, tools, squads, structured outputs and simulations |
+| [Blocks](docs/guides/blocks.md) | Share prompt text and config between assistants, squads and orgs |
 | [Resource reference](docs/guides/resource-reference.md) | Look up every setting, with examples |
 | [Writing system prompts](docs/guides/writing-prompts.md) | Structure a voice agent's prompt |
 | [PR checks](docs/guides/pr-checks.md) | Test every pull request with simulations |
