@@ -12,6 +12,11 @@ import {
 } from "./config.ts";
 import { extractResourceName, type RemoteResource } from "./dep-dedup.ts";
 import { detectOrphanYamls } from "./new-file-gate.ts";
+import { collectUnlinkedDependencies } from "./push-dependencies.ts";
+import {
+  filterResourcesByPaths,
+  shouldApplyResourceType,
+} from "./push-scope.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import type { TouchedSets } from "./state-merge.ts";
 import { type StopIssue, shellQuote } from "./stop-report.ts";
@@ -113,6 +118,37 @@ export async function prepareResourceLinks(opts: {
       state: preview,
       filePathFilter: APPLY_FILTER.filePaths,
     });
+    const dependencies = collectUnlinkedDependencies(
+      opts.resources,
+      {
+        assistants: shouldApplyResourceType("assistants")
+          ? filterResourcesByPaths(opts.resources.assistants, "assistants")
+          : [],
+        squads: shouldApplyResourceType("squads")
+          ? filterResourcesByPaths(opts.resources.squads, "squads")
+          : [],
+      },
+      preview,
+    );
+    const neededBy = new Map(
+      dependencies.map((dependency) => [
+        `${dependency.type}:${dependency.resource.resourceId}`,
+        [...dependency.neededBy].map((path) => relative(BASE_DIR, path)),
+      ]),
+    );
+    for (const { type, resource } of dependencies) {
+      if (
+        !report.orphans.some(
+          (entry) =>
+            entry.type === type && entry.resourceId === resource.resourceId,
+        )
+      )
+        report.orphans.push({
+          type,
+          resourceId: resource.resourceId,
+          relativePath: relative(BASE_DIR, resource.filePath),
+        });
+    }
     for (const entry of report.orphans) {
       if (removed.has(`${entry.type}:${entry.resourceId}`)) continue;
       const file = opts.resources[entry.type].find(
@@ -124,6 +160,15 @@ export async function prepareResourceLinks(opts: {
       )
         continue;
       const path = relative(BASE_DIR, file.filePath);
+      const parents = neededBy.get(`${entry.type}:${entry.resourceId}`);
+      const commandPaths = parents
+        ? APPLY_FILTER.filePaths?.length
+          ? APPLY_FILTER.filePaths
+          : APPLY_FILTER.resourceTypes?.length
+            ? APPLY_FILTER.resourceTypes
+            : [path]
+        : [path];
+      const scope = commandPaths.map(shellQuote).join(" ");
       const name = slugify(extractResourceName(file.data) ?? entry.resourceId);
       const matches = new Set(
         Object.entries(opts.state[entry.type])
@@ -141,24 +186,28 @@ export async function prepareResourceLinks(opts: {
       const adopt = matches.size === 1 && !lookupError;
       const args = [
         `--adopt ${shellQuote(entry.resourceId)}`,
-        shellQuote(path),
+        ...commandPaths.map(shellQuote),
       ];
       const commands = [...matches]
         .sort()
         .map(
           (uuid) =>
-            `${base} --adopt ${shellQuote(entry.resourceId + (matches.size > 1 ? "=" + uuid : ""))} ${shellQuote(path)}`,
+            `${base} --adopt ${shellQuote(entry.resourceId + (matches.size > 1 ? "=" + uuid : ""))} ${scope}`,
         );
       const issue: StopIssue = {
         file: path,
         resourceType: entry.type,
-        problem: `Not linked to any resource in ${VAPI_ENV} yet.${matches.size ? ` Same-named resource(s): ${[...matches].join(", ")}; NOT linked automatically.` : ""}${lookupError ? ` Inventory unavailable: ${lookupError}` : ""}`,
-        fix: matches.size
-          ? "To take over a same-named resource, explicitly approve adoption. If genuinely new, approve --allow-new-files instead. If renamed/stale, delete the file."
-          : "If new, approve --allow-new-files. If renamed/stale, delete the file (merge any needed edits first).",
+        problem: `Not linked to any resource in ${VAPI_ENV} yet.${parents ? ` Needed by ${parents.join(", ")}.` : ""}${matches.size ? ` Same-named resource(s): ${[...matches].join(", ")}; NOT linked automatically.` : ""}${lookupError ? ` Inventory unavailable: ${lookupError}` : ""}`,
+        fix:
+          (matches.size
+            ? "To take over a same-named resource, explicitly approve adoption. If genuinely new, approve --allow-new-files instead. If renamed/stale, delete the file."
+            : "If new, approve --allow-new-files. If renamed/stale, delete the file (merge any needed edits first).") +
+          (parents
+            ? " If deleting it, also remove or replace its references in the files that need it."
+            : ""),
         command: [
           ...commands,
-          `${base} --allow-new-files ${shellQuote(path)}`,
+          `${base} --allow-new-files ${scope}`,
           `rm -- ${shellQuote(path)}`,
         ].join(" OR "),
         needsChoice: !adopt,

@@ -172,6 +172,12 @@ an unlinked file creates a new resource. Show the report and ask the human
 to choose per file. Pass
 `--allow-new-files` only once they confirm every file is genuinely new. For a
 rename, see [Renaming](#naming-and-renaming); delete stale files.
+Scoped pushes also check dependencies they would create, including squad
+member assistants and those assistants' tools and structured outputs. Each
+is marked "Needed by <selected file>", including transitive dependencies.
+`--allow-new-files` approves creation throughout the selected scope and its
+dependencies; the dependency paths need not also be listed. Ask for approval
+for the whole reported creation plan, not just the selected file.
 Same-named org resources are NOT linked automatically. Preview with
 `npm run push -- <org> --dry-run --allow-new-files` only after approval for
 those new files, and check the **Name collisions** list (read-only dashboard

@@ -45,6 +45,25 @@ block and exits **1**, before API mutations, state writes or alias deletion.
 "Not linked to any resource in <org> yet" means pushing would create a new
 resource; the engine cannot infer new versus renamed/stale intent.
 
+The same check covers dependencies a scoped push would auto-create: tools,
+structured outputs, and squad member assistants (including their dependencies).
+They are marked "Needed by <selected file>" in text and in JSON's `problem`
+field. Already-linked dependencies and repo-owned mappings that can be safely
+reused do not require creation approval. `--allow-new-files` authorizes new
+resources across the selected scope **and its dependencies**; you do not need
+to list the dependency paths separately. For example, after reviewing the
+whole plan:
+
+```bash
+npm run push -- <org> assistants/receptionist.md --allow-new-files
+# Or explicitly take over the existing tool instead of creating one:
+npm run push -- <org> assistants/receptionist.md --adopt my-end-call
+```
+
+Without either approval, an unlinked dependency stops the run with exit 1
+before API mutations or state writes. `--dry-run` reports the same blockers
+and never creates resources.
+
 Each file has exact commands: approve `--allow-new-files` for genuinely new
 resources, approve `--adopt <id>[=<uuid>]` for a takeover, or merge needed edits
 and remove a renamed/stale file. A single ready-to-run combined command appears
