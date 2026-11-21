@@ -258,6 +258,17 @@ default-exports the object (safety rule 5).
 
 The engine resolves IDs and credential names to each org's UUIDs on push.
 
+Assistant subfolders are pushed as derived `metadata.gitops.folderPath` (for example
+`assistants/support/intake.yml` → `support`). Other metadata and sibling `gitops`
+keys are preserved; top-level `metadata.folderPath` is a user key, left untouched.
+The full subfolder path is preserved:
+`assistants/support/intake/b.yml` → `support/intake`.
+Root assistants send `metadata.gitops.folderPath: null`, clearing stale grouping.
+Pull and drift exclude this key; don't author it locally. File moves still require the normal
+filename/state mapping safeguards below. Other resource types are unchanged.
+If authored, `metadata.gitops` must be a plain object. Pull removes only the
+derived key, dropping `gitops` and `metadata` only if they become empty.
+
 ### Naming and renaming
 
 - **Files you create keep their names.** Resources pulled from the platform
@@ -272,7 +283,7 @@ The engine resolves IDs and credential names to each org's UUIDs on push.
 | To rename… | Do this |
 | --- | --- |
 | The display name | Change `name` in the file (or in the dashboard, then pull). The filename stays. |
-| The file itself | A renamed file has no state entry, so the next deploy stops at the new-file check. Either keep the old filename, or (with the human's agreement) deploy it as new with `--allow-new-files` and delete the old platform resource with `npm run cleanup -- <org> --force --confirm <org>`. |
+| The file itself | A renamed or moved file has no state entry. With the human's agreement, use `--adopt <new-resourceId>=<uuid>` to keep managing the same platform resource under the new path. Without adoption, an unlinked file is created as a new resource, not matched by name. |
 
 ### Excluding resources (`.vapi-ignore`)
 

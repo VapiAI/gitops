@@ -538,6 +538,7 @@ export async function writeDashboardBackup(
     platformPayload,
     state,
     credReverse,
+    resourceType,
   );
   // Filesystem-safe ISO timestamp: 2026-06-04T19-22-33 (no colons, no ms).
   const timestamp = new Date()
@@ -844,7 +845,7 @@ export async function pullResourceType(
           // classifier, audit, and resolveBothDiverged sites. Any asymmetry here
           // makes every drifted file look `both-diverged` even when content matches.
           const platformHash = hashPayload(
-            canonicalizeForHash(resource, state, credReverse),
+            canonicalizeForHash(resource, state, credReverse, resourceType),
           );
           // Note: classifyDrift treats live local + platform agreement as
           // `clean` whatever the (possibly stale) baseline says — the clean
@@ -1015,7 +1016,12 @@ export async function pullResourceType(
     // Single canonicalization for both the file write AND the lastPulledHash
     // fallback. Encodes the 3-step pipeline (cleanResource → resolve refs →
     // replace credential UUIDs) plus the _platformDefault marker.
-    const withCredNames = canonicalizeForHash(resource, state, credReverse);
+    const withCredNames = canonicalizeForHash(
+      resource,
+      state,
+      credReverse,
+      resourceType,
+    );
 
     if (bootstrap) {
       const icon = isPlatformDefault ? "🔒" : isNew ? "✨" : "📝";
@@ -1175,6 +1181,7 @@ async function resolveBothDivergedResources(options: {
       entry.resource,
       state,
       credReverse,
+      entry.resourceType,
     );
 
     await writeResourceFile(

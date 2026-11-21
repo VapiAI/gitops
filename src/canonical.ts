@@ -12,6 +12,7 @@
 // drift, so drift could not import back — it grew a divergent copy instead).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { withoutAssistantFolder } from "./assistant-folder.ts";
 import { replaceCredentialRefs } from "./credentials.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 
@@ -210,9 +211,12 @@ export function canonicalizeForHash(
   resource: VapiResource,
   state: StateFile,
   credReverse: Map<string, string>,
+  resourceType?: ResourceType,
 ): Record<string, unknown> {
   const cleaned = cleanResource(resource);
-  const resolved = resolveReferencesToResourceIds(cleaned, state);
+  const content =
+    resourceType === "assistants" ? withoutAssistantFolder(cleaned) : cleaned;
+  const resolved = resolveReferencesToResourceIds(content, state);
   const withCredNames = replaceCredentialRefs(resolved, credReverse);
   const isPlatformDefault =
     resource.orgId === null || resource.orgId === undefined;

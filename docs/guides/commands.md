@@ -97,6 +97,19 @@ adoption before dependency resolution to take one over instead.
 
 ## Interactive Mode
 
+Assistant pushes (including the push phase of `apply`) derive
+`metadata.gitops.folderPath` from the full subfolder path under `assistants/`, preserving
+other authored metadata and sibling `gitops` keys:
+`assistants/support/intake.yml` groups under `support`.
+Nested paths are preserved: `assistants/support/intake/b.yml` groups under
+`support/intake`. Root files send
+`metadata.gitops.folderPath: null` to clear grouping.
+Pull omits this derived key, dropping empty `gitops`/`metadata` objects, and drift
+comparisons ignore it. Top-level `metadata.folderPath` is a user key, left
+untouched. Authored `metadata.gitops` must be a plain object. To move a file
+while retaining its platform UUID, explicitly adopt it with
+`--adopt <new-resourceId>=<uuid>`; the subsequent push updates its folder path.
+
 When you run a command without arguments, you get a fully interactive experience:
 
 ```bash
