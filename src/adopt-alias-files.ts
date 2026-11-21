@@ -2,7 +2,7 @@ import { confirm } from "@inquirer/prompts";
 import { rm } from "fs/promises";
 import { relative } from "path";
 import type { AdoptionAlias } from "./adopt.ts";
-import { BASE_DIR, DRY_RUN, VAPI_ENV } from "./config.ts";
+import { BASE_DIR, DRY_RUN, RESOURCES_DIR, VAPI_ENV } from "./config.ts";
 import { deleteBaseline, readBaseline } from "./hash-store.ts";
 import { parseResourceDataFromFile } from "./resource-parse.ts";
 import { hashPayload } from "./state-serialize.ts";
@@ -26,7 +26,9 @@ export async function prepareAliasCleanup(
     const path = relative(BASE_DIR, file.filePath);
     let hash: string | undefined;
     try {
-      hash = hashPayload(parseResourceDataFromFile(file.filePath));
+      hash = hashPayload(
+        parseResourceDataFromFile(file.filePath, RESOURCES_DIR),
+      );
     } catch {}
     const baseline = readBaseline(VAPI_ENV, uuid);
     if (!baseline || hash !== baseline) {

@@ -637,7 +637,7 @@ async function blocksFilePull(options: {
     return;
   }
   const platformHash = hashPayload(
-    canonicalizeForHash(resource, state, options.credReverse),
+    canonicalizeForHash(resource, state, options.credReverse, resourceType),
   );
   const baseline = readBaseline(VAPI_ENV, resource.id);
   const direction = classifyDrift({
