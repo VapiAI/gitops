@@ -5,7 +5,7 @@
 Resources are scoped by organization, with names you choose (not fixed `dev`/`stg`/`prod`). Each org gets:
 
 - `.env.<org>` — private API key and base URL
-- `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
+- `.vapi-state.<org>.json` — resource ID ↔ UUID mappings and optional origin (committed)
 - `.vapi-state-hash/<org>/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
 - `resources/<org>/` — all resource files
 
@@ -42,7 +42,26 @@ files
 
 **`push`** — reads local files and syncs them to the platform: creates and updates. It deletes platform resources whose files you removed only when you pass `--force`.
 
-**`apply`** — runs `pull` then `push` in sequence.
+**`apply`** — runs `pull` then `push` in sequence. With `--dry-run`, it skips
+pull (which writes local files/state) and previews push with read-only GETs.
+
+### Names never authorize taking over org resources
+
+Pull keeps existing UUID mappings and filenames stable. An unknown UUID always
+gets a separate `<name-slug>-<uuid8>` ID, even if a same-named local file exists.
+Neither pull nor push automatically collapses that key onto a local filename.
+
+A file without a state mapping remains subject to the new-file gate. After
+confirming it is genuinely new, preview `--dry-run --allow-new-files` and review
+the final **Name collisions** list. It compares every planned POST, including
+auto-created dependencies, with state and live dashboard names. Matching names
+do not change the plan into a takeover. GETs run; platform mutations do not.
+
+To take over a resource intentionally, obtain explicit human approval and use
+`--adopt <id>[=<uuid>]`. Adoption links an untracked local file before the gate
+and normal PATCH flow. Dependency alias reuse is restricted to state entries
+with `origin: pushed` or `origin: adopted`; pulled and legacy entries do not
+authorize new name-based links. Existing exact-key legacy links remain intact.
 
 ## Conflicts and the drift gate
 
@@ -144,6 +163,8 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 ```
 
 Every resource type has a section. Keys are sorted, so diffs stay readable.
+New entries record `origin: pushed`, `pulled`, or `adopted`. Updates preserve
+that provenance, and legacy entries without an origin are not backfilled.
 
 ## What Vapi sees
 

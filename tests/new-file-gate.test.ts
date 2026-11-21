@@ -4,6 +4,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -621,6 +622,38 @@ test("integration: selective push with orphan OUTSIDE the selection → gate doe
       /Push refused/,
       `gate should not fire for orphan outside selection; stderr=${res.stderr}`,
     );
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("integration: bootstrap UUID-suffixed mapping never takes over a local slug", () => {
+  const state = {
+    ...stateWithSentinel(),
+    assistants: {
+      "foo-abcd1234": {
+        uuid: "abcd1234-1111-1111-1111-111111111111",
+        origin: "pulled",
+      },
+    },
+  };
+  const fx = setupFixture({
+    resources: { "assistants/foo.md": MINIMAL_ASSISTANT_FOO },
+    state,
+  });
+  try {
+    const statePath = join(fx.dir, `.vapi-state.${fx.env}.json`);
+    const before = readFileSync(statePath, "utf8");
+    const res = runPush(fx, []);
+    assert.equal(res.code, 1, res.stdout + res.stderr);
+    assert.match(res.stderr, /Push refused/);
+    assert.match(res.stderr, /NOT linked/);
+    assert.match(res.stderr, /--adopt foo/);
+    assert.doesNotMatch(
+      res.stdout,
+      /Updating assistant|Creating assistant|PATCH|POST/,
+    );
+    assert.equal(readFileSync(statePath, "utf8"), before);
   } finally {
     fx.cleanup();
   }

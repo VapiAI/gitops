@@ -109,6 +109,32 @@ When the files are genuinely new resources:
 npm run apply -- <org> --allow-new-files
 ```
 
+Before deploying, review the collision preview (the flag still needs approval
+for every genuinely new file):
+
+```bash
+npm run push -- <org> --dry-run --allow-new-files
+```
+
+The final **Name collisions** section includes same-name state and dashboard
+resources for every planned create, including dependencies. Names alone never
+take over an org resource. The plan POSTs a new one unless you explicitly adopt:
+
+```bash
+npm run apply -- <org> --adopt my-agent assistants/my-agent.md
+# If multiple candidates exist:
+npm run apply -- <org> --adopt my-agent=<uuid> assistants/my-agent.md
+```
+
+Adoption needs the human's explicit yes for that resource, just like new-file
+approval. It requires a local file with no state mapping. Pull never links
+unknown remote UUIDs to local files by name, and dependency aliases are reused
+only when state records pushed/adopted ownership. If adoption leaves an old
+alias file orphaned, stop and review it rather than bypassing the gate.
+
+Both `push --dry-run` and `apply --dry-run` perform read-only dashboard GETs
+for the collision preview; apply skips its pull stage to avoid local writes.
+
 Check each listed file before you pass the flag: it confirms every one is
 new. If a coding agent runs your deploys, it should show you the list rather
 than pass the flag itself; [`AGENTS.md`](../../AGENTS.md) instructs it to.

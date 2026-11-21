@@ -1,13 +1,14 @@
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import type { Environment, ResourceType } from "./types.ts";
+import { parseAdoptArgs } from "./adopt.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import {
   ignorePatternsRead,
   matchesIgnore as matchesIgnorePatterns,
 } from "./resource-parse.ts";
 import { resolveResourceTypes, VALID_TYPE_ARGS } from "./resource-type-args.ts";
+import type { Environment, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
@@ -51,7 +52,6 @@ function parseEnvironment(): Environment {
 
   return envArg;
 }
-
 
 function parseFlags(): {
   forceDelete: boolean;
@@ -97,6 +97,12 @@ function parseFlags(): {
       arg === "--allow-new-files"
     )
       continue;
+
+    if (arg === "--adopt") {
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--adopt=")) continue;
 
     // --confirm <slug>: consumed by cleanup.ts directly. Eat the value here so
     // parseFlags' strict-arg check below doesn't trip on the slug.
@@ -231,6 +237,7 @@ export const BASE_DIR = join(__dirname, "..");
 
 // Parse environment, flags, and load env files
 export const VAPI_ENV = parseEnvironment();
+export const ADOPT_TARGETS = parseAdoptArgs(process.argv.slice(3));
 export const {
   forceDelete: FORCE_DELETE,
   bootstrapSync: BOOTSTRAP_SYNC,

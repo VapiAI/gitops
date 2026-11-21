@@ -161,7 +161,10 @@ for (const rtype of RTYPES) {
     const h = makeHarness();
     const sharedUuid = "00000000-0000-0000-0000-000000000aaa";
     // Pre-existing alias under a bootstrap-renamed key, same UUID.
-    h.state[rtype]["my-resource-12345678"] = { uuid: sharedUuid };
+    h.state[rtype]["my-resource-12345678"] = {
+      uuid: sharedUuid,
+      origin: "pushed",
+    };
     const resource = makeResource(rtype, "my-resource", "my-resource");
 
     await runReconcile({
@@ -174,7 +177,10 @@ for (const rtype of RTYPES) {
     // Canonical key now points at the adopted UUID. The entry is a bare
     // { uuid }: the drift baseline is recorded by applyFn's own push path in
     // the hash store, never in state.
-    assert.deepEqual(h.state[rtype]["my-resource"], { uuid: sharedUuid });
+    assert.deepEqual(h.state[rtype]["my-resource"], {
+      uuid: sharedUuid,
+      origin: "pushed",
+    });
     // Alias was deleted.
     assert.equal(h.state[rtype]["my-resource-12345678"], undefined);
     // Both keys marked touched: the deletion AND the new canonical entry.
@@ -200,7 +206,10 @@ for (const rtype of RTYPES) {
   test(`[${rtype}] scenario 2: state hit, different uuid, adopts and rekeys`, async () => {
     const h = makeHarness();
     const adoptedUuid = "11111111-1111-1111-1111-111111111aaa";
-    h.state[rtype]["end-call-67aea057"] = { uuid: adoptedUuid };
+    h.state[rtype]["end-call-67aea057"] = {
+      uuid: adoptedUuid,
+      origin: "pushed",
+    };
     const resource = makeResource(rtype, "end-call", "end-call");
 
     await runReconcile({
@@ -226,7 +235,7 @@ for (const rtype of RTYPES) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 for (const rtype of RTYPES) {
-  test(`[${rtype}] scenario 3: dashboard hit only, adopts remote UUID`, async () => {
+  test(`[${rtype}] scenario 3: dashboard hit only creates new UUID`, async () => {
     const h = makeHarness();
     const dashboardUuid = "22222222-2222-2222-2222-222222222aaa";
     const resource = makeResource(rtype, "my-resource", "My Resource");
@@ -238,7 +247,10 @@ for (const rtype of RTYPES) {
       harness: h,
     });
 
-    assert.equal(h.state[rtype]["my-resource"]?.uuid, dashboardUuid);
+    assert.equal(
+      h.state[rtype]["my-resource"]?.uuid,
+      "uuid-my-resource-created",
+    );
     assert.equal(h.applyCalls.length, 1);
     assert.equal(h.applied[rtype], 1);
     assert.ok(h.autoApplied.has(`${rtype}:my-resource`));
@@ -253,7 +265,7 @@ for (const rtype of RTYPES) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 for (const rtype of RTYPES) {
-  test(`[${rtype}] scenario 4: ambiguous dashboard match, picks lex-smallest`, async () => {
+  test(`[${rtype}] scenario 4: ambiguous dashboard matches only warn`, async () => {
     const h = makeHarness();
     const uuidA = "11111111-1111-1111-1111-111111111aaa";
     const uuidB = "22222222-2222-2222-2222-222222222aaa";
@@ -280,8 +292,8 @@ for (const rtype of RTYPES) {
     }
 
     // Lex-smallest wins → uuidA.
-    assert.equal(h.state[rtype]["dup"]?.uuid, uuidA);
-    assert.ok(warnings.some((w) => w.includes("Multiple")));
+    assert.equal(h.state[rtype]["dup"]?.uuid, "uuid-dup-created");
+    assert.ok(warnings.some((w) => w.includes("NOT linked")));
     assert.ok(warnings.some((w) => w.includes(uuidB)));
     assert.equal(h.applied[rtype], 1);
   });
@@ -400,7 +412,7 @@ for (const rtype of RTYPES) {
     //   - alias A pointing at the adopted uuid → MUST be deleted
     //   - alias B pointing at the duplicate uuid → MUST be preserved
     //   - alias C pointing at an unrelated uuid → MUST be preserved
-    h.state[rtype]["dup-aaaaaaaa"] = { uuid: adoptedUuid };
+    h.state[rtype]["dup-aaaaaaaa"] = { uuid: adoptedUuid, origin: "pushed" };
     h.state[rtype]["dup-bbbbbbbb"] = { uuid: duplicateUuid };
     h.state[rtype]["unrelated-cccccccc"] = {
       uuid: "99999999-9999-9999-9999-999999999aaa",
@@ -441,4 +453,42 @@ for (const rtype of RTYPES) {
     );
     assert.equal(h.touched[rtype].has("unrelated-cccccccc"), false);
   });
+}
+
+for (const rtype of RTYPES) {
+  for (const origin of ["pulled", undefined] as const) {
+    test(`[${rtype}] ${origin} state match is warned about, never rekeyed`, async () => {
+      const h = makeHarness();
+      h.state[rtype]["stop-abcd1234"] = {
+        uuid: "old",
+        ...(origin ? { origin } : {}),
+      };
+      const warnings: string[] = [];
+      const original = console.warn;
+      console.warn = (message: string) => {
+        warnings.push(message);
+      };
+      try {
+        await runReconcile({
+          rtype,
+          resource: makeResource(rtype, "stop", "Stop"),
+          harness: h,
+        });
+      } finally {
+        console.warn = original;
+      }
+      assert.equal(h.state[rtype].stop?.uuid, "uuid-stop-created");
+      assert.equal(h.state[rtype]["stop-abcd1234"]?.uuid, "old");
+      assert.equal(h.touched[rtype].has("stop-abcd1234"), false);
+      assert.ok(
+        warnings.some(
+          (line) =>
+            line.includes(rtype) &&
+            line.includes("Stop") &&
+            line.includes("old") &&
+            line.includes("--adopt stop"),
+        ),
+      );
+    });
+  }
 }

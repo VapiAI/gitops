@@ -36,10 +36,6 @@ import {
 import { readBaseline, writeBaseline } from "./hash-store.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import {
-  formatRecanonicalizeReport,
-  recanonicalizeStateKeys,
-} from "./recanonicalize.ts";
-import {
   FOLDER_MAP,
   hashLocalResource,
   parseResourceFilePath,
@@ -226,7 +222,8 @@ async function fetchPagedList<T extends Listable>(
 
   // A short first page proves we saw everything in one request — the common case
   // pays nothing for paging.
-  if (first.length < LIST_PAGE_SIZE) return { resources: first, complete: true };
+  if (first.length < LIST_PAGE_SIZE)
+    return { resources: first, complete: true };
 
   // A full page means the response was capped. Walk backwards through
   // `createdAt`, the only cursor these endpoints offer.
@@ -342,7 +339,9 @@ async function pullCredentials(state: StateFile): Promise<void> {
     if (!slug) {
       slug = credentialSlug(cred);
     }
-    newSection[slug] = { uuid: cred.id };
+    newSection[slug] = existingReverse.has(cred.id)
+      ? state.credentials[slug]!
+      : { uuid: cred.id, origin: "pulled" };
     console.log(`   🔑 ${slug} -> ${cred.id}`);
   }
 
@@ -406,49 +405,6 @@ export function listExistingResourceIds(resourceType: ResourceType): string[] {
   };
 
   return walk(dir, []);
-}
-
-// When pulling a new environment, a resource may already exist on disk under a
-// different UUID suffix (e.g., `end-call-tool-8102e715` from dev). Match by
-// name-slug so we reuse the existing file instead of creating a duplicate.
-//
-// State-awareness guard: if a name-matching file is already claimed in state
-// by a *different* UUID, refuse adoption. Without this guard, two dashboard
-// resources sharing a name (e.g. a Duplicate-Assistant click, or any
-// platform auto-seed of a same-named twin) collapse onto the same file —
-// the second pull silently overwrites the first's content and reassigns
-// the slug's state mapping to the new UUID, orphaning the original.
-// Falling through to `generateResourceId` (caller) produces a deterministic
-// `<name>-<uuid8>` slug per UUID, so the second resource gets its own file.
-export function findExistingResourceId(
-  existingResourceIds: string[],
-  resource: VapiResource,
-  stateSection: Record<string, ResourceState>,
-): string | undefined {
-  const name = extractName(resource);
-  if (!name) return undefined;
-
-  const nameSlug = slugify(name);
-  const matches = existingResourceIds.filter(
-    (id) => extractBaseSlug(id) === nameSlug,
-  );
-  if (matches.length === 0) return undefined;
-
-  // A file is adoptable when it is either unclaimed in state (cross-env
-  // pull: file shipped from dev, this env has no prior state for it) or
-  // already claimed by THIS resource's UUID. The same-UUID branch is
-  // defensive — in the production code path the caller's
-  // `reverseMap.get(resource.id)` short-circuits this case, so we only
-  // reach this function when the UUID is unknown to state. Keep the
-  // branch anyway so the helper is correct in isolation.
-  // A file claimed by a *different* UUID is not adoptable — adopting it
-  // would clobber the existing resource's content and state mapping.
-  const adoptable = matches.filter((id) => {
-    const claim = stateSection[id]?.uuid;
-    return claim === undefined || claim === resource.id;
-  });
-
-  return adoptable.length === 1 ? adoptable[0] : undefined;
 }
 
 function removeUuidMappings(
@@ -826,9 +782,6 @@ export async function pullResourceType(
   const newStateSection: Record<string, ResourceState> = resourceIds?.length
     ? { ...state[resourceType] }
     : {};
-  const existingResourceIds = bootstrap
-    ? []
-    : listExistingResourceIds(resourceType);
 
   let created = 0;
   let updated = 0;
@@ -840,35 +793,21 @@ export async function pullResourceType(
     // dashboard `name`. If this UUID is already tracked in state, keep its
     // existing resourceId verbatim — a dashboard rename only changes the
     // resource's content, never its local filename. We only mint a new slug
-    // when the UUID is unknown to state (genuinely new or cross-env adoption).
+    // when the UUID is unknown to state.
     const trackedResourceId = reverseMap.get(resource.id);
     let resourceId = trackedResourceId;
 
     if (!resourceId) {
-      // Reuse an existing file's resourceId if the name matches (cross-env
-      // pull). The adoption guard needs both prior-pull claims AND
-      // intra-pull claims so the fix is iteration-order-independent:
-      //   - `state[resourceType]` carries prior-pull claims loaded from
-      //     disk. Without this, if the dashboard returns the new same-name
-      //     twin BEFORE the tracked one, the new twin sees `newStateSection`
-      //     empty and clobbers the tracked file. A customer's production
-      //     5-Rileys investigation surfaced this ordering dependency.
-      //   - `newStateSection` carries intra-pull claims from earlier
-      //     iterations. Handles the converse (tracked-then-twin order).
-      // Spread `newStateSection` last so it wins when both have the same
-      // slug — the in-flight value is the more authoritative claim during
-      // this pull (e.g. an earlier iteration rekeyed the slug to a new UUID).
-      const claimView = { ...state[resourceType], ...newStateSection };
-      resourceId = bootstrap
-        ? generateResourceId(resource)
-        : (findExistingResourceId(existingResourceIds, resource, claimView) ??
-          generateResourceId(resource));
+      resourceId = generateResourceId(resource);
     }
     // New only when the UUID was not previously tracked. A dashboard rename
     // of an already-tracked resource is an UPDATE to the existing file, not
     // a new resource — the local filename stays put.
     const isNew = !trackedResourceId;
 
+    if (trackedResourceId && state[resourceType][trackedResourceId]) {
+      newStateSection[resourceId] = state[resourceType][trackedResourceId];
+    }
     removeUuidMappings(newStateSection, resource.id, resourceId);
 
     const folderPath = FOLDER_MAP[resourceType];
@@ -964,7 +903,10 @@ export async function pullResourceType(
             console.log(
               `   ⬆️  ${resourceId} (local ahead of dashboard) ${formatDriftLabel(direction)}`,
             );
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            upsertState(newStateSection, resourceId, {
+              uuid: resource.id,
+              origin: "pulled",
+            });
             skipped++;
             continue;
           }
@@ -1002,7 +944,10 @@ export async function pullResourceType(
         changedFiles.has(yamlPath)
       ) {
         console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-        upsertState(newStateSection, resourceId, { uuid: resource.id });
+        upsertState(newStateSection, resourceId, {
+          uuid: resource.id,
+          origin: "pulled",
+        });
         skipped++;
         continue;
       }
@@ -1029,7 +974,10 @@ export async function pullResourceType(
           const stateMtime = statSync(stateFilePath).mtimeMs;
           if (localMtime > stateMtime) {
             console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-            upsertState(newStateSection, resourceId, { uuid: resource.id });
+            upsertState(newStateSection, resourceId, {
+              uuid: resource.id,
+              origin: "pulled",
+            });
             skipped++;
             continue;
           }
@@ -1051,7 +999,10 @@ export async function pullResourceType(
         console.log(
           `   🗑️  ${resourceId} (deleted locally, intent in state — add to .vapi-ignore to stop tracking)`,
         );
-        upsertState(newStateSection, resourceId, { uuid: resource.id });
+        upsertState(newStateSection, resourceId, {
+          uuid: resource.id,
+          origin: "pulled",
+        });
         skipped++;
         continue;
       }
@@ -1113,7 +1064,10 @@ export async function pullResourceType(
         `   ⚠️  ${resourceType}/${resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(newStateSection, resourceId, { uuid: resource.id });
+    upsertState(newStateSection, resourceId, {
+      uuid: resource.id,
+      origin: "pulled",
+    });
     await writeBaseline(
       VAPI_ENV,
       resource.id,
@@ -1209,7 +1163,10 @@ async function resolveBothDivergedResources(options: {
       // No file write — local is preserved. Set the baseline to the platform
       // state at resolve time so the next classifyDrift correctly reports
       // `local-ahead` instead of re-flagging `both-diverged`.
-      upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+      upsertState(section, entry.resourceId, {
+        uuid: entry.resource.id,
+        origin: "pulled",
+      });
       await writeBaseline(VAPI_ENV, entry.resource.id, entry.platformHash);
       continue;
     }
@@ -1235,7 +1192,10 @@ async function resolveBothDivergedResources(options: {
         `   ⚠️  ${entry.resourceType}/${entry.resourceId}: failed to hash post-write disk form; falling back to in-memory hash (may produce phantom drift on next pull)`,
       );
     }
-    upsertState(section, entry.resourceId, { uuid: entry.resource.id });
+    upsertState(section, entry.resourceId, {
+      uuid: entry.resource.id,
+      origin: "pulled",
+    });
     await writeBaseline(
       VAPI_ENV,
       entry.resource.id,
@@ -1532,26 +1492,6 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     );
   if (shouldPull("evals"))
     stats.evals = await pullResourceType("evals", state, pullOptsFor("evals"));
-
-  // Collapse UUID-suffixed state keys back to canonical when the underlying
-  // name-collision has resolved (the conflicting twin was deleted, etc.).
-  // Skipped during bootstrap because bootstrap is supposed to populate state
-  // from scratch — there is no prior rekey to undo. Also skipped on targeted
-  // ID pulls so we don't sweep types we haven't fully refreshed. When the
-  // pull is scoped by typeFilter, the pass is restricted to those types so
-  // we don't touch sections this pull didn't refresh — preserves the stated
-  // safety boundary even though the preconditions themselves are safe.
-  // Pull's saveState writes wholesale, so `touched` isn't needed here.
-  if (!bootstrap && !isScopedPull) {
-    const report = recanonicalizeStateKeys({
-      state,
-      types: typeFilter?.length ? (typeFilter as ResourceType[]) : undefined,
-    });
-    const summary = formatRecanonicalizeReport(report);
-    if (summary) {
-      console.log(`\n${summary}`);
-    }
-  }
 
   const resolveResult = await resolveBothDivergedResources({
     state,

@@ -40,6 +40,7 @@ export interface OrphanFile {
   type: ResourceType;
   resourceId: string;
   relativePath: string;
+  sameNameResourceIds?: string[];
 }
 
 export interface RenameSource {
@@ -178,7 +179,20 @@ export function detectOrphanYamls(
       ) {
         continue;
       }
-      orphans.push({ type, resourceId: localId, relativePath });
+      const sameNameResourceIds = Object.entries(state[type])
+        .filter(
+          ([id, entry]) =>
+            id.toLowerCase() ===
+              `${localId}-${entry.uuid.slice(0, 8)}`.toLowerCase() &&
+            /^[a-f0-9]{8}$/i.test(entry.uuid.slice(0, 8)),
+        )
+        .map(([id]) => id);
+      orphans.push({
+        type,
+        resourceId: localId,
+        relativePath,
+        ...(sameNameResourceIds.length ? { sameNameResourceIds } : {}),
+      });
       const baseSet = orphanBaseSlugsByType.get(type) ?? new Set<string>();
       baseSet.add(baseSlugFn(localId));
       orphanBaseSlugsByType.set(type, baseSet);
@@ -270,6 +284,11 @@ export function formatGateMessage(
   lines.push(`${bold}Files without state entry:${reset}`);
   for (const orphan of report.orphans) {
     lines.push(`  - ${orphan.relativePath}`);
+    for (const resourceId of orphan.sameNameResourceIds ?? []) {
+      lines.push(
+        `    The org already has a resource with that name (${orphan.type}/${resourceId}); it was NOT linked. --adopt ${orphan.resourceId} will take it over.`,
+      );
+    }
   }
 
   lines.push("");

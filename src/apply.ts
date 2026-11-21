@@ -1,6 +1,7 @@
 import { execSync } from "child_process";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { parseAdoptArgs } from "./adopt.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 // Pins this command's User-Agent label for the pull and push it spawns.
 import "./user-agent.ts";
@@ -30,7 +31,9 @@ function runPassthrough(cmd: string): number {
 export async function runApply(): Promise<void> {
   const env = process.argv[2];
   const allArgs = process.argv.slice(3);
+  parseAdoptArgs(allArgs);
   const hasForce = allArgs.includes("--force");
+  const dryRun = allArgs.includes("--dry-run");
 
   // Fail fast with one clear message if this org's state file is still legacy,
   // rather than letting the spawned pull/push subprocess surface it later.
@@ -67,7 +70,9 @@ export async function runApply(): Promise<void> {
   const pushArgs = pushArgsList.join(" ");
 
   if (!env || !SLUG_RE.test(env)) {
-    console.error("Usage: npm run apply <org> [--force] [--allow-new-files] [--resolve=defer|ours|theirs|fail] [<file...>]");
+    console.error(
+      "Usage: npm run apply <org> [--force] [--allow-new-files] [--resolve=defer|ours|theirs|fail] [<file...>]",
+    );
     console.error("");
     console.error("  Pull → Merge → Push (safe bidirectional sync)");
     console.error("");
@@ -88,6 +93,9 @@ export async function runApply(): Promise<void> {
     );
     console.error(
       "                     state entry is genuinely new — see src/new-file-gate.ts.",
+    );
+    console.error(
+      "  --adopt <id>[=<uuid>]  Explicitly take over a remote resource (repeatable).",
     );
     console.error(
       "  --resolve=defer    On 3-way drift, ask per resource at push time (default).",
@@ -130,7 +138,11 @@ export async function runApply(): Promise<void> {
   }
 
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
-  const pullExit = runPassthrough(pullCmd);
+  if (dryRun)
+    console.log(
+      "\n🧪 Dry-run: skipping pull to preserve local files and state.",
+    );
+  const pullExit = dryRun ? 0 : runPassthrough(pullCmd);
   if (pullExit !== 0) {
     console.error("\n❌ Pull had issues. Resolve conflicts before pushing.");
     process.exit(1);
@@ -143,6 +155,8 @@ export async function runApply(): Promise<void> {
     console.error("\n❌ Push failed!");
     process.exit(1);
   }
+
+  if (dryRun) return;
 
   console.log(
     "\n═══════════════════════════════════════════════════════════════",

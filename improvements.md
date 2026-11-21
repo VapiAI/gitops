@@ -2076,3 +2076,19 @@ dependency check, as `check-payload.ts` already does.
   `AGENTS.md`. Don't conflate that with drift detection.
 - **Renaming `npm run eval` to disambiguate from `npm run sim`.**
   Backwards-incompatible script change; raise as a separate issue.
+
+## Implicit name-based takeover during pull/bootstrap recovery
+
+**Problem:** A matching name is not authorization to overwrite an org resource.
+**Current behavior:** Pull generates UUID-suffixed IDs for unknown remote UUIDs;
+pull and push no longer collapse these mappings onto local name matches.
+The new-file gate reports same-name candidates without linking them.
+**Risk:** Names are not globally unique; adoption needs an explicit UUID when ambiguous.
+**Current mitigation:** Stop at the new-file gate, review each orphan and the
+dry-run Name collisions list (state plus read-only dashboard GETs). Apply dry-run
+skips pull to preserve local files/state while previewing the push.
+**Possible fix:** Require explicit adoption for all name-based takeover paths.
+**Status:** Pull/recanonicalization paths fixed. Dependency reuse now requires
+pushed/adopted provenance; `--adopt <id>[=<uuid>]` explicitly claims remote UUIDs.
+Dry-run reports planned POST collisions, including dependencies; failed inventory
+lookups are reported as incomplete checks instead of falsely reporting none.
