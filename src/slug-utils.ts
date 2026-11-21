@@ -6,15 +6,15 @@
 //   - `slugify(name)` — 4 byte-identical copies
 //   - `extractBaseSlug(resourceId)` — 2 byte-identical copies
 //
-// It also exposes the strict `isEngineSuffixedSlug` form used by
-// `recanonicalize.ts` to prove a state key was engine-generated (i.e. the
+// It also exposes the strict `isEngineSuffixedSlug` form to check whether
+// a state key has an engine-generated shape (i.e. the
 // captured 8-hex matches the entry's UUID prefix), and the canonical
 // `UUID_SUFFIX_RE` constant.
 //
 // Config-free is load-bearing: `config.ts` asserts `argv[2]` / `VAPI_TOKEN`
 // at module load. Any test that imports a slug helper without going through
 // this module would otherwise have to prime `process.argv` and
-// `process.env.VAPI_TOKEN` (see `tests/recanonicalize.test.ts:7-8`). This
+// `process.env.VAPI_TOKEN`. This
 // module has zero such side effects so it's safely importable from any test.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -55,8 +55,7 @@ export function extractBaseSlug(resourceId: string): string {
 // the resourceId doesn't match the engine shape at all.
 //
 // Use this when you have BOTH a state key AND its entry's UUID and need to
-// prove the key was engine-generated (the precondition-2 check in
-// `recanonicalize.ts`). A user-given name that coincidentally ends in
+// check the key against the engine-generated shape. A user-given name that coincidentally ends in
 // `-abcd1234` will NOT match because its UUID prefix is different.
 //
 // Mirrors `generateResourceId` in `src/pull.ts:265-273` — UUIDs have the

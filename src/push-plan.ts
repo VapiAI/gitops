@@ -65,7 +65,9 @@ export function pushBlockingFindings(
   return findings
     .filter(
       (finding) =>
-        (finding.severity === "error" && strict) ||
+        (strict &&
+          (finding.severity === "error" ||
+            finding.rule === "variable-undefined")) ||
         (plan.has(`${finding.type}:${finding.resourceId}`) &&
           (finding.severity === "error" ||
             finding.rule === "unresolved-credential")),

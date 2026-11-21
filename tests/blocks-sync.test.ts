@@ -301,13 +301,19 @@ test("--apply pushes through the drift check: an untouched resource is updated, 
 
     // Only the pushed resource is recorded with the new block.
     const after = blocksRecordRead(root, ORG);
-    assert.notDeepEqual(after["assistants/triage"], recorded["assistants/triage"]);
+    assert.notDeepEqual(
+      after["assistants/triage"],
+      recorded["assistants/triage"],
+    );
     assert.deepEqual(
       after["assistants/pharmacy"],
       recorded["assistants/pharmacy"],
     );
     // And neither file lost its marker on the way through pull.
-    assert.equal(readFileSync(join(root, assistants, "triage.md"), "utf8"), TRIAGE);
+    assert.equal(
+      readFileSync(join(root, assistants, "triage.md"), "utf8"),
+      TRIAGE,
+    );
     assert.equal(
       readFileSync(join(root, assistants, "pharmacy.md"), "utf8"),
       PHARMACY,

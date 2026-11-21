@@ -62,7 +62,9 @@ test("a Liquid file tag in a system prompt is reported, because Vapi renders it 
     validateResources(resources({ assistants: [prompt(content)] })).map(
       (f) => f.rule,
     );
-  assert.deepEqual(rules("Hi.\n{% include 'red-flags' %}"), ["liquid-file-tag"]);
+  assert.deepEqual(rules("Hi.\n{% include 'red-flags' %}"), [
+    "liquid-file-tag",
+  ]);
   assert.deepEqual(rules("{%- render 'tone' -%}"), ["liquid-file-tag"]);
   // Ordinary Liquid, and the block marker, are fine.
   assert.deepEqual(

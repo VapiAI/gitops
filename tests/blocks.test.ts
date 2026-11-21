@@ -4,20 +4,20 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  blocksRecordPath,
   blockLayers,
   blocksChanged,
   blocksExpand,
+  blocksRecordPath,
   blocksRecordRead,
   blocksRecordUpdate,
   blocksUsedIn,
 } from "../src/blocks.ts";
+import { migrateAll } from "../src/migrate-hash-store.ts";
 import {
   orgResourcesRead,
   parseResourceDataFromFile,
   resourceFileUsesBlocks,
 } from "../src/resource-parse.ts";
-import { migrateAll } from "../src/migrate-hash-store.ts";
 import { commitStepAcknowledge } from "../src/state-paths.ts";
 import { filesWrite, repoCreate } from "./blocks-helpers.ts";
 
@@ -502,7 +502,10 @@ test("the blocks record is written where the org's state is committed, and migra
     blocksRecordUpdate(root, "acme", current, ["assistants/triage"]);
     commitStepAcknowledge(root);
     await migrateAll(root);
-    assert.equal(existsSync(join(root, "resources/acme/.vapi-blocks.json")), false);
+    assert.equal(
+      existsSync(join(root, "resources/acme/.vapi-blocks.json")),
+      false,
+    );
     assert.equal(
       blocksRecordPath(root, "acme"),
       join(root, "state/acme/blocks.json"),
@@ -514,43 +517,57 @@ test("the blocks record is written where the org's state is committed, and migra
 });
 
 test("the blocks record marks only pushed resources as in sync", () => {
-  withRepo({ "resources/acme/.keep": "", "state/acme/state.json": "{}\n" }, (root) => {
-    const current = new Map<string, Record<string, string>>([
-      ["assistants/triage", { "blocks/red-flags.md": "aaaa" }],
-      ["assistants/pharmacy", { "blocks/red-flags.md": "aaaa" }],
-      ["assistants/plain", {}],
-    ]);
-    blocksRecordUpdate(root, "acme", current, ["assistants/triage", "assistants/plain"]);
-    assert.deepEqual(blocksRecordRead(root, "acme"), {
-      "assistants/triage": { "blocks/red-flags.md": "aaaa" },
-    });
-    assert.match(
-      readFileSync(blocksRecordPath(root, "acme"), "utf8"),
-      /^\{\n {2}"assistants\/triage"/,
-    );
+  withRepo(
+    { "resources/acme/.keep": "", "state/acme/state.json": "{}\n" },
+    (root) => {
+      const current = new Map<string, Record<string, string>>([
+        ["assistants/triage", { "blocks/red-flags.md": "aaaa" }],
+        ["assistants/pharmacy", { "blocks/red-flags.md": "aaaa" }],
+        ["assistants/plain", {}],
+      ]);
+      blocksRecordUpdate(root, "acme", current, [
+        "assistants/triage",
+        "assistants/plain",
+      ]);
+      assert.deepEqual(blocksRecordRead(root, "acme"), {
+        "assistants/triage": { "blocks/red-flags.md": "aaaa" },
+      });
+      assert.match(
+        readFileSync(blocksRecordPath(root, "acme"), "utf8"),
+        /^\{\n {2}"assistants\/triage"/,
+      );
 
-    // The block changes; only pharmacy is pushed. Triage keeps its old entry,
-    // which is what marks it as still running the old text.
-    const changed = new Map<string, Record<string, string>>([
-      ["assistants/triage", { "blocks/red-flags.md": "bbbb" }],
-      ["assistants/pharmacy", { "blocks/red-flags.md": "bbbb" }],
-    ]);
-    blocksRecordUpdate(root, "acme", changed, ["assistants/pharmacy"]);
-    const record = blocksRecordRead(root, "acme");
-    assert.deepEqual(
-      blocksChanged(changed.get("assistants/triage")!, record["assistants/triage"]),
-      ["blocks/red-flags.md"],
-    );
-    assert.deepEqual(
-      blocksChanged(
-        changed.get("assistants/pharmacy")!,
-        record["assistants/pharmacy"],
-      ),
-      [],
-    );
+      // The block changes; only pharmacy is pushed. Triage keeps its old entry,
+      // which is what marks it as still running the old text.
+      const changed = new Map<string, Record<string, string>>([
+        ["assistants/triage", { "blocks/red-flags.md": "bbbb" }],
+        ["assistants/pharmacy", { "blocks/red-flags.md": "bbbb" }],
+      ]);
+      blocksRecordUpdate(root, "acme", changed, ["assistants/pharmacy"]);
+      const record = blocksRecordRead(root, "acme");
+      assert.deepEqual(
+        blocksChanged(
+          changed.get("assistants/triage")!,
+          record["assistants/triage"],
+        ),
+        ["blocks/red-flags.md"],
+      );
+      assert.deepEqual(
+        blocksChanged(
+          changed.get("assistants/pharmacy")!,
+          record["assistants/pharmacy"],
+        ),
+        [],
+      );
 
-    // A resource that is gone, or no longer uses blocks, drops out.
-    blocksRecordUpdate(root, "acme", new Map([["assistants/pharmacy", {}]]), []);
-    assert.deepEqual(blocksRecordRead(root, "acme"), {});
-  });
+      // A resource that is gone, or no longer uses blocks, drops out.
+      blocksRecordUpdate(
+        root,
+        "acme",
+        new Map([["assistants/pharmacy", {}]]),
+        [],
+      );
+      assert.deepEqual(blocksRecordRead(root, "acme"), {});
+    },
+  );
 });

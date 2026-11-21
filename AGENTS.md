@@ -209,7 +209,8 @@ Nothing was written to the remote API"), a resource the push would write (one
 you selected, or a dependency it would create) has a validation error or an
 unresolved credential. Fix the listed findings and rerun; nothing was applied,
 so there is nothing to roll back. Errors in files outside the push only warn
-(`--strict` blocks those too). The preflight only catches what `validate`
+(`--strict` blocks those too, as well as `variable-undefined` warnings).
+The preflight only catches what `validate`
 knows about, so an API rejection can still leave a push partly applied.
 
 If something goes wrong: `npm run rollback -- <org> --list`, then (with a yes)

@@ -130,6 +130,40 @@ test("plan: squad auto-applied assistant errors block, including existing assist
   assert.deepEqual(pushBlockingFindings([], new Set(), false), []);
 });
 
+test("strict preflight blocks undefined variables globally but leaves other warnings advisory", () => {
+  const resources = loaded({
+    assistants: {
+      bot: {
+        model: { messages: [{ role: "system", content: "{{practice}}" }] },
+      },
+    },
+    squads: { team: { members: [{ assistantId: "bot" }] } },
+  });
+  const findings = validateResources(resources).filter(
+    (finding) => finding.rule === "variable-undefined",
+  );
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0]!.severity, "warn");
+  assert.deepEqual(
+    pushBlockingFindings(findings, new Set(["squads:team"]), false),
+    [],
+  );
+  assert.equal(pushBlockingFindings(findings, new Set(), true).length, 1);
+  assert.equal(
+    pushBlockingFindings(findings, new Set(), true)[0]!.severity,
+    "error",
+  );
+  assert.deepEqual(
+    pushBlockingFindings(
+      [{ ...findings[0]!, rule: "other-warning" }],
+      new Set(["squads:team"]),
+      true,
+    ),
+    [],
+  );
+  assert.deepEqual(pushBlockingFindings([], new Set(), true), []);
+});
+
 test("credential-pin severity and scope survive push preflight", () => {
   const local = loaded({
     assistants: {

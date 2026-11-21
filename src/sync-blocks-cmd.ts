@@ -41,7 +41,8 @@ function orgsRead(rootDir: string): string[] {
   return readdirSync(resources)
     .filter(
       (entry) =>
-        !entry.startsWith(".") && statSync(join(resources, entry)).isDirectory(),
+        !entry.startsWith(".") &&
+        statSync(join(resources, entry)).isDirectory(),
     )
     .sort();
 }
@@ -96,8 +97,7 @@ export async function syncBlocksRun(
   overrides: Partial<SyncBlocksDeps> = {},
 ): Promise<number> {
   const rootDir =
-    overrides.rootDir ??
-    resolve(process.env.VAPI_GITOPS_ROOT ?? baseDir());
+    overrides.rootDir ?? resolve(process.env.VAPI_GITOPS_ROOT ?? baseDir());
   const deploy =
     overrides.applyRun ??
     ((org: string, paths: string[]) => applyRun(rootDir, org, paths));
