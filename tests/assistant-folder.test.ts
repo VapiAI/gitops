@@ -43,15 +43,15 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
       const state = ${JSON.stringify(state)};
       const requests = [];
       globalThis.fetch = async (url, options) => {
-        if (options.method === 'GET') return new Response(JSON.stringify({ ...data, id: 'uuid', orgId: 'org', metadata: { team: 'support', folderPath: 'old' } }));
+        if (options.method === 'GET') return new Response(JSON.stringify({ ...data, id: 'uuid', orgId: 'org', metadata: { ...data.metadata, gitops: { owner: 'repo', folderPath: 'old' } } }));
         const body = JSON.parse(options.body);
         requests.push({ method: options.method, body });
         return new Response(JSON.stringify({ ...body, id: 'uuid', orgId: 'org' }));
       };
-      const data = { name: 'Intake', metadata: { team: 'support' } };
+      const data = { name: 'Intake', metadata: { team: 'support', folderPath: 'user', gitops: { owner: 'repo' } } };
       await applyAssistant({ resourceId: 'support/tier2/intake', filePath: '', data }, state);
       assert.equal(requests[0].method, 'POST');
-      assert.deepEqual(requests[0].body.metadata, { team: 'support', folderPath: 'support/tier2' });
+      assert.deepEqual(requests[0].body.metadata, { ...data.metadata, gitops: { owner: 'repo', folderPath: 'support' } });
       assert.deepEqual(state.assistants['support/tier2/intake'], { uuid: 'uuid', origin: 'pushed' });
       assert.equal(readBaseline('folder-test', 'uuid'), hashPayload(data));
       requests.length = 0;
@@ -67,21 +67,21 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
       assert.deepEqual(state.assistants.intake, { uuid: 'uuid', origin: 'adopted' });
       await applyAssistant({ resourceId: 'intake', filePath: '', data }, state);
       const patch = requests.find(r => r.method === 'PATCH' && r.body.name === 'Intake');
-      assert.deepEqual(patch.body.metadata, { team: 'support', folderPath: null });
+      assert.deepEqual(patch.body.metadata, { ...data.metadata, gitops: { owner: 'repo', folderPath: null } });
       assert.equal(readBaseline('folder-test', 'uuid'), hashPayload(data));
       const { pullResourceType } = await import('./src/pull.ts');
       const { hashLocalResource } = await import('./src/resources.ts');
       const { readFileSync, mkdirSync, writeFileSync } = await import('node:fs');
       mkdirSync('./resources/folder-test/assistants', { recursive: true });
-      writeFileSync('./resources/folder-test/assistants/intake.md', '---\\nname: Intake\\nmetadata:\\n  team: support\\n---\\n');
+      writeFileSync('./resources/folder-test/assistants/intake.yml', JSON.stringify(data));
       globalThis.fetch = async () => new Response(JSON.stringify([
-        { ...data, id: 'uuid', orgId: 'org', metadata: { team: 'support', folderPath: 'support' } },
+        { ...data, id: 'uuid', orgId: 'org', metadata: { ...data.metadata, gitops: { owner: 'repo', folderPath: 'support' } } },
       ]));
       const pulled = await pullResourceType('assistants', state, { force: true });
       assert.equal(pulled.created + pulled.updated, 1);
-      const yaml = readFileSync('./resources/folder-test/assistants/intake.md', 'utf8');
-      assert.ok(!yaml.includes('folderPath'));
-      assert.ok(yaml.includes('team: support'));
+      const { parse } = await import('yaml');
+      const yaml = readFileSync('./resources/folder-test/assistants/intake.yml', 'utf8');
+      assert.deepEqual(parse(yaml).metadata, data.metadata);
       assert.equal(hashLocalResource('assistants', 'intake'), readBaseline('folder-test', 'uuid'));
     `;
     const result = spawnSync(
@@ -95,6 +95,13 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
       },
     );
     assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(
+      result.stderr.split(
+        'dashboard folders are one level deep; grouped under "support".',
+      ).length - 1,
+      1,
+      result.stderr,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -103,33 +110,41 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
 test("folder payloads preserve user metadata and override derived values", () => {
   const data = {
     name: "Intake",
-    metadata: { team: "support", folderPath: "old" },
+    metadata: {
+      team: "support",
+      folderPath: "user",
+      gitops: { owner: "repo", folderPath: "old" },
+    },
   };
   assert.deepEqual(withAssistantFolder(data, "support/tier2/intake"), {
     name: "Intake",
-    metadata: { team: "support", folderPath: "support/tier2" },
+    metadata: {
+      team: "support",
+      folderPath: "user",
+      gitops: { owner: "repo", folderPath: "support" },
+    },
   });
-  assert.equal(data.metadata.folderPath, "old");
+  assert.equal(data.metadata.gitops.folderPath, "old");
   assert.deepEqual(withAssistantFolder({}, "support/intake"), {
-    metadata: { folderPath: "support" },
+    metadata: { gitops: { folderPath: "support" } },
   });
 });
 
 test("moving to root explicitly clears a stale folder without losing metadata", () => {
   assert.deepEqual(
     withAssistantFolder(
-      { metadata: { team: "support", folderPath: "old" } },
+      { metadata: { team: "support", gitops: { folderPath: "old" } } },
       "intake",
     ),
     {
-      metadata: { team: "support", folderPath: null },
+      metadata: { team: "support", gitops: { folderPath: null } },
     },
   );
   assert.deepEqual(withAssistantFolder({}, "intake"), {
-    metadata: { folderPath: null },
+    metadata: { gitops: { folderPath: null } },
   });
   assert.deepEqual(withAssistantFolder({ metadata: null }, "intake"), {
-    metadata: { folderPath: null },
+    metadata: { gitops: { folderPath: null } },
   });
 });
 
@@ -140,6 +155,18 @@ test("invalid assistant metadata is rejected instead of silently overwritten", (
       /metadata must be an object/,
     );
   }
+  for (const gitops of [null, undefined, "bad", 1, [], new Date()]) {
+    assert.throws(
+      () => withAssistantFolder({ metadata: { gitops } }, "intake"),
+      /metadata.gitops must be a plain object/,
+    );
+  }
+  assert.deepEqual(
+    withAssistantFolder({ metadata: { gitops: {} } }, "intake"),
+    {
+      metadata: { gitops: { folderPath: null } },
+    },
+  );
 });
 
 test("pull and drift canonical forms ignore only assistant folder metadata", () => {
@@ -148,9 +175,20 @@ test("pull and drift canonical forms ignore only assistant folder metadata", () 
       id: "uuid",
       orgId: "org",
       name: "Intake",
-      metadata: { team: "support", folderPath },
+      metadata: {
+        team: "support",
+        folderPath: "user",
+        gitops: { owner: "repo", folderPath },
+      },
     };
-    const local = { name: "Intake", metadata: { team: "support" } };
+    const local = {
+      name: "Intake",
+      metadata: {
+        team: "support",
+        folderPath: "user",
+        gitops: { owner: "repo" },
+      },
+    };
     const canonical = canonicalizeForHash(
       remote,
       state,
@@ -166,13 +204,19 @@ test("pull and drift canonical forms ignore only assistant folder metadata", () 
       canonicalizeForHash(remote, state, new Map(), "squads").metadata,
       remote.metadata,
     );
-    assert.equal(remote.metadata.folderPath, folderPath);
+    assert.equal(remote.metadata.gitops.folderPath, folderPath);
   }
   assert.deepEqual(
-    withoutAssistantFolder({ metadata: { folderPath: "support" } }),
+    withoutAssistantFolder({ metadata: { gitops: { folderPath: "support" } } }),
     {},
   );
-  assert.deepEqual(withoutAssistantFolder({ metadata: {} }), {});
+  assert.deepEqual(withoutAssistantFolder({ metadata: { gitops: {} } }), {});
+  assert.deepEqual(
+    withoutAssistantFolder({
+      metadata: { folderPath: "user", gitops: { folderPath: "support" } },
+    }),
+    { metadata: { folderPath: "user" } },
+  );
   assert.deepEqual(withoutAssistantFolder({ name: "Intake" }), {
     name: "Intake",
   });

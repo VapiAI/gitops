@@ -98,9 +98,15 @@ adoption before dependency resolution to take one over instead.
 ## Interactive Mode
 
 Assistant pushes (including the push phase of `apply`) derive
-`metadata.folderPath` from the file's subfolder under `assistants/`, preserving
-other authored metadata. Root files send `folderPath: null` to clear grouping.
-Pull omits this derived key, and drift comparisons ignore it. To move a file
+`metadata.gitops.folderPath` from the first folder under `assistants/`, preserving
+other authored metadata and sibling `gitops` keys:
+`assistants/support/intake.yml` groups under `support`.
+Dashboard folders are one level deep; deeper paths group under the first folder
+and print a warning, not an error. Root files send
+`metadata.gitops.folderPath: null` to clear grouping.
+Pull omits this derived key, dropping empty `gitops`/`metadata` objects, and drift
+comparisons ignore it. Top-level `metadata.folderPath` is a user key, left
+untouched. Authored `metadata.gitops` must be a plain object. To move a file
 while retaining its platform UUID, explicitly adopt it with
 `--adopt <new-resourceId>=<uuid>`; the subsequent push updates its folder path.
 

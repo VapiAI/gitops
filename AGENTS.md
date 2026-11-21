@@ -250,11 +250,16 @@ default-exports the object (safety rule 5).
 
 The engine resolves IDs and credential names to each org's UUIDs on push.
 
-Assistant subfolders are pushed as derived `metadata.folderPath` (for example
-`assistants/support/intake.yml` → `support`). Other metadata keys are preserved.
-Root assistants send `folderPath: null`, clearing stale grouping. Pull and drift
-exclude this key; don't author it locally. File moves still require the normal
+Assistant subfolders are pushed as derived `metadata.gitops.folderPath` (for example
+`assistants/support/intake.yml` → `support`). Other metadata and sibling `gitops`
+keys are preserved; top-level `metadata.folderPath` is a user key, left untouched.
+Dashboard folders are one level deep: deeper paths use the first folder only,
+with a warning on push (not an error).
+Root assistants send `metadata.gitops.folderPath: null`, clearing stale grouping.
+Pull and drift exclude this key; don't author it locally. File moves still require the normal
 filename/state mapping safeguards below. Other resource types are unchanged.
+If authored, `metadata.gitops` must be a plain object. Pull removes only the
+derived key, dropping `gitops` and `metadata` only if they become empty.
 
 ### Naming and renaming
 
