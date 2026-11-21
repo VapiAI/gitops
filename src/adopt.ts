@@ -4,6 +4,13 @@ import type { TouchedSets } from "./state-merge.ts";
 import type { LoadedResources, ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
+export interface AdoptionAlias {
+  type: ResourceType;
+  resourceId: string;
+  uuid: string;
+  adoptedAs: string;
+}
+
 export function parseAdoptArgs(args: string[]): string[] {
   const targets: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -29,6 +36,7 @@ export async function adoptResources(opts: {
   touched: TouchedSets;
   getRemoteList: (type: ResourceType) => Promise<RemoteResource[]>;
   dryRun: boolean;
+  cleanupAliases?: (aliases: AdoptionAlias[]) => Promise<void>;
 }): Promise<StateFile> {
   const state = opts.dryRun ? structuredClone(opts.state) : opts.state;
   const plans: { type: ResourceType; resourceId: string; uuid: string }[] = [];
@@ -91,6 +99,12 @@ export async function adoptResources(opts: {
     }
     plans.push({ type, resourceId, uuid });
   }
+  const aliases = plans.flatMap(({ type, resourceId, uuid }) =>
+    Object.entries(state[type])
+      .filter(([key, entry]) => key !== resourceId && entry.uuid === uuid)
+      .map(([key]) => ({ type, resourceId: key, uuid, adoptedAs: resourceId })),
+  );
+  await opts.cleanupAliases?.(aliases);
   for (const { type, resourceId, uuid } of plans) {
     console.log(
       `  ${opts.dryRun ? "would adopt" : "Adopting"} ${resourceId} → ${uuid}`,

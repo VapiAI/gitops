@@ -54,9 +54,13 @@ uses the normal PATCH path. Scoped saves include both sides of the re-key.
 `would adopt <id> → <uuid>`, but does not write state or mutate the platform.
 `apply` forwards adoption to its push stage; its preceding pull remains a
 normal pull except in `--dry-run`, which skips pull to avoid local writes.
-If a removed alias still has a local file, that file remains an
-orphan and the normal new-file gate requires review; adoption never deletes
-local files for you.
+Adoption deletes leftover alias files only when they match the last-synced
+baseline. Edited files or missing baselines need per-file y/N approval in a
+terminal; headless runs stop before changing files, state or the platform.
+Merge those edits into the adopted file or delete the alias manually and rerun.
+Dry-run reports would-delete/would-fail without deleting. Baselines are keyed
+by remote UUID, not alias; adoption drops the shared old baseline and the normal
+PATCH records a fresh one for the adopted resource.
 
 Dependencies are automatically reused by name only when an existing state
 entry records `origin: pushed` or `origin: adopted`. Pulled and legacy entries,

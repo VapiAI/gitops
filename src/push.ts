@@ -2,6 +2,7 @@ import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { adoptResources } from "./adopt.ts";
+import { cleanupAdoptionAliases } from "./adopt-alias-files.ts";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
@@ -1627,6 +1628,7 @@ async function main(): Promise<void> {
 
   // Load current state (needed for reference resolution even in partial apply)
   let state = loadState();
+  let preflightComplete = false;
 
   // Track which resourceIds we actually mutate so the end-of-run save can
   // merge into existing on-disk state instead of rewriting wholesale.
@@ -1719,6 +1721,7 @@ async function main(): Promise<void> {
     };
 
     state = await maybeBootstrapState(loadedResources, state);
+    const removedAliasIds = new Set<string>();
     state = await adoptResources({
       targets: ADOPT_TARGETS,
       resources: loadedResources,
@@ -1727,6 +1730,11 @@ async function main(): Promise<void> {
       getRemoteList: async (type) =>
         (await fetchAllResources(type)) as RemoteResource[],
       dryRun: DRY_RUN,
+      cleanupAliases: async (aliases) => {
+        await cleanupAdoptionAliases(aliases, loadedResources);
+        for (const alias of aliases)
+          removedAliasIds.add(`${alias.type}:${alias.resourceId}`);
+      },
     });
 
     // Orphan-YAML pre-flight gate. Runs ONCE for ALL resource types after
@@ -1743,6 +1751,9 @@ async function main(): Promise<void> {
         state,
         filePathFilter: APPLY_FILTER.filePaths,
       });
+      orphanReport.orphans = orphanReport.orphans.filter(
+        (file) => !removedAliasIds.has(`${file.type}:${file.resourceId}`),
+      );
       if (orphanReport.orphans.length > 0) {
         if (ALLOW_NEW_FILES) {
           const verb = DRY_RUN ? "would create" : "creating";
@@ -1760,6 +1771,7 @@ async function main(): Promise<void> {
       }
     }
 
+    preflightComplete = true;
     // Run client-side validators against the loaded resource set. In default
     // mode, errors are surfaced as warnings so a single bad spec doesn't block
     // an otherwise-good push. With --strict, any error-severity finding aborts
@@ -2269,7 +2281,7 @@ async function main(): Promise<void> {
           `.vapi-state.${VAPI_ENV}.json)`,
       );
       console.log(`\n${await dryRunCollisions!.format()}`);
-    } else {
+    } else if (preflightComplete) {
       try {
         // For scoped pushes, only persist entries we actually mutated.
         // Re-load disk state and merge our touched entries on top so

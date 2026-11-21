@@ -16,6 +16,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { parseResourceDataFromFile } from "../src/resource-parse.ts";
+import { hashPayload } from "../src/state-serialize.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Integration test for the state-aware adoption fix in pull.ts.
@@ -657,6 +659,115 @@ for (const command of ["push", "apply"]) {
         JSON.stringify(requests),
       );
       assert.equal(existsSync(join(dir, ".vapi-state-hash")), false);
+    } finally {
+      await worker.terminate();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
+  test(`adoption cleans alias files safely: ${mode}`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vapi-alias-"));
+    cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+    symlinkSync(
+      join(REPO_ROOT, "node_modules"),
+      join(dir, "node_modules"),
+      "dir",
+    );
+    const assistants = join(dir, "resources", ENV, "assistants");
+    mkdirSync(assistants, { recursive: true });
+    writeFileSync(join(assistants, "riley.md"), PREEXISTING_RILEY_MD);
+    const alias = join(assistants, "riley-aaaaaaaa.md");
+    writeFileSync(alias, PREEXISTING_RILEY_MD.replace("A-original", "A"));
+    const hashes = join(dir, ".vapi-state-hash", ENV);
+    mkdirSync(hashes, { recursive: true });
+    if (mode !== "missing-baseline")
+      writeFileSync(
+        join(hashes, UUID_A),
+        hashPayload(parseResourceDataFromFile(alias)),
+      );
+    if (mode === "edited")
+      writeFileSync(
+        alias,
+        PREEXISTING_RILEY_MD.replace("A-original", "edited"),
+      );
+    const originalAlias = readFileSync(alias, "utf8");
+    const statePath = join(dir, `.vapi-state.${ENV}.json`);
+    const initial = JSON.stringify({
+      assistants: { "riley-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
+      credentials: { fake: { uuid: "cred" } },
+    });
+    writeFileSync(statePath, initial);
+    const { worker, port } = await startStub([
+      {
+        method: "GET",
+        pathStartsWith: `/assistant/${UUID_A}`,
+        body: rileyDashboardBody(UUID_A, "A"),
+      },
+      {
+        method: "GET",
+        pathStartsWith: "/assistant",
+        body: [rileyDashboardBody(UUID_A, "A")],
+      },
+      {
+        method: "PATCH",
+        pathStartsWith: "/assistant",
+        body: rileyDashboardBody(UUID_A, "A-original"),
+      },
+    ]);
+    const run = (command: string, args: string[]) =>
+      spawnSync(
+        "node",
+        ["--import", "tsx", `src/${command}.ts`, ENV, ...args],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 30000,
+          env: {
+            ...process.env,
+            VAPI_PRIVATE_API_KEY: "fake-token-not-used",
+            VAPI_BASE_URL: `http://127.0.0.1:${port}`,
+          },
+        },
+      );
+    try {
+      const res = run(mode === "apply" ? "apply" : "push", [
+        "--adopt",
+        "riley",
+        ...(mode === "dry-run" ? ["--dry-run"] : []),
+      ]);
+      const blocked = mode === "edited" || mode === "missing-baseline";
+      assert.equal(res.status, blocked ? 1 : 0, res.stdout + res.stderr);
+      if (blocked || mode === "dry-run") {
+        assert.equal(readFileSync(alias, "utf8"), originalAlias);
+        assert.equal(readFileSync(statePath, "utf8"), initial);
+        assert.match(
+          res.stdout + res.stderr,
+          blocked ? /Delete it by hand/ : /would delete .*riley-aaaaaaaa.md/,
+        );
+        const requests = (await (
+          await fetch(`http://127.0.0.1:${port}/__requests`)
+        ).json()) as { method: string }[];
+        assert.ok(requests.every((r) => r.method === "GET"));
+      } else {
+        assert.equal(existsSync(alias), false);
+        assert.match(
+          res.stdout,
+          /Deleted .*riley-aaaaaaaa.md: same remote resource, now adopted as riley/,
+        );
+        assert.deepEqual(
+          JSON.parse(readFileSync(statePath, "utf8")).assistants,
+          { riley: { uuid: UUID_A, origin: "adopted" } },
+        );
+        const next = run("push", []);
+        assert.doesNotMatch(
+          next.stdout + next.stderr,
+          /Push refused|Files without state entry/,
+        );
+        assert.equal(existsSync(alias), false);
+      }
     } finally {
       await worker.terminate();
       rmSync(dir, { recursive: true, force: true });

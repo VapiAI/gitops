@@ -129,8 +129,9 @@ npm run apply -- <org> --adopt my-agent=<uuid> assistants/my-agent.md
 Adoption needs the human's explicit yes for that resource, just like new-file
 approval. It requires a local file with no state mapping. Pull never links
 unknown remote UUIDs to local files by name, and dependency aliases are reused
-only when state records pushed/adopted ownership. If adoption leaves an old
-alias file orphaned, stop and review it rather than bypassing the gate.
+only when state records pushed/adopted ownership. Adoption removes unchanged alias files automatically. Edited aliases or
+missing baselines require per-file approval in a terminal; headless runs stop
+so you can merge their edits into the adopted file or remove them manually.
 
 Both `push --dry-run` and `apply --dry-run` perform read-only dashboard GETs
 for the collision preview; apply skips its pull stage to avoid local writes.

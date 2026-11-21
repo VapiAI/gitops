@@ -138,6 +138,12 @@ export async function runApply(): Promise<void> {
   }
 
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
+  if (!process.stdin.isTTY && parseAdoptArgs(allArgs).length) {
+    const { preflightApplyAliases } = await import(
+      "./adopt-apply-preflight.ts"
+    );
+    await preflightApplyAliases(parseAdoptArgs(allArgs));
+  }
   if (dryRun)
     console.log(
       "\n🧪 Dry-run: skipping pull to preserve local files and state.",

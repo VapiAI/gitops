@@ -176,6 +176,10 @@ those new files, and check the **Name collisions** list (read-only dashboard
 GETs). To take over an existing resource instead, get an explicit yes for
 `--adopt <id>[=<uuid>]`; use the UUID form when candidates are ambiguous.
 Never auto-pass adoption or new-file approval to make a deploy succeed.
+Adoption removes unchanged alias files automatically using the last-synced
+baseline. Edited aliases or missing baselines require per-file y/N approval;
+headless runs stop before changing files/state or the platform. Merge edits
+into the adopted file or remove the alias manually, then rerun.
 
 If something goes wrong: `npm run rollback -- <org> --list`, then (with a yes)
 `--to <timestamp>`. Details for every workflow:
