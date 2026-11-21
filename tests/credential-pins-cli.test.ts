@@ -204,7 +204,10 @@ for (const layout of LAYOUTS)
       const state = JSON.parse(
         readFileSync(join(dir, layout.stateFile), "utf-8"),
       );
-      assert.deepEqual(state.credentials.elevenlabs, { uuid: id(3) });
+      assert.deepEqual(state.credentials.elevenlabs, {
+        uuid: id(3),
+        origin: "pulled",
+      });
 
       // A warning by default: validate passes and says what is hidden.
       const warned = run(dir, port, "validate-cmd.ts");
