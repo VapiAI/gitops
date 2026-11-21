@@ -156,6 +156,16 @@ For a one-off call using an existing `squadId`, the same shape can be passed as 
 
 ## Override Merge Order
 
+### Shared assistants speak unresolved practice variables
+
+**Problem:** A shared assistant says literal `{{name}}` instead of a practice's details.
+
+**Cause:** Undefined variables remain literal on the call; an explicit empty string renders as nothing. Override precedence is member → squad → call; later values win.
+
+**Fix:** Keep assistants shared and set each practice's values in `membersOverrides.variableValues` (or a member's `assistantOverrides.variableValues`). `variable-undefined` warns per squad member; `--strict` blocks it in validate and push. Transfer numbers must stay literal: see [Liquid destination numbers](tools.md#liquid-destination-numbers-fail-api-validation).
+
+### Layer precedence
+
 The final assistant configuration is built by merging these layers in order:
 
 1. Base assistant
@@ -168,8 +178,6 @@ Later layers win on conflicts. `variableValues` from all layers are merged separ
 `credentialIds` follows the same order with one difference: a list on the base assistant is kept and the override's list is added to it, while `squad.membersOverrides.credentialIds` replaces `member.assistantOverrides.credentialIds`.
 
 **Gotcha:** a `credentialIds` list anywhere in the squad narrows the whole call to the listed keys, for every member and every provider. A provider left off runs on Vapi's own key with no error. List every key the call needs, and let `npm run validate` check it: see [Credential pins](../guides/credential-pins.md).
-
-**Gotcha:** a variable with no value is **left in the prompt as written**, not replaced and not an error. If a variable isn't in the merged `variableValues`, `{{ myVar }}` reaches the model as the literal text `{{ myVar }}`. A variable that is set to an empty string does render as nothing. So a squad that forgets a variable shows the braces to the model: check every `{{ … }}` in a prompt, and in any [block](../guides/blocks.md) it includes, has a value in each squad that uses it.
 
 ---
 
