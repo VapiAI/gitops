@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { basename, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
+import { withoutAssistantFolder } from "./assistant-folder.ts";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import {
   FOLDER_MAP,
@@ -16,10 +17,10 @@ import { stateUuid } from "./state.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceFile, ResourceType, StateFile } from "./types.ts";
 
+export type { LoadOptions };
 // The file-reading half lives in resource-parse.ts (config-free). These are
 // re-exported so existing importers keep working.
 export { FOLDER_MAP, VALID_EXTENSIONS };
-export type { LoadOptions };
 
 function findLocalResourceFile(
   type: ResourceType,
@@ -42,7 +43,10 @@ export function hashLocalResource(
   const filePath = findLocalResourceFile(type, resourceId);
   if (!filePath) return null;
   try {
-    return hashPayload(parseResourceDataFromFile(filePath));
+    const data = parseResourceDataFromFile(filePath);
+    return hashPayload(
+      type === "assistants" ? withoutAssistantFolder(data) : data,
+    );
   } catch {
     return null;
   }

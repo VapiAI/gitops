@@ -18,7 +18,7 @@
 // has nothing to compare against — only PATCH (update) is drift-sensitive.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { vapiGet, VapiApiError } from "./api.ts";
+import { VapiApiError, vapiGet } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { readBaseline } from "./hash-store.ts";
@@ -144,7 +144,12 @@ export async function checkDriftForUpdate(options: {
   // resource hashed differently here than at pull time → phantom both-diverged.
   const credReverse = credentialReverseMap(state);
   const platformHash = hashPayload(
-    canonicalizeForHash(remote as VapiResource, state, credReverse),
+    canonicalizeForHash(
+      remote as VapiResource,
+      state,
+      credReverse,
+      resourceType,
+    ),
   );
   if (platformHash === baseline) {
     return { ok: true, reason: "match", platformHash, platformPayload: remote };
@@ -153,8 +158,7 @@ export async function checkDriftForUpdate(options: {
   // On-disk hash in the same basis as the baseline. Absent a local file
   // (rare on an update path), fall back to the baseline so the direction is
   // dashboard-ahead rather than a phantom both-diverged.
-  const localHash =
-    hashLocalResource(resourceType, resourceId) ?? baseline;
+  const localHash = hashLocalResource(resourceType, resourceId) ?? baseline;
 
   // Local and platform are byte-identical → there is nothing to reconcile and
   // the PATCH is a no-op. NEVER block here, even if the baseline disagrees

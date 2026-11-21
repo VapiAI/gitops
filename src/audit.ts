@@ -21,12 +21,12 @@
 
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import { matchesIgnore, RESOURCES_DIR, VAPI_ENV } from "./config.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { classifyDrift } from "./drift.ts";
 import { readBaseline } from "./hash-store.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
-import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import { fetchAllResources, listExistingResourceIds } from "./pull.ts";
 import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
@@ -393,7 +393,7 @@ function checkContentDrift(
     // canonicalizeForHash centralizes the 3-step pipeline + _platformDefault
     // mutation so the hash agrees with the pull-write baseline basis.
     const platformHash = hashPayload(
-      canonicalizeForHash(remoteResource, state, credReverse),
+      canonicalizeForHash(remoteResource, state, credReverse, type),
     );
     const direction = classifyDrift({
       localHash,

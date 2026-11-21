@@ -2,6 +2,7 @@ import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
+import { withAssistantFolder } from "./assistant-folder.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
   ALLOW_NEW_FILES,
@@ -156,13 +157,19 @@ async function writeBaselineFromResponse(
   uuid: string,
   response: unknown,
   state: StateFile,
+  resourceType?: ResourceType,
 ): Promise<void> {
   if (DRY_RUN) return;
   if (!response || typeof response !== "object") return;
   try {
     const credReverse = credentialReverseMap(state);
     const hash = hashPayload(
-      canonicalizeForHash(response as VapiResource, state, credReverse),
+      canonicalizeForHash(
+        response as VapiResource,
+        state,
+        credReverse,
+        resourceType,
+      ),
     );
     await writeBaseline(VAPI_ENV, uuid, hash);
   } catch (err) {
@@ -243,7 +250,12 @@ async function upsertResourceWithStateRecovery(options: {
   if (!existingUuid) {
     console.log(`  ✨ Creating ${resourceLabel}: ${resourceId}`);
     const result = await vapiRequest("POST", createEndpoint, createPayload);
-    await writeBaselineFromResponse(result.id, result, fullState);
+    await writeBaselineFromResponse(
+      result.id,
+      result,
+      fullState,
+      RESOURCE_LABEL_TO_TYPE[resourceLabel],
+    );
     if (resourceLabel === "assistant") {
       await writeAssistantVersionMetadata({
         uuid: result.id,
@@ -397,7 +409,12 @@ async function upsertResourceWithStateRecovery(options: {
     // The PATCH response is the full resource as the platform now stores it —
     // the freshest possible "last known platform state." Hash it as the new
     // drift baseline so the next push of a further local edit is clean.
-    await writeBaselineFromResponse(existingUuid, result, fullState);
+    await writeBaselineFromResponse(
+      existingUuid,
+      result,
+      fullState,
+      RESOURCE_LABEL_TO_TYPE[resourceLabel],
+    );
     if (resourceLabel === "assistant" && platformPayloadForSnapshot) {
       await writeAssistantVersionMetadata({
         uuid: existingUuid,
@@ -874,7 +891,10 @@ export async function applyAssistant(
   const existingUuid = state.assistants[resourceId]?.uuid;
 
   // Resolve tool and structured output references
-  const payload = resolveReferences(data as Record<string, unknown>, state);
+  const payload = withAssistantFolder(
+    resolveReferences(data as Record<string, unknown>, state),
+    resourceId,
+  );
 
   return upsertResourceWithStateRecovery({
     resourceLabel: "assistant",

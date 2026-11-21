@@ -182,6 +182,13 @@ To test every pull request automatically, set up [PR checks](docs/guides/pr-chec
 - **Secrets stay out of git.** API keys live in `.env.<org>` (gitignored) or
   CI secrets. Credentials are referenced by name and bound to each org's own
   credentials.
+- **Assistant subfolders group the dashboard.** Pushing
+  `assistants/support/tier2/intake.yml` sets `metadata.folderPath` to
+  `support/tier2`, preserving other authored metadata. Root assistants send
+  `folderPath: null` to clear any previous folder. This derived key is omitted
+  on pull and ignored for drift; do not author it in YAML. Moving files still
+  follows the normal filename/state mapping safeguards. `apply` uses the same
+  behavior in its push phase.
 - **Each folder is pinned to its org.** The first command that can see which
   org a key belongs to records it in `resources/<org>/.vapi-org.json`. After
   that, every command checks the key against it before any request, and stops

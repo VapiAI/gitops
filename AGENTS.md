@@ -223,6 +223,12 @@ default-exports the object (safety rule 5).
 
 The engine resolves IDs and credential names to each org's UUIDs on push.
 
+Assistant subfolders are pushed as derived `metadata.folderPath` (for example
+`assistants/support/intake.yml` → `support`). Other metadata keys are preserved.
+Root assistants send `folderPath: null`, clearing stale grouping. Pull and drift
+exclude this key; don't author it locally. File moves still require the normal
+filename/state mapping safeguards below. Other resource types are unchanged.
+
 ### Naming and renaming
 
 - **Files you create keep their names.** Resources pulled from the platform

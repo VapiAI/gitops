@@ -26,6 +26,12 @@ The other commands are direct only.
 
 ## Interactive Mode
 
+Assistant pushes (including the push phase of `apply`) derive
+`metadata.folderPath` from the file's subfolder under `assistants/`, preserving
+other authored metadata. Root files send `folderPath: null` to clear grouping.
+Pull omits this derived key, and drift comparisons ignore it. Moving a file
+still follows the normal rename/state mapping safeguards.
+
 When you run a command without arguments, you get a fully interactive experience:
 
 ```bash
