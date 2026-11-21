@@ -109,7 +109,14 @@ To move wording you already have pasted into several assistants:
    🧩 reception (uses blocks, matches the dashboard — file left as written)
    ```
 
-   That line tells you the move changed no wording. If a file you moved does
+   This assumes the file is already linked to the live resource in state.
+   Pull never links an unknown UUID to a file just because their names match.
+   For a renamed or moved file, explicitly approve `--adopt <resourceId>=<uuid>`
+   to keep managing the existing resource; see [Running in CI](commands.md#running-in-ci).
+   Assistant subfolders set `metadata.gitops.folderPath` on push. That derived
+   field is excluded from drift hashes, including when the file uses blocks.
+
+   That line tells you the move changed no wording. If a linked file you moved does
    not get that line, its finished prompt differs from the live one: compare
    your block with the paragraph you deleted before you deploy.
 5. Deploy the file. **Changes a live org.**
@@ -159,14 +166,10 @@ The full rules are in [Config blocks](blocks.md#config-blocks).
 squad. `apply` stops when it meets files it has never deployed, and lists
 them:
 
-```text
-❌ Push refused: 3 file(s) on disk have no state-file UUID mapping for env "north-clinic".
-…
-Files without state entry:
-  - resources/north-clinic/assistants/pharmacy.md
-  - resources/north-clinic/assistants/triage.md
-  - resources/north-clinic/squads/front-desk.yml
-```
+The grouped link preflight reports "Not linked to any resource in north-clinic
+yet" for each unlinked file, with commands for creating a new resource or
+explicitly adopting an existing one. It stops before file deletion, state
+writes or remote mutations. Same-named resources are never linked automatically.
 
 Read the list. When every file on it is meant to be new, confirm with the
 flag (see
@@ -176,6 +179,16 @@ flag (see
 npm run apply -- north-clinic --allow-new-files
 npm run apply -- south-clinic --allow-new-files
 ```
+
+If a file should manage an existing resource instead, get explicit approval
+for `--adopt <resourceId>[=<uuid>]`, not `--allow-new-files`. Unchanged leftover
+alias files are removed using their last-synced baseline; edited or unbaselined
+aliases require review. Never bypass this choice just to make a deploy pass.
+
+After linking, push preflights the write plan, including dependencies, before
+any remote mutation. Validation errors and unresolved credentials in that
+plan block even a dry run. `--strict` also blocks errors outside the plan and
+`variable-undefined` warnings; other warnings remain advisory.
 
 ```text
    ⚠️  bypassing new-file gate: creating 3 new resource(s) on the dashboard
@@ -193,11 +206,13 @@ git add templates resources state
 git commit -m "Add two clinics that share blocks"
 ```
 
-`state/<org>/` is the engine's record of each org. One file in it,
+`state/<org>/` is the engine's record of each org: `state.json` maps resource
+IDs to UUIDs and `org.json` pins the folder to its org. One other file in it,
 `blocks.json`, records which block text each resource was last pushed with.
 That record is how `sync-blocks` knows what a block edit has not reached
 yet. Commit `state/` whenever a command changes it, and never edit it by
-hand.
+hand. Baselines and snapshots under `state/<org>/local/` are per-developer
+and gitignored; do not stage them.
 
 After the deploy, `npm run sync-blocks` prints
 `✅ Every resource is in sync with its blocks.`
@@ -558,13 +573,15 @@ the marker left in or the text missing:
 `validate`, `apply` and `sync-blocks` each stopped with that message and exit
 code 1, and none of them sent anything to the API.
 
-**A variable nobody defines is not caught.** The engine does not check Liquid
-variables. A block that says `We are open {{opening_hours}}.` passed
-`validate` with no warning when no squad set `opening_hours`. On a call, Vapi
-leaves a variable with no value in the prompt as written, so the model sees
-the braces (see the gotcha under
-[Override Merge Order](../learnings/squads.md#override-merge-order)). When a
-block uses a variable, give it a value in every squad that uses the block.
+**Undefined squad variables warn, and block under `--strict`.** After block
+expansion, the engine checks each squad member's effective assistant prompt
+and greeting against its variable values and known built-ins. A block that
+says `We are open {{opening_hours}}.` produces `variable-undefined` when a
+squad uses it without defining `opening_hours`. Normal validate and push
+warn; `--strict` makes the finding blocking in both, including scoped pushes.
+This is a static squad check, not a guarantee about values supplied on a live
+call. Give every variable a value in each squad that uses the block; see
+[Override Merge Order](../learnings/squads.md#override-merge-order).
 
 **Two mistakes are warnings today, not errors.** `validate` prints them and
 still passes:
@@ -596,6 +613,11 @@ run at all:
   `promote`) were run from a terminal instead.
 - **Live simulations.** The PR check was built with `--dry-run`, so no
   simulation ran.
+
+That run predates the current adoption/link preflight and undefined-variable
+checks. The descriptions of those checks above reflect the current engine;
+the old first-deploy refusal output has been replaced with a description of
+the grouped report.
 
 The stand-in is not Vapi. Where a result depends on how the API stores an
 update, as with the dashboard-only setting in step 5, check it on your own
