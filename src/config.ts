@@ -93,6 +93,7 @@ function parseFlags(): {
       arg === "--bootstrap" ||
       arg === "--dry-run" ||
       arg === "--strict" ||
+      arg === "--json" ||
       arg === "--overwrite" ||
       arg === "--allow-new-files"
     )
@@ -221,7 +222,9 @@ function loadEnvFile(env: string, baseDir: string): Record<string, string> {
           process.env[key] = value;
         }
       }
-      console.log(`📁 Loaded env file: ${basename(envFile)}`);
+      (process.argv.includes("--json") ? console.error : console.log)(
+        `📁 Loaded env file: ${basename(envFile)}`,
+      );
     }
   }
   return fileVars;
@@ -269,7 +272,9 @@ if (!VAPI_TOKEN) {
 }
 if (API_KEY?.warning) console.warn(`⚠️  ${API_KEY.warning}`);
 else if (API_KEY && API_KEY.source !== `.env.${VAPI_ENV}`)
-  console.log(`🔑 Using the API key from ${API_KEY.source}`);
+  (process.argv.includes("--json") ? console.error : console.log)(
+    `🔑 Using the API key from ${API_KEY.source}`,
+  );
 // Some call sites read the variables directly; keep them on the key chosen
 // above, so code reading the generic name can't see another org's key.
 process.env.VAPI_PRIVATE_API_KEY = VAPI_TOKEN;

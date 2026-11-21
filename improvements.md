@@ -2092,3 +2092,8 @@ skips pull to preserve local files/state while previewing the push.
 pushed/adopted provenance; `--adopt <id>[=<uuid>]` explicitly claims remote UUIDs.
 Dry-run reports planned POST collisions, including dependencies; failed inventory
 lookups are reported as incomplete checks instead of falsely reporting none.
+
+Alias cleanup now checks canonical file content against the UUID-keyed baseline,
+removes unchanged copies, and requires approval for edited/unbaselined copies.
+Link preflight groups all stop reasons with per-file commands (exit 1); `--json`
+emits the machine-readable report. Apply runs this read-only check before pull.

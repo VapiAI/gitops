@@ -165,9 +165,11 @@ the dashboard, `apply` asks about that resource alone in a terminal; in CI or
 piped runs it's blocked unless `--resolve=ours|theirs|fail` is passed — ask
 the human which.
 
-**When a deploy stops at the new-file check** ("no state-file UUID mapping"),
-the engine can't tell whether each listed file is new, a rename, or stale.
-Show the list to the human and ask them to classify each file. Pass
+**When a deploy stops at the new-file check** ("Not linked to any resource
+in <org> yet"), the grouped report lists every blocking file with exact fix
+commands. The engine cannot tell new / renamed / stale files apart; pushing
+an unlinked file creates a new resource. Show the report and ask the human
+to choose per file. Pass
 `--allow-new-files` only once they confirm every file is genuinely new. For a
 rename, see [Renaming](#naming-and-renaming); delete stale files.
 Same-named org resources are NOT linked automatically. Preview with
@@ -180,6 +182,17 @@ Adoption removes unchanged alias files automatically using the last-synced
 baseline. Edited aliases or missing baselines require per-file y/N approval;
 headless runs stop before changing files/state or the platform. Merge edits
 into the adopted file or remove the alias manually, then rerun.
+
+**Running in CI:** link/adoption preflight stops with exit code **1**, before
+file deletion, state writes or API mutations. It groups unlinked files, invalid
+adoptions and unsafe alias deletions once. `--json` prints one array of
+`{file, resourceType, problem, fix, command}` to stdout (other logs go to stderr);
+`[]` means this preflight found no blockers, not that deployment cannot fail.
+A combined command is suggested only when every file has an unambiguous
+suggestion; otherwise the report names files needing human choice. No flags
+are needed to remove a verified unchanged leftover of an already-adopted
+resource. The engine never auto-adopts, auto-allows new files or deletes edited
+files without approval.
 
 If something goes wrong: `npm run rollback -- <org> --list`, then (with a yes)
 `--to <timestamp>`. Details for every workflow:

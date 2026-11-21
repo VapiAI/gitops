@@ -229,7 +229,7 @@ npm run cleanup -- <org> --force --confirm <org>
 ```
 
 Cleanup treats every platform resource that isn't in
-`.vapi-state.<org>.json` as an orphan, except those matched by
+`.vapi-state.<org>.json` as unmanaged, except those matched by
 `resources/<org>/.vapi-ignore`: it lists those as retained and never deletes
 them. Still read the dry-run list before a destructive run.
 
@@ -240,7 +240,7 @@ through the API, then refresh state:
 
 ```bash
 curl -X DELETE -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
-  https://api.vapi.ai/assistant/<orphan-uuid>
+  https://api.vapi.ai/assistant/<resource-uuid>
 npm run pull -- <org> --bootstrap
 ```
 

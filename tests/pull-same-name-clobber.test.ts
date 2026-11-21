@@ -61,7 +61,9 @@ function startStub(
       const server = http.createServer((req, res) => {
         const url = req.url || '';
         const method = (req.method || 'GET').toUpperCase();
-        requests.push({ method, url });
+        const request = { method, url, body: '' };
+        requests.push(request);
+        req.on('data', chunk => { request.body += chunk.toString(); });
         if (url === '/__requests') {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(requests));
@@ -666,7 +668,23 @@ for (const command of ["push", "apply"]) {
   });
 }
 
-for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
+for (const mode of [
+  "push",
+  "apply",
+  "dry-run",
+  "dry-run-json",
+  "edited",
+  "missing-baseline",
+  "automatic",
+  "edited-apply",
+  "grouped-json",
+  "grouped-text",
+  "grouped-apply",
+  "grouped-safe",
+  "suggestions",
+  "suggestions-approved",
+  "ambiguous",
+]) {
   test(`adoption cleans alias files safely: ${mode}`, async () => {
     const dir = mkdtempSync(join(tmpdir(), "vapi-alias-"));
     cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
@@ -688,7 +706,11 @@ for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
         join(hashes, UUID_A),
         hashPayload(parseResourceDataFromFile(alias)),
       );
-    if (mode === "edited")
+    if (
+      mode === "edited" ||
+      (mode.startsWith("grouped") && mode !== "grouped-safe") ||
+      mode === "edited-apply"
+    )
       writeFileSync(
         alias,
         PREEXISTING_RILEY_MD.replace("A-original", "edited"),
@@ -696,7 +718,10 @@ for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
     const originalAlias = readFileSync(alias, "utf8");
     const statePath = join(dir, `.vapi-state.${ENV}.json`);
     const initial = JSON.stringify({
-      assistants: { "riley-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
+      assistants:
+        mode === "automatic"
+          ? { riley: { uuid: UUID_A, origin: "adopted" } }
+          : { "riley-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
       credentials: { fake: { uuid: "cred" } },
     });
     writeFileSync(statePath, initial);
@@ -709,7 +734,13 @@ for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
       {
         method: "GET",
         pathStartsWith: "/assistant",
-        body: [rileyDashboardBody(UUID_A, "A")],
+        body: [
+          rileyDashboardBody(UUID_A, "A"),
+          ...(mode === "ambiguous" ? [rileyDashboardBody(UUID_B, "B")] : []),
+          ...(mode === "suggestions-approved"
+            ? [{ ...rileyDashboardBody(UUID_B, "B"), name: "New Remote" }]
+            : []),
+        ],
       },
       {
         method: "PATCH",
@@ -733,25 +764,125 @@ for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
         },
       );
     try {
-      const res = run(mode === "apply" ? "apply" : "push", [
-        "--adopt",
-        "riley",
-        ...(mode === "dry-run" ? ["--dry-run"] : []),
-      ]);
-      const blocked = mode === "edited" || mode === "missing-baseline";
+      if (mode === "suggestions-approved")
+        writeFileSync(
+          join(assistants, "new.md"),
+          PREEXISTING_RILEY_MD.replace("name: Riley", "name: New Remote"),
+        );
+      if (mode.startsWith("grouped"))
+        writeFileSync(
+          join(assistants, "new.md"),
+          PREEXISTING_RILEY_MD.replace("name: Riley", "name: Brand New"),
+        );
+      const res = run(
+        mode === "apply" || mode === "edited-apply" || mode === "grouped-apply"
+          ? "apply"
+          : "push",
+        [
+          ...(["automatic", "suggestions", "ambiguous"].includes(mode)
+            ? []
+            : ["--adopt", "riley"]),
+          ...(mode.startsWith("grouped")
+            ? ["--adopt", "absent", "--adopt", "other-missing"]
+            : []),
+          ...(mode === "grouped-json" ||
+          mode === "grouped-apply" ||
+          mode === "dry-run-json"
+            ? ["--json"]
+            : []),
+          ...(mode === "dry-run" || mode === "dry-run-json"
+            ? ["--dry-run"]
+            : []),
+        ],
+      );
+      const blocked =
+        mode === "edited" ||
+        mode === "missing-baseline" ||
+        mode === "edited-apply" ||
+        mode === "suggestions" ||
+        mode === "suggestions-approved" ||
+        mode === "ambiguous" ||
+        mode.startsWith("grouped");
       assert.equal(res.status, blocked ? 1 : 0, res.stdout + res.stderr);
-      if (blocked || mode === "dry-run") {
+      if (blocked || mode === "dry-run" || mode === "dry-run-json") {
         assert.equal(readFileSync(alias, "utf8"), originalAlias);
         assert.equal(readFileSync(statePath, "utf8"), initial);
         assert.match(
           res.stdout + res.stderr,
-          blocked ? /Delete it by hand/ : /would delete .*riley-aaaaaaaa.md/,
+          mode.startsWith("suggestions") || mode === "ambiguous"
+            ? /Not linked to any resource/
+            : mode === "grouped-safe"
+              ? /no such file/
+              : blocked
+                ? /Delete it by hand/
+                : /would delete .*riley-aaaaaaaa.md/,
         );
+        if (mode === "dry-run-json")
+          assert.deepEqual(JSON.parse(res.stdout), []);
         const requests = (await (
           await fetch(`http://127.0.0.1:${port}/__requests`)
         ).json()) as { method: string }[];
         assert.ok(requests.every((r) => r.method === "GET"));
+        if (mode !== "missing-baseline")
+          assert.ok(existsSync(join(hashes, UUID_A)));
+        if (mode === "grouped-json" || mode === "grouped-apply") {
+          const issues = JSON.parse(res.stdout);
+          assert.equal(issues.length, 4, res.stdout);
+          assert.ok(
+            issues.some((issue: { file: string }) =>
+              issue.file.endsWith("riley-aaaaaaaa.md"),
+            ),
+          );
+          assert.ok(
+            issues.some((issue: { file: string }) =>
+              issue.file.endsWith("new.md"),
+            ),
+          );
+          assert.ok(
+            issues.some((issue: { file: string }) => issue.file === "absent"),
+          );
+          assert.doesNotMatch(res.stdout + res.stderr, /orphan/i);
+        }
+        if (mode === "suggestions") {
+          assert.match(
+            res.stderr,
+            /Suggested command.*npm run push -- test-clobber --adopt riley resources\/test-clobber\/assistants\/riley.md/,
+          );
+        }
+        if (mode === "suggestions-approved") {
+          assert.match(
+            res.stderr,
+            /Suggested command.*--adopt riley resources\/test-clobber\/assistants\/riley.md --adopt new resources\/test-clobber\/assistants\/new.md/,
+          );
+        }
+        if (mode === "ambiguous") {
+          assert.doesNotMatch(res.stderr, /Suggested command/);
+          assert.match(res.stderr, new RegExp("--adopt riley=" + UUID_A));
+          assert.match(res.stderr, new RegExp("--adopt riley=" + UUID_B));
+          assert.match(res.stderr, /Human choice needed/);
+        }
+        if (mode === "grouped-text") {
+          assert.equal(res.stderr.match(/Push stopped:/g)?.length, 1);
+          assert.doesNotMatch(res.stderr, /Apply failed|orphan/i);
+        }
       } else {
+        const requests = (await (
+          await fetch(`http://127.0.0.1:${port}/__requests`)
+        ).json()) as { method: string; body: string }[];
+        assert.equal(
+          requests.filter((request) => request.method === "PATCH").length,
+          1,
+          JSON.stringify(requests),
+        );
+        assert.ok(
+          requests.every(
+            (request) => request.method === "GET" || request.method === "PATCH",
+          ),
+        );
+        assert.match(
+          requests.find((request) => request.method === "PATCH")!.body,
+          /marker:A-original/,
+        );
         assert.equal(existsSync(alias), false);
         assert.match(
           res.stdout,
@@ -764,7 +895,7 @@ for (const mode of ["push", "apply", "dry-run", "edited", "missing-baseline"]) {
         const next = run("push", []);
         assert.doesNotMatch(
           next.stdout + next.stderr,
-          /Push refused|Files without state entry/,
+          /Push stopped|Files without state entry/,
         );
         assert.equal(existsSync(alias), false);
       }

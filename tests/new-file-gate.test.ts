@@ -341,38 +341,40 @@ test("formatGateMessage: includes all orphan relative paths", () => {
   assert.ok(out.includes("resources/test/tools/bar.yml"));
 });
 
-test("formatGateMessage: includes the rename-sources block with state-only entries", () => {
-  const out = formatGateMessage(sampleReport(), "test-env", { color: false });
-  assert.match(out, /possible rename SOURCES/);
-  assert.match(out, /assistants\/old-foo/);
-  // Short UUID display (first 8 chars).
-  assert.match(out, /64df6206/);
+test("formatGateMessage: every file has exact fix commands", () => {
+  const out = formatGateMessage(sampleReport(), "test-env");
+  assert.match(
+    out,
+    /npm run push -- test-env --allow-new-files resources\/test\/assistants\/foo.md/,
+  );
+  assert.match(out, /rm -- resources\/test\/tools\/bar.yml/);
+  assert.doesNotMatch(out, /orphan/i);
 });
 
 test("formatGateMessage: includes the AI-agent paragraph and the --allow-new-files hint", () => {
   const out = formatGateMessage(sampleReport(), "test-env", { color: false });
-  assert.match(out, /FOR AI AGENTS/);
-  assert.match(out, /do NOT auto-pass --allow-new-files/);
+  assert.match(out, /explicit approval/);
+  assert.match(out, /Do not auto-pass --adopt or --allow-new-files/);
   assert.match(out, /--allow-new-files/);
 });
 
 test("formatGateMessage: scopedToPaths=true surfaces the scope note", () => {
   const report = { ...sampleReport(), scopedToPaths: true };
   const out = formatGateMessage(report, "test-env", { color: false });
-  assert.match(out, /scoped to the selective-push file set/);
+  assert.match(out, /Not linked to any resource/);
 });
 
 test("formatGateMessage: empty rename-sources block prints '(none — …)' message", () => {
   const report = { ...sampleReport(), possibleRenameSources: [] };
   const out = formatGateMessage(report, "test-env", { color: false });
-  assert.match(out, /no plausible rename pairings found/);
+  assert.match(out, /Human choice needed/);
 });
 
 test("formatGateMessage: environment name appears in the headline", () => {
   const out = formatGateMessage(sampleReport(), "prod-cluster", {
     color: false,
   });
-  assert.match(out, /env "prod-cluster"/);
+  assert.match(out, /for prod-cluster/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -536,9 +538,9 @@ test("integration: orphan + no flag + --dry-run → exit 1, gate fires, no API c
       1,
       `expected exit 1; stdout=${res.stdout}\nstderr=${res.stderr}`,
     );
-    assert.match(res.stderr, /Push refused/);
+    assert.match(res.stderr, /Push stopped/);
     assert.match(res.stderr, /resources\/[^/]+\/assistants\/foo\.md/);
-    assert.match(res.stderr, /FOR AI AGENTS/);
+    assert.match(res.stderr, /explicit approval/);
     // The gate must fire BEFORE the apply loops — no "would PATCH/POST" lines
     // should appear for the orphan.
     assert.doesNotMatch(res.stdout, /would (PATCH|POST)/);
@@ -560,11 +562,11 @@ test("integration: orphan + --allow-new-files + --dry-run → gate bypassed with
     // gate is the only thing that would exit 1 in this minimal fixture).
     assert.match(
       res.stdout,
-      /bypassing new-file gate/,
+      /Would create/,
       `expected bypass notice; stdout=${res.stdout}`,
     );
     // The gate's error message must NOT appear when bypassed.
-    assert.doesNotMatch(res.stderr, /Push refused/);
+    assert.doesNotMatch(res.stderr, /Push stopped/);
   } finally {
     fx.cleanup();
   }
@@ -580,7 +582,7 @@ test("integration: orphan + --bootstrap → gate suppressed (bootstrap legitimat
   try {
     const res = runPush(fx, ["--dry-run", "--bootstrap"]);
     // The gate must not fire under --bootstrap.
-    assert.doesNotMatch(res.stderr, /Push refused/);
+    assert.doesNotMatch(res.stderr, /Push stopped/);
     assert.doesNotMatch(res.stdout, /bypassing new-file gate/);
   } finally {
     fx.cleanup();
@@ -619,7 +621,7 @@ test("integration: selective push with orphan OUTSIDE the selection → gate doe
     // the gate must scope to the file set and not block.
     assert.doesNotMatch(
       res.stderr,
-      /Push refused/,
+      /Push stopped/,
       `gate should not fire for orphan outside selection; stderr=${res.stderr}`,
     );
   } finally {
@@ -646,7 +648,7 @@ test("integration: bootstrap UUID-suffixed mapping never takes over a local slug
     const before = readFileSync(statePath, "utf8");
     const res = runPush(fx, []);
     assert.equal(res.code, 1, res.stdout + res.stderr);
-    assert.match(res.stderr, /Push refused/);
+    assert.match(res.stderr, /Push stopped/);
     assert.match(res.stderr, /NOT linked/);
     assert.match(res.stderr, /--adopt foo/);
     assert.doesNotMatch(

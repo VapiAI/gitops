@@ -1,16 +1,11 @@
 import { select } from "@inquirer/prompts";
 import { relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import { adoptResources } from "./adopt.ts";
-import { cleanupAdoptionAliases } from "./adopt-alias-files.ts";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
-  ADOPT_TARGETS,
-  ALLOW_NEW_FILES,
   APPLY_FILTER,
   BASE_DIR,
-  BOOTSTRAP_SYNC,
   DRY_RUN,
   FORCE_DELETE,
   loadIgnorePatterns,
@@ -29,12 +24,13 @@ import {
 } from "./dep-dedup.ts";
 import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
 import { deleteBaseline, writeBaseline } from "./hash-store.ts";
+import { prepareResourceLinks } from "./link-preflight.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { NameCollisionReport } from "./name-collisions.ts";
-import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
+import { formatStopReport, jsonStopReport } from "./stop-report.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   summarizeFindings,
@@ -1593,7 +1589,11 @@ async function ensureAssistantExists(
 // Main Apply Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
+const reportOutput = console.log.bind(console);
+
 async function main(): Promise<void> {
+  const json = process.argv.includes("--json");
+  if (json) console.log = console.error.bind(console);
   dryRunCollisions = DRY_RUN
     ? new NameCollisionReport(
         async (type) => (await fetchAllResources(type)) as RemoteResource[],
@@ -1720,57 +1720,41 @@ async function main(): Promise<void> {
       evals: allEvalsRaw,
     };
 
-    state = await maybeBootstrapState(loadedResources, state);
-    const removedAliasIds = new Set<string>();
-    state = await adoptResources({
-      targets: ADOPT_TARGETS,
+    const inventories = new Map<ResourceType, Promise<RemoteResource[]>>();
+    const links = await prepareResourceLinks({
       resources: loadedResources,
       state,
       touched,
-      getRemoteList: async (type) =>
-        (await fetchAllResources(type)) as RemoteResource[],
-      dryRun: DRY_RUN,
-      cleanupAliases: async (aliases) => {
-        await cleanupAdoptionAliases(aliases, loadedResources);
-        for (const alias of aliases)
-          removedAliasIds.add(`${alias.type}:${alias.resourceId}`);
+      getRemoteList: (type) => {
+        let inventory = inventories.get(type);
+        if (!inventory) {
+          inventory = (dryRunCollisions?.getRemoteList(type) ??
+            fetchAllResources(type)) as Promise<RemoteResource[]>;
+          inventories.set(type, inventory);
+        }
+        return inventory;
       },
     });
-
-    // Orphan-YAML pre-flight gate. Runs ONCE for ALL resource types after
-    // bootstrap (so state-recovery has a chance to rekey first) and BEFORE
-    // any apply phase. Halts push when local files exist with no state entry
-    // — the duplicate-creation pattern we surfaced in a customer fork's
-    // working session 2026-05-13 (see src/new-file-gate.ts for context).
-    //
-    // Skipped during explicit `--bootstrap` runs: a bootstrap is supposed to
-    // populate state from scratch, so every local file legitimately lacks a
-    // state entry at that point.
-    if (!BOOTSTRAP_SYNC) {
-      const orphanReport = detectOrphanYamls({
-        state,
-        filePathFilter: APPLY_FILTER.filePaths,
-      });
-      orphanReport.orphans = orphanReport.orphans.filter(
-        (file) => !removedAliasIds.has(`${file.type}:${file.resourceId}`),
-      );
-      if (orphanReport.orphans.length > 0) {
-        if (ALLOW_NEW_FILES) {
-          const verb = DRY_RUN ? "would create" : "creating";
-          console.log(
-            `   ⚠️  bypassing new-file gate: ${verb} ${orphanReport.orphans.length} new resource(s) on the dashboard`,
-          );
-        } else {
-          console.error(
-            formatGateMessage(orphanReport, VAPI_ENV, {
-              color: process.stderr.isTTY === true,
-            }),
-          );
-          process.exit(1);
+    if (links.issues.length) {
+      if (json) reportOutput(jsonStopReport(links.issues));
+      else console.error(formatStopReport(links.issues, VAPI_ENV));
+      process.exit(1);
+    }
+    await links.commit();
+    state = links.preview;
+    state = await maybeBootstrapState(loadedResources, state);
+    for (const type of ALL_RESOURCE_TYPES) {
+      for (const [id, entry] of Object.entries(links.preview[type])) {
+        if (entry.origin !== "adopted") continue;
+        for (const [key, value] of Object.entries(state[type])) {
+          if (key !== id && value.uuid === entry.uuid) {
+            delete state[type][key];
+            if (!DRY_RUN) touched[type].add(key);
+          }
         }
+        state[type][id] = entry;
       }
     }
-
     preflightComplete = true;
     // Run client-side validators against the loaded resource set. In default
     // mode, errors are surfaced as warnings so a single bad spec doesn't block
@@ -2269,6 +2253,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } finally {
+    if (json && preflightComplete) reportOutput("[]");
     // Always flush state, even on partial failure — resources that already
     // received UUIDs from the API must be recorded so the next run does not
     // re-create them.

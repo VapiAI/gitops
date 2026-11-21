@@ -19,9 +19,12 @@ const BASE_DIR = join(__dirname, "..");
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-function runPassthrough(cmd: string): number {
+function runPassthrough(cmd: string, quiet = false): number {
   try {
-    execSync(cmd, { cwd: BASE_DIR, stdio: "inherit" });
+    execSync(cmd, {
+      cwd: BASE_DIR,
+      stdio: quiet ? ["inherit", 2, 2] : "inherit",
+    });
     return 0;
   } catch (error: unknown) {
     return (error as { status?: number }).status ?? 1;
@@ -29,6 +32,9 @@ function runPassthrough(cmd: string): number {
 }
 
 export async function runApply(): Promise<void> {
+  const output = console.log.bind(console);
+  const json = process.argv.includes("--json");
+  if (json) console.log = console.error.bind(console);
   const env = process.argv[2];
   const allArgs = process.argv.slice(3);
   parseAdoptArgs(allArgs);
@@ -86,7 +92,7 @@ export async function runApply(): Promise<void> {
       "                     will also be deleted from the platform.",
     );
     console.error(
-      "  --allow-new-files  Bypass the orphan-YAML pre-flight gate (push stage).",
+      "  --allow-new-files  Approve creating resources for unlinked files (push stage).",
     );
     console.error(
       "                     Use only after confirming every local file without a",
@@ -96,6 +102,9 @@ export async function runApply(): Promise<void> {
     );
     console.error(
       "  --adopt <id>[=<uuid>]  Explicitly take over a remote resource (repeatable).",
+    );
+    console.error(
+      "  --json             Print the link-preflight report as a JSON array on stdout.",
     );
     console.error(
       "  --resolve=defer    On 3-way drift, ask per resource at push time (default).",
@@ -129,7 +138,7 @@ export async function runApply(): Promise<void> {
   // this is the same check as `npm run validate`, just built in. It stays
   // available standalone for CI / pre-flight use.
   const validateCmd = `npx tsx src/validate-cmd.ts ${env}`;
-  const validateExit = runPassthrough(validateCmd);
+  const validateExit = runPassthrough(validateCmd, json);
   if (validateExit !== 0) {
     console.error(
       "\n❌ Validation failed — fix the schema errors above before applying.",
@@ -138,17 +147,13 @@ export async function runApply(): Promise<void> {
   }
 
   const pullCmd = `npx tsx src/pull.ts ${env} ${pullArgs}`.trim();
-  if (!process.stdin.isTTY && parseAdoptArgs(allArgs).length) {
-    const { preflightApplyAliases } = await import(
-      "./adopt-apply-preflight.ts"
-    );
-    await preflightApplyAliases(parseAdoptArgs(allArgs));
-  }
+  const { preflightApplyLinks } = await import("./adopt-apply-preflight.ts");
+  await preflightApplyLinks(output);
   if (dryRun)
     console.log(
       "\n🧪 Dry-run: skipping pull to preserve local files and state.",
     );
-  const pullExit = dryRun ? 0 : runPassthrough(pullCmd);
+  const pullExit = dryRun ? 0 : runPassthrough(pullCmd, json);
   if (pullExit !== 0) {
     console.error("\n❌ Pull had issues. Resolve conflicts before pushing.");
     process.exit(1);
@@ -158,7 +163,6 @@ export async function runApply(): Promise<void> {
   const pushCmd = `npx tsx src/push.ts ${env} ${pushArgs}`.trim();
   const pushExit = runPassthrough(pushCmd);
   if (pushExit !== 0) {
-    console.error("\n❌ Push failed!");
     process.exit(1);
   }
 

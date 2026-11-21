@@ -238,7 +238,7 @@ export async function deleteOrphanedResources(
       const loadedIds = loadedResources[type].map((r) => r.resourceId);
       if (!loadedIds.includes(id)) {
         retainedLogLines.push(
-          `  🚫 ${type}/${id} retained (matched .vapi-ignore — orphan-protected)`,
+          `  🚫 ${type}/${id} retained (matched .vapi-ignore — protected from deletion)`,
         );
       }
     }
@@ -373,7 +373,7 @@ export async function deleteOrphanedResources(
 
   // No orphaned resources - nothing to do
   if (allOrphaned.length === 0) {
-    console.log("  ✅ No orphaned resources found\n");
+    console.log("  ✅ No tracked resources are missing local files\n");
     return;
   }
 
@@ -447,7 +447,9 @@ export async function deleteOrphanedResources(
   }
 
   // Force mode: actually delete (already in reverse dependency order)
-  console.log("  ⚠️  DELETING ORPHANED RESOURCES (--force enabled):\n");
+  console.log(
+    "  ⚠️  DELETING RESOURCES WITHOUT LOCAL FILES (--force enabled):\n",
+  );
 
   let deleted = 0;
   for (const { resourceId, uuid, type, stateKey } of safeToDelete) {
@@ -470,7 +472,7 @@ export async function deleteOrphanedResources(
     }
   }
 
-  console.log(`\n  ✅ Deleted ${deleted} orphaned resource(s)`);
+  console.log(`\n  ✅ Deleted ${deleted} resource(s) without local files`);
   if (blocked.length > 0) {
     console.log(`  ⛔ Skipped ${blocked.length} resource(s) still referenced`);
   }
