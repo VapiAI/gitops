@@ -4,6 +4,17 @@ A block is a piece of prompt text or config that lives in one file and is
 used by many resources. Change the block and every assistant and squad that
 includes it changes with it, in every org.
 
+`validate` checks Liquid variables after expanding blocks. For each squad member,
+`variable-undefined` warns about root names missing from the member's
+`assistantOverrides.variableValues` and the squad's `membersOverrides.variableValues`.
+It checks system prompts, first/voicemail/end-call messages, and attached tools,
+including `tools:append`. Vapi built-ins, squad tool/handoff extraction schema
+properties and alias keys, and Liquid assign/capture/loop locals count as defined.
+Raw blocks and tool code are ignored. Standalone assistants are not checked:
+their variables can be supplied at call time. This is a static check, not proof
+that an extraction tool runs before a variable is used. Use `--strict` with
+validate or push to make missing squad variables blocking.
+
 There are two kinds:
 
 | Kind | File | Included with | Use it for |
