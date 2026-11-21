@@ -52,9 +52,19 @@ test("assistant POST/PATCH and response baselines share the folder-free hash bas
       await applyAssistant({ resourceId: 'support/tier2/intake', filePath: '', data }, state);
       assert.equal(requests[0].method, 'POST');
       assert.deepEqual(requests[0].body.metadata, { team: 'support', folderPath: 'support/tier2' });
+      assert.deepEqual(state.assistants['support/tier2/intake'], { uuid: 'uuid', origin: 'pushed' });
       assert.equal(readBaseline('folder-test', 'uuid'), hashPayload(data));
       requests.length = 0;
-      state.assistants.intake = { uuid: 'uuid' };
+      const { adoptResources } = await import('./src/adopt.ts');
+      const resources = Object.fromEntries(Object.keys(state).filter(k => k !== 'credentials').map(k => [k, []]));
+      resources.assistants = [{ resourceId: 'intake', filePath: '', data }];
+      const touched = Object.fromEntries(Object.keys(resources).map(k => [k, new Set()]));
+      await adoptResources({
+        targets: ['intake=uuid'], resources, state, touched,
+        getRemoteList: async () => [{ id: 'uuid', name: 'Intake' }], dryRun: false,
+      });
+      assert.equal(state.assistants['support/tier2/intake'], undefined);
+      assert.deepEqual(state.assistants.intake, { uuid: 'uuid', origin: 'adopted' });
       await applyAssistant({ resourceId: 'intake', filePath: '', data }, state);
       const patch = requests.find(r => r.method === 'PATCH' && r.body.name === 'Intake');
       assert.deepEqual(patch.body.metadata, { team: 'support', folderPath: null });

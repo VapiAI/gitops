@@ -14,7 +14,8 @@ import { existsSync, readdirSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
 import { basename, dirname, join } from "path";
 import { HASH_STORE_ROOT, readBaseline, writeBaseline } from "./hash-store.ts";
-import { sortedKeysReplacer } from "./state-serialize.ts";
+import { asResourceState, sortedKeysReplacer } from "./state-serialize.ts";
+import type { ResourceState } from "./types.ts";
 
 // Repo root, derived from the hash store's known location (single source).
 const BASE_DIR = dirname(HASH_STORE_ROOT);
@@ -40,7 +41,7 @@ function isLegacyEntry(value: unknown): boolean {
   if (typeof value === "string") return true;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const keys = Object.keys(value as Record<string, unknown>);
-    return keys.some((k) => k !== "uuid");
+    return keys.some((k) => k !== "uuid" && k !== "origin");
   }
   return false;
 }
@@ -71,7 +72,9 @@ function isSection(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function discoverStateFiles(baseDir: string): Array<{ org: string; path: string }> {
+function discoverStateFiles(
+  baseDir: string,
+): Array<{ org: string; path: string }> {
   const out: Array<{ org: string; path: string }> = [];
   for (const name of readdirSync(baseDir)) {
     const m = STATE_FILE_RE.exec(name);
@@ -93,7 +96,7 @@ async function migrateOne(
   let seeded = 0;
   let skipped = 0;
   let needsSlim = false;
-  const slim: Record<string, Record<string, { uuid: string }>> = {};
+  const slim: Record<string, Record<string, ResourceState>> = {};
 
   for (const [sectionKey, section] of Object.entries(raw)) {
     if (!isSection(section)) {
@@ -102,7 +105,7 @@ async function migrateOne(
       (slim as Record<string, unknown>)[sectionKey] = section;
       continue;
     }
-    const slimSection: Record<string, { uuid: string }> = {};
+    const slimSection: Record<string, ResourceState> = {};
     for (const [resourceId, value] of Object.entries(section)) {
       if (isLegacyEntry(value)) needsSlim = true;
       const uuid = uuidOf(value);
@@ -118,7 +121,7 @@ async function migrateOne(
           skipped++;
         }
       }
-      slimSection[resourceId] = { uuid };
+      slimSection[resourceId] = asResourceState(value)!;
     }
     slim[sectionKey] = slimSection;
   }
@@ -132,7 +135,13 @@ async function migrateOne(
     await rename(tmpPath, stateFilePath);
   }
 
-  return { org, stateFile: basename(stateFilePath), seeded, skipped, slimmed: needsSlim };
+  return {
+    org,
+    stateFile: basename(stateFilePath),
+    seeded,
+    skipped,
+    slimmed: needsSlim,
+  };
 }
 
 // Migrate every `.vapi-state.<org>.json` in the repo root: seed missing

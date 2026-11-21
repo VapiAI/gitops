@@ -5,7 +5,7 @@
 Resources are scoped by organization, with names you choose (not fixed `dev`/`stg`/`prod`). Each org gets:
 
 - `.env.<org>` — private API key and base URL
-- `.vapi-state.<org>.json` — resource name ↔ UUID mappings (nothing else — committed)
+- `.vapi-state.<org>.json` — resource ID ↔ UUID mappings and optional origin (committed)
 - `.vapi-state-hash/<org>/<uuid>` — last-seen platform content hash per resource, used for drift detection (per-developer, gitignored)
 - `resources/<org>/` — all resource files
 
@@ -42,7 +42,52 @@ files
 
 **`push`** — reads local files and syncs them to the platform: creates and updates. It deletes platform resources whose files you removed only when you pass `--force`.
 
-**`apply`** — runs `pull` then `push` in sequence.
+**`apply`** — runs `pull` then `push` in sequence. With `--dry-run`, it skips
+pull (which writes local files/state) and previews push with read-only GETs.
+
+### Running in CI
+
+Push/apply link preflight reports all blocking files in one **Push stopped**
+block and exits **1**, before API mutations, state writes or alias deletion.
+"Not linked to any resource in <org> yet" means pushing would create a new
+resource; the engine cannot infer new versus renamed/stale intent.
+
+Each file has exact commands: approve `--allow-new-files` for genuinely new
+resources, approve `--adopt <id>[=<uuid>]` for a takeover, or merge needed edits
+and remove a renamed/stale file. A single ready-to-run combined command appears
+only when every file has an unambiguous suggestion; otherwise the report lists
+which files need human choice. Suggestions are not authorization to execute.
+
+`--json` on push or apply prints one stdout array of
+`{file, resourceType, problem, fix, command}`; ordinary logs go to stderr.
+The exit code stays 1 for blockers. `[]` means no link-preflight blockers,
+not a guarantee that later network/validation/deployment steps will succeed.
+Use `--dry-run --json` for a read-only preview. With npm, use
+`npm run -s push -- <org> --dry-run --json` to suppress npm's banner.
+
+Safe, unchanged leftover alias files are removed automatically, including
+UUID-suffixed leftovers of an already-adopted mapping on a later plain push.
+Edited/unbaselined files need per-file y/N approval in a terminal and stop CI.
+The engine never auto-adopts, auto-passes the new-file flag or silently deletes
+edited files.
+
+### Names never authorize taking over org resources
+
+Pull keeps existing UUID mappings and filenames stable. An unknown UUID always
+gets a separate `<name-slug>-<uuid8>` ID, even if a same-named local file exists.
+Neither pull nor push automatically collapses that key onto a local filename.
+
+A file without a state mapping remains subject to the new-file gate. After
+confirming it is genuinely new, preview `--dry-run --allow-new-files` and review
+the final **Name collisions** list. It compares every planned POST, including
+auto-created dependencies, with state and live dashboard names. Matching names
+do not change the plan into a takeover. GETs run; platform mutations do not.
+
+To take over a resource intentionally, obtain explicit human approval and use
+`--adopt <id>[=<uuid>]`. Adoption links an untracked local file before the gate
+and normal PATCH flow. Dependency alias reuse is restricted to state entries
+with `origin: pushed` or `origin: adopted`; pulled and legacy entries do not
+authorize new name-based links. Existing exact-key legacy links remain intact.
 
 ## Conflicts and the drift gate
 
@@ -53,7 +98,7 @@ Before updating a resource, push GETs its current dashboard payload, hashes it, 
 - **Hashes match** → your local edit is the natural next step in the change chain → pushed silently, and the baseline is refreshed from the PATCH **response** (what the platform actually stored).
 - **Hashes differ** → someone else published changes since your last sync. In a terminal, push asks **for that resource only**: ① push my local version (take ownership) ② keep the dashboard version (skip, local untouched) ③ save the dashboard version as `<name>.<TIMESTAMP>.bkp.<ext>` beside your file and skip, for a manual merge. In CI / piped runs the resource is blocked instead (use `--overwrite` to push unconditionally).
 
-Backup copies (`*.bkp.*`, gitignored) are merge reference material only — invisible to the loader, the orphan gate, audit, the interactive picker, and explicit CLI paths.
+Backup copies (`*.bkp.*`, gitignored) are merge reference material only — invisible to the loader, the new-file check, audit, the interactive picker, and explicit CLI paths.
 
 ## Reading pull and push output
 
@@ -77,7 +122,7 @@ Mental model: `⬆️` flows UP (push), `⬇️` flows DOWN (pull), `📝` is th
 
 ## Listing completeness
 
-Vapi list endpoints cap a response at 100 items and expose no page cursor — only `createdAt` comparison filters. The engine pages backwards through `createdAt` until it gets a short page, so pull, push's invalid-mapping detection, `delete`'s orphan sweep, `audit`, and the credential reverse-map all see the whole type instead of the first hundred. When completeness cannot be proven — an endpoint that ignores the cursor params, a payload with no `createdAt`, or the page-count backstop — the engine says so on stderr. Treat that warning as "do not infer deletion from absence for this type".
+Vapi list endpoints cap a response at 100 items and expose no page cursor — only `createdAt` comparison filters. The engine pages backwards through `createdAt` until it gets a short page, so pull, push's invalid-mapping detection, `delete`'s missing-file sweep, `audit`, and the credential reverse-map all see the whole type instead of the first hundred. When completeness cannot be proven — an endpoint that ignores the cursor params, a payload with no `createdAt`, or the page-count backstop — the engine says so on stderr. Treat that warning as "do not infer deletion from absence for this type".
 
 ## Processing Order
 
@@ -144,6 +189,8 @@ Tracks resource ID ↔ Vapi UUID mappings per org:
 ```
 
 Every resource type has a section. Keys are sorted, so diffs stay readable.
+New entries record `origin: pushed`, `pulled`, or `adopted`. Updates preserve
+that provenance, and legacy entries without an origin are not backfilled.
 
 ## What Vapi sees
 

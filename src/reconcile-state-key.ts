@@ -1,36 +1,9 @@
-// Generic state-key reconciliation for auto-applied dependencies.
-//
-// Both `ensureToolExists` and `ensureStructuredOutputExists` in `push.ts`
-// share a 94-line body that:
-//
-//   1. Probes for an existing dashboard / state resource whose canonical
-//      name matches the local payload (`findExistingResourceByName`), so a
-//      bootstrap-renamed state entry (`<slug>-<uuid8>`) or a live dashboard
-//      twin isn't shadowed by a brand-new POST.
-//   2. On match: rekeys state to the adopted UUID, runs the orphan-deletion
-//      guard (drop OTHER state keys pointing at the same UUID so a
-//      subsequent push doesn't DELETE the freshly-adopted dashboard
-//      resource), and PATCHes via the standard apply path so drift
-//      detection fires.
-//   3. On no match: logs the auto-apply line and runs the standard apply
-//      path (which creates).
-//   4. In BOTH branches: records `autoApplied` even when the apply returns
-//      `null` (the apply-path short-circuit that signals "skipped"), then
-//      conditionally updates state with the post-PATCH hash, increments the
-//      applied counter, pushes onto the per-type bookkeeping array, and
-//      marks the local resourceId touched.
-//
-// The two functions differ only in: resource type label (singular + plural
-// for log lines), state section, remote list fetcher, the per-type counter
-// in `applied`, the per-type bookkeeping array, and the apply function.
-// This module extracts the shared body — narrowed to `tools` /
-// `structuredOutputs` because those are the only two auto-apply paths in
-// the engine today.
+// Reuse repo-owned dependency mappings; all other name matches require adoption.
 
 import type { RemoteResource } from "./dep-dedup.ts";
 import {
-  extractResourceName,
   findExistingResourceByName,
+  warnUnownedNameMatches,
 } from "./dep-dedup.ts";
 import { upsertState } from "./state.ts";
 import type { TouchedSets } from "./state-merge.ts";
@@ -112,11 +85,10 @@ export async function reconcileStateKeyForResource(
     pushToAutoAppliedList,
     getRemoteList,
     applyFn,
-    vapiEnv,
     formatError,
   } = opts;
 
-  const { singular, plural } = LABELS[resourceType];
+  const { singular } = LABELS[resourceType];
   const stateSection = state[resourceType];
   const touchedSection = touched[resourceType];
   const resourceId = resource.resourceId;
@@ -134,13 +106,16 @@ export async function reconcileStateKeyForResource(
     remoteList,
   });
 
+  warnUnownedNameMatches({
+    resourceType,
+    localResourceId: resourceId,
+    localPayload: resource.data,
+    stateSection,
+    remoteList,
+    reusedUuid: match?.uuid,
+  });
+
   if (match) {
-    if (match.ambiguous) {
-      const displayName = extractResourceName(resource.data) ?? resourceId;
-      console.warn(
-        `  ⚠️  Multiple ${plural} share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${vapiEnv}\` to prune duplicates.`,
-      );
-    }
     console.log(
       `  🔁 Reusing existing ${singular}: ${resourceId} → ${match.uuid} (matched via ${match.source})`,
     );
@@ -148,7 +123,10 @@ export async function reconcileStateKeyForResource(
     // Re-key state to point at the adopted UUID under the local resourceId.
     // No hash yet — `applyFn` below will PATCH with the local payload and
     // record the post-PATCH hash, exercising the standard drift-check flow.
-    upsertState(stateSection, resourceId, { uuid: match.uuid });
+    upsertState(stateSection, resourceId, {
+      uuid: match.uuid,
+      origin: match.origin,
+    });
 
     // Orphan-deletion guard — drop other state keys pointing at the SAME
     // uuid so a subsequent full push doesn't see them as "tracked but no
