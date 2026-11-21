@@ -324,6 +324,8 @@ For changes under `src/`, `tests/` or `.github/`:
 - Run `npm run build` (type-checks `src/` and `tests/`) and `npm test` before
   you finish. Tests use `node:test` and must never call the real Vapi API —
   use a local HTTP stub, as the existing tests do.
+- Run `npx biome check <changed files>` before you finish. It uses the pinned
+  local Biome version and the config in `biome.json`.
 - Changing a command's flags or behaviour? Update
   [`docs/guides/commands.md`](docs/guides/commands.md) and the README command
   table in the same change.
