@@ -1,13 +1,14 @@
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import type { Environment, ResourceType } from "./types.ts";
+import { parseAdoptArgs } from "./adopt.ts";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import {
   ignorePatternsRead,
   matchesIgnore as matchesIgnorePatterns,
 } from "./resource-parse.ts";
 import { resolveResourceTypes, VALID_TYPE_ARGS } from "./resource-type-args.ts";
+import type { Environment, ResourceType } from "./types.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Argument Parsing
@@ -52,7 +53,6 @@ function parseEnvironment(): Environment {
   return envArg;
 }
 
-
 function parseFlags(): {
   forceDelete: boolean;
   bootstrapSync: boolean;
@@ -93,10 +93,17 @@ function parseFlags(): {
       arg === "--bootstrap" ||
       arg === "--dry-run" ||
       arg === "--strict" ||
+      arg === "--json" ||
       arg === "--overwrite" ||
       arg === "--allow-new-files"
     )
       continue;
+
+    if (arg === "--adopt") {
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--adopt=")) continue;
 
     // --confirm <slug>: consumed by cleanup.ts directly. Eat the value here so
     // parseFlags' strict-arg check below doesn't trip on the slug.
@@ -215,7 +222,9 @@ function loadEnvFile(env: string, baseDir: string): Record<string, string> {
           process.env[key] = value;
         }
       }
-      console.log(`📁 Loaded env file: ${basename(envFile)}`);
+      (process.argv.includes("--json") ? console.error : console.log)(
+        `📁 Loaded env file: ${basename(envFile)}`,
+      );
     }
   }
   return fileVars;
@@ -231,6 +240,7 @@ export const BASE_DIR = join(__dirname, "..");
 
 // Parse environment, flags, and load env files
 export const VAPI_ENV = parseEnvironment();
+export const ADOPT_TARGETS = parseAdoptArgs(process.argv.slice(3));
 export const {
   forceDelete: FORCE_DELETE,
   bootstrapSync: BOOTSTRAP_SYNC,
@@ -262,7 +272,9 @@ if (!VAPI_TOKEN) {
 }
 if (API_KEY?.warning) console.warn(`⚠️  ${API_KEY.warning}`);
 else if (API_KEY && API_KEY.source !== `.env.${VAPI_ENV}`)
-  console.log(`🔑 Using the API key from ${API_KEY.source}`);
+  (process.argv.includes("--json") ? console.error : console.log)(
+    `🔑 Using the API key from ${API_KEY.source}`,
+  );
 // Some call sites read the variables directly; keep them on the key chosen
 // above, so code reading the generic name can't see another org's key.
 process.env.VAPI_PRIVATE_API_KEY = VAPI_TOKEN;

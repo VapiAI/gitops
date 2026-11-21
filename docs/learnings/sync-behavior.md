@@ -143,7 +143,7 @@ stale pointer. Never blocks, never prompts.
 | Command | Behavior |
 |---|---|
 | `validate` | schema-checked like any resource |
-| `push` | **orphan-YAML gate**: refuses with exit 1, listing the file and possible rename-source candidates. Intentional — the engine can't tell "new resource" from "renamed file" from "stale cruft". After confirming it's genuinely new: `push --allow-new-files` → POST create → state entry + baseline (from response). If a dashboard resource with the **same name** already exists, the engine adopts its UUID instead of creating a duplicate (dep-dedup). |
+| `push` | **orphan-YAML gate**: refuses with exit 1, listing the file and possible rename-source candidates. Intentional — the engine can't tell "new resource" from "renamed file" from "stale cruft". After confirming it's genuinely new: `push --allow-new-files` → POST create → state entry + baseline (from response). Same-name resources are never taken over automatically: review dry-run Name collisions, then use `--adopt <id>[=<uuid>]` only with explicit approval to take one over. Dependency alias reuse requires pushed/adopted provenance. |
 | `pull` | untouched — pull only visits resources the dashboard has |
 | `apply` | pull stage no-op for it; push stage hits the gate (pass `--allow-new-files` through apply) |
 
@@ -282,7 +282,7 @@ push: the content is already live.
 | `--force` | push/apply/cleanup | enable deletions of dashboard orphans |
 | `--allow-new-files` | push/apply | bypass the orphan-YAML gate (confirm each orphan is genuinely new first) |
 | `--bootstrap` | pull | refresh state + baselines without writing resource files |
-| `--dry-run` | push | print would-be calls; no API calls, no baseline writes, no prompts |
+| `--dry-run` | push, apply | print would-be calls and Name collisions; read-only GETs, no baseline/state writes or prompts; apply skips pull |
 
 ## Interactivity rule
 

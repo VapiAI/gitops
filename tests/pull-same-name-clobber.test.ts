@@ -16,6 +16,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
+import { parseResourceDataFromFile } from "../src/resource-parse.ts";
+import { hashPayload } from "../src/state-serialize.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Integration test for the state-aware adoption fix in pull.ts.
@@ -55,9 +57,18 @@ function startStub(
       const http = require('node:http');
       const { parentPort, workerData } = require('node:worker_threads');
       const routes = workerData.routes;
+      const requests = [];
       const server = http.createServer((req, res) => {
         const url = req.url || '';
         const method = (req.method || 'GET').toUpperCase();
+        const request = { method, url, body: '' };
+        requests.push(request);
+        req.on('data', chunk => { request.body += chunk.toString(); });
+        if (url === '/__requests') {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(requests));
+          return;
+        }
         const match = routes.find(
           (r) => r.method === method && url.startsWith(r.pathStartsWith),
         );
@@ -133,6 +144,8 @@ marker:A-original
 async function runClobberScenario(
   testName: string,
   dashboardOrder: "A-first" | "B-first",
+  untracked = false,
+  bootstrap = false,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "vapi-pull-clobber-"));
 
@@ -164,7 +177,7 @@ async function runClobberScenario(
       {
         credentials: {},
         assistants: {
-          riley: { uuid: UUID_A },
+          ...(untracked ? {} : { riley: { uuid: UUID_A } }),
         },
         structuredOutputs: {},
         tools: {},
@@ -218,7 +231,14 @@ async function runClobberScenario(
     // content lands there or A's content stays).
     const res = spawnSync(
       "node",
-      ["--import", "tsx", "src/pull.ts", ENV, "--force"],
+      [
+        "--import",
+        "tsx",
+        "src/pull.ts",
+        ENV,
+        "--force",
+        ...(bootstrap ? ["--bootstrap"] : []),
+      ],
       {
         cwd: dir,
         env: {
@@ -246,7 +266,7 @@ async function runClobberScenario(
     const rileyContent = readFileSync(rileyPath, "utf-8");
     assert.match(
       rileyContent,
-      /marker:A-fresh-from-platform/,
+      untracked ? /marker:A-original/ : /marker:A-fresh-from-platform/,
       `[${testName}] riley.md must hold A's content (the file mapped to A in state); got:\n${rileyContent}`,
     );
     assert.doesNotMatch(
@@ -255,19 +275,23 @@ async function runClobberScenario(
       `[${testName}] riley.md must NOT have been clobbered by B; got:\n${rileyContent}`,
     );
 
-    // B must have landed in its own file `riley-<B[:8]>.md`.
-    const expectedBSlug = `riley-${UUID_B.slice(0, 8)}`;
-    const bPath = join(assistantsDir, `${expectedBSlug}.md`);
-    assert.ok(
-      existsSync(bPath),
-      `[${testName}] expected B's file at ${bPath}; assistants dir contents: ${readdirSync(assistantsDir).join(", ")}`,
-    );
-    const bContent = readFileSync(bPath, "utf-8");
-    assert.match(
-      bContent,
-      /marker:B-new-twin/,
-      `[${testName}] ${expectedBSlug}.md must hold B's content; got:\n${bContent}`,
-    );
+    if (bootstrap) {
+      assert.deepEqual(readdirSync(assistantsDir), ["riley.md"]);
+    } else {
+      // B must have landed in its own file `riley-<B[:8]>.md`.
+      const expectedBSlug = `riley-${UUID_B.slice(0, 8)}`;
+      const bPath = join(assistantsDir, `${expectedBSlug}.md`);
+      assert.ok(
+        existsSync(bPath),
+        `[${testName}] expected B's file at ${bPath}; assistants dir contents: ${readdirSync(assistantsDir).join(", ")}`,
+      );
+      const bContent = readFileSync(bPath, "utf-8");
+      assert.match(
+        bContent,
+        /marker:B-new-twin/,
+        `[${testName}] ${expectedBSlug}.md must hold B's content; got:\n${bContent}`,
+      );
+    }
 
     // ── State assertions ─────────────────────────────────────────────────
     const finalState = JSON.parse(
@@ -275,14 +299,23 @@ async function runClobberScenario(
     );
     assert.equal(
       finalState.assistants.riley?.uuid,
-      UUID_A,
+      untracked ? undefined : UUID_A,
       `[${testName}] state[riley] must still map to A (${UUID_A}); got ${JSON.stringify(finalState.assistants.riley)}`,
     );
+    const expectedBSlug = `riley-${UUID_B.slice(0, 8)}`;
     assert.equal(
       finalState.assistants[expectedBSlug]?.uuid,
       UUID_B,
       `[${testName}] state[${expectedBSlug}] must map to B (${UUID_B}); got ${JSON.stringify(finalState.assistants[expectedBSlug])}`,
     );
+    assert.equal(finalState.assistants[expectedBSlug].origin, "pulled");
+    if (!untracked)
+      assert.deepEqual(finalState.assistants.riley, { uuid: UUID_A });
+    else
+      assert.equal(
+        finalState.assistants[`riley-${UUID_A.slice(0, 8)}`].origin,
+        "pulled",
+      );
   } finally {
     worker.postMessage({ type: "shutdown" });
     await new Promise<void>((resolveShutdown) => {
@@ -309,3 +342,566 @@ test("pull: 2 same-name resources (B-first ordering) — fix prevents clobber re
   // sees `riley.md` as "unclaimed in flight" — but prior state has it).
   await runClobberScenario("B-first", "B-first");
 });
+
+test("pull: untracked same-name remote leaves local file alone", async () => {
+  await runClobberScenario("untracked", "A-first", true);
+});
+
+test("bootstrap pull: records pulled origin without linking local file", async () => {
+  await runClobberScenario("bootstrap", "A-first", true, true);
+});
+
+test("push POST records pushed provenance", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vapi-post-origin-"));
+  cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+  cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+  symlinkSync(
+    join(REPO_ROOT, "node_modules"),
+    join(dir, "node_modules"),
+    "dir",
+  );
+  const { worker, port } = await startStub([
+    {
+      method: "POST",
+      pathStartsWith: "/tool",
+      body: { id: UUID_A, type: "endCall" },
+    },
+  ]);
+  try {
+    const script = `
+      process.argv = ["node", "test", "test-origin"];
+      const { applyTool } = await import("./src/push.ts");
+      const { createEmptyState } = await import("./src/state.ts");
+      const state = createEmptyState();
+      await applyTool({ resourceId: "stop", data: { type: "endCall" } }, state);
+      console.log("STATE:" + JSON.stringify(state.tools.stop));
+    `;
+    const result = spawnSync(
+      "node",
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: 30000,
+        env: {
+          ...process.env,
+          VAPI_TOKEN: "fake-token-not-used",
+          VAPI_BASE_URL: `http://127.0.0.1:${port}`,
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(
+      result.stdout,
+      /STATE:{"uuid":"aaaaaaaa-1111-1111-1111-111111111111","origin":"pushed"}/,
+    );
+  } finally {
+    await worker.terminate();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const mode of ["push", "dry-run", "apply"]) {
+  const dryRun = mode === "dry-run";
+  test(`push --adopt integrates lookup, scoped PATCH, provenance in ${mode}`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vapi-adopt-cli-"));
+    cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+    symlinkSync(
+      join(REPO_ROOT, "node_modules"),
+      join(dir, "node_modules"),
+      "dir",
+    );
+    const assistantsDir = join(dir, "resources", ENV, "assistants");
+    mkdirSync(assistantsDir, { recursive: true });
+    writeFileSync(join(assistantsDir, "riley.md"), PREEXISTING_RILEY_MD);
+    const statePath = join(dir, `.vapi-state.${ENV}.json`);
+    const initial = JSON.stringify({
+      assistants: { "riley-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
+      credentials: { fake: { uuid: "cred" } },
+    });
+    writeFileSync(statePath, initial);
+    const { worker, port } = await startStub([
+      {
+        method: "GET",
+        pathStartsWith: `/assistant/${UUID_A}`,
+        body: rileyDashboardBody(UUID_A, "A"),
+      },
+      {
+        method: "GET",
+        pathStartsWith: "/assistant",
+        body: [rileyDashboardBody(UUID_A, "A")],
+      },
+      {
+        method: "PATCH",
+        pathStartsWith: `/assistant/${UUID_A}`,
+        body: rileyDashboardBody(UUID_A, "patched"),
+      },
+    ]);
+    try {
+      const res = spawnSync(
+        "node",
+        [
+          "--import",
+          "tsx",
+          mode === "apply" ? "src/apply.ts" : "src/push.ts",
+          ENV,
+          ...(dryRun ? ["--dry-run", "--adopt=riley"] : ["--adopt", "riley"]),
+          "assistants/riley.md",
+        ],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 30000,
+          env: {
+            ...process.env,
+            VAPI_PRIVATE_API_KEY: "fake-token-not-used",
+            VAPI_BASE_URL: `http://127.0.0.1:${port}`,
+          },
+        },
+      );
+      assert.equal(res.status, 0, res.stdout + res.stderr);
+      assert.match(res.stdout, dryRun ? /would adopt riley/ : /Adopting riley/);
+      assert.match(res.stdout, /Updating assistant: riley/);
+      assert.doesNotMatch(res.stdout, /Creating assistant|Push refused/);
+      if (dryRun) {
+        assert.equal(readFileSync(statePath, "utf8"), initial);
+        assert.match(res.stdout, /would PATCH/);
+      } else {
+        const saved = JSON.parse(readFileSync(statePath, "utf8"));
+        assert.deepEqual(saved.assistants.riley, {
+          uuid: UUID_A,
+          origin: "adopted",
+        });
+        assert.equal(saved.assistants["riley-aaaaaaaa"], undefined);
+      }
+    } finally {
+      await worker.terminate();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const origin of ["pulled", undefined, "pushed", "dashboard"] as const) {
+  test(`dependency auto-apply with ${origin} name match uses only owned UUIDs`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vapi-dep-origin-"));
+    cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+    symlinkSync(
+      join(REPO_ROOT, "node_modules"),
+      join(dir, "node_modules"),
+      "dir",
+    );
+    const { worker, port } = await startStub([
+      {
+        method: "POST",
+        pathStartsWith: "/tool",
+        body: { id: UUID_B, type: "endCall" },
+      },
+      {
+        method: "GET",
+        pathStartsWith: `/tool/${UUID_A}`,
+        body: { id: UUID_A, type: "endCall" },
+      },
+      {
+        method: "PATCH",
+        pathStartsWith: `/tool/${UUID_A}`,
+        body: { id: UUID_A, type: "endCall" },
+      },
+    ]);
+    try {
+      const script = `
+        process.argv = ["node", "test", "test-origin"];
+        const { applyTool } = await import("./src/push.ts");
+        const { reconcileStateKeyForResource } = await import("./src/reconcile-state-key.ts");
+        const { createEmptyState } = await import("./src/state.ts");
+        const state = createEmptyState();
+        ${origin === "dashboard" ? "" : `state.tools["stop-aaaaaaaa"] = ${JSON.stringify({ uuid: UUID_A, ...(origin ? { origin } : {}) })};`}
+        const touched = Object.fromEntries(Object.keys(state).map(k => [k, new Set()]));
+        const applied = Object.fromEntries(Object.keys(state).map(k => [k, 0]));
+        await reconcileStateKeyForResource({
+          resourceType: "tools", resource: { resourceId: "stop", filePath: "tools/stop.yml", data: { type: "endCall", function: { name: "stop" } } },
+          state, touched, applied, autoApplied: new Set(), pushToAutoAppliedList: () => {},
+          getRemoteList: async () => [{ id: "${UUID_A}", function: { name: "stop" } }],
+          applyFn: applyTool, vapiEnv: "test-origin", formatError: (_,e) => String(e),
+        });
+        console.log("FINAL:" + JSON.stringify(state.tools.stop));
+      `;
+      const res = spawnSync(
+        "node",
+        ["--import", "tsx", "--input-type=module", "-e", script],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 30000,
+          env: {
+            ...process.env,
+            VAPI_PRIVATE_API_KEY: "fake-token-not-used",
+            VAPI_BASE_URL: `http://127.0.0.1:${port}`,
+          },
+        },
+      );
+      assert.equal(res.status, 0, res.stdout + res.stderr);
+      assert.match(
+        res.stdout,
+        origin === "pushed" ? /Updating tool: stop/ : /Creating tool: stop/,
+      );
+      assert.match(
+        res.stdout,
+        new RegExp(origin === "pushed" ? UUID_A : UUID_B),
+      );
+      if (origin !== "pushed") {
+        assert.match(
+          res.stderr,
+          /tools.*stop.*aaaaaaaa-1111-1111-1111-111111111111.*--adopt stop/,
+        );
+      }
+    } finally {
+      await worker.terminate();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const command of ["push", "apply"]) {
+  test(`${command} dry-run lists top-level and dependency collisions without writes or mutations`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vapi-collisions-"));
+    cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+    symlinkSync(
+      join(REPO_ROOT, "node_modules"),
+      join(dir, "node_modules"),
+      "dir",
+    );
+    const assistantsDir = join(dir, "resources", ENV, "assistants");
+    const toolsDir = join(dir, "resources", ENV, "tools");
+    mkdirSync(assistantsDir, { recursive: true });
+    mkdirSync(toolsDir, { recursive: true });
+    const local = PREEXISTING_RILEY_MD.replace(
+      "model:\n",
+      "model:\n  toolIds:\n    - stop\n",
+    );
+    writeFileSync(join(assistantsDir, "riley.md"), local);
+    writeFileSync(
+      join(toolsDir, "stop.yml"),
+      "type: endCall\nfunction:\n  name: stop\n",
+    );
+    const statePath = join(dir, `.vapi-state.${ENV}.json`);
+    const initial = JSON.stringify({
+      assistants: { "riley-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
+      tools: { "stop-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
+      credentials: { fake: { uuid: "cred" } },
+    });
+    writeFileSync(statePath, initial);
+    const { worker, port } = await startStub([
+      {
+        method: "GET",
+        pathStartsWith: "/assistant",
+        body: [rileyDashboardBody(UUID_A, "existing")],
+      },
+      {
+        method: "GET",
+        pathStartsWith: "/tool",
+        body: [{ id: UUID_B, type: "endCall", function: { name: "stop" } }],
+      },
+    ]);
+    try {
+      const res = spawnSync(
+        "node",
+        [
+          "--import",
+          "tsx",
+          `src/${command}.ts`,
+          ENV,
+          "--dry-run",
+          "--allow-new-files",
+          "assistants/riley.md",
+        ],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 30000,
+          env: {
+            ...process.env,
+            VAPI_PRIVATE_API_KEY: "fake-token-not-used",
+            VAPI_BASE_URL: `http://127.0.0.1:${port}`,
+          },
+        },
+      );
+      assert.equal(res.status, 0, res.stdout + res.stderr);
+      const section = res.stdout.slice(
+        res.stdout.lastIndexOf("Name collisions:"),
+      );
+      assert.match(
+        section,
+        new RegExp(
+          `assistants "Riley" \\(${UUID_A}\\).*would create a new resource; --adopt riley to take this over`,
+        ),
+      );
+      assert.match(
+        section,
+        new RegExp(`tools "stop" \\(${UUID_A}\\).*--adopt stop`),
+      );
+      assert.match(
+        section,
+        new RegExp(`tools "stop" \\(${UUID_B}\\).*--adopt stop`),
+      );
+      assert.equal(readFileSync(statePath, "utf8"), initial);
+      assert.equal(
+        readFileSync(join(assistantsDir, "riley.md"), "utf8"),
+        local,
+      );
+      const requests = (await (
+        await fetch(`http://127.0.0.1:${port}/__requests`)
+      ).json()) as { method: string; url: string }[];
+      assert.ok(requests.some((r) => r.url.startsWith("/tool")));
+      assert.ok(requests.some((r) => r.url.startsWith("/assistant")));
+      assert.ok(
+        requests.every((r) => r.method === "GET"),
+        JSON.stringify(requests),
+      );
+      assert.equal(existsSync(join(dir, ".vapi-state-hash")), false);
+    } finally {
+      await worker.terminate();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const mode of [
+  "push",
+  "apply",
+  "dry-run",
+  "dry-run-json",
+  "edited",
+  "missing-baseline",
+  "automatic",
+  "edited-apply",
+  "grouped-json",
+  "grouped-text",
+  "grouped-apply",
+  "grouped-safe",
+  "suggestions",
+  "suggestions-approved",
+  "ambiguous",
+]) {
+  test(`adoption cleans alias files safely: ${mode}`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vapi-alias-"));
+    cpSync(join(REPO_ROOT, "src"), join(dir, "src"), { recursive: true });
+    cpSync(join(REPO_ROOT, "package.json"), join(dir, "package.json"));
+    symlinkSync(
+      join(REPO_ROOT, "node_modules"),
+      join(dir, "node_modules"),
+      "dir",
+    );
+    const assistants = join(dir, "resources", ENV, "assistants");
+    mkdirSync(assistants, { recursive: true });
+    writeFileSync(join(assistants, "riley.md"), PREEXISTING_RILEY_MD);
+    const alias = join(assistants, "riley-aaaaaaaa.md");
+    writeFileSync(alias, PREEXISTING_RILEY_MD.replace("A-original", "A"));
+    const hashes = join(dir, ".vapi-state-hash", ENV);
+    mkdirSync(hashes, { recursive: true });
+    if (mode !== "missing-baseline")
+      writeFileSync(
+        join(hashes, UUID_A),
+        hashPayload(parseResourceDataFromFile(alias)),
+      );
+    if (
+      mode === "edited" ||
+      (mode.startsWith("grouped") && mode !== "grouped-safe") ||
+      mode === "edited-apply"
+    )
+      writeFileSync(
+        alias,
+        PREEXISTING_RILEY_MD.replace("A-original", "edited"),
+      );
+    const originalAlias = readFileSync(alias, "utf8");
+    const statePath = join(dir, `.vapi-state.${ENV}.json`);
+    const initial = JSON.stringify({
+      assistants:
+        mode === "automatic"
+          ? { riley: { uuid: UUID_A, origin: "adopted" } }
+          : { "riley-aaaaaaaa": { uuid: UUID_A, origin: "pulled" } },
+      credentials: { fake: { uuid: "cred" } },
+    });
+    writeFileSync(statePath, initial);
+    const { worker, port } = await startStub([
+      {
+        method: "GET",
+        pathStartsWith: `/assistant/${UUID_A}`,
+        body: rileyDashboardBody(UUID_A, "A"),
+      },
+      {
+        method: "GET",
+        pathStartsWith: "/assistant",
+        body: [
+          rileyDashboardBody(UUID_A, "A"),
+          ...(mode === "ambiguous" ? [rileyDashboardBody(UUID_B, "B")] : []),
+          ...(mode === "suggestions-approved"
+            ? [{ ...rileyDashboardBody(UUID_B, "B"), name: "New Remote" }]
+            : []),
+        ],
+      },
+      {
+        method: "PATCH",
+        pathStartsWith: "/assistant",
+        body: rileyDashboardBody(UUID_A, "A-original"),
+      },
+    ]);
+    const run = (command: string, args: string[]) =>
+      spawnSync(
+        "node",
+        ["--import", "tsx", `src/${command}.ts`, ENV, ...args],
+        {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 30000,
+          env: {
+            ...process.env,
+            VAPI_PRIVATE_API_KEY: "fake-token-not-used",
+            VAPI_BASE_URL: `http://127.0.0.1:${port}`,
+          },
+        },
+      );
+    try {
+      if (mode === "suggestions-approved")
+        writeFileSync(
+          join(assistants, "new.md"),
+          PREEXISTING_RILEY_MD.replace("name: Riley", "name: New Remote"),
+        );
+      if (mode.startsWith("grouped"))
+        writeFileSync(
+          join(assistants, "new.md"),
+          PREEXISTING_RILEY_MD.replace("name: Riley", "name: Brand New"),
+        );
+      const res = run(
+        mode === "apply" || mode === "edited-apply" || mode === "grouped-apply"
+          ? "apply"
+          : "push",
+        [
+          ...(["automatic", "suggestions", "ambiguous"].includes(mode)
+            ? []
+            : ["--adopt", "riley"]),
+          ...(mode.startsWith("grouped")
+            ? ["--adopt", "absent", "--adopt", "other-missing"]
+            : []),
+          ...(mode === "grouped-json" ||
+          mode === "grouped-apply" ||
+          mode === "dry-run-json"
+            ? ["--json"]
+            : []),
+          ...(mode === "dry-run" || mode === "dry-run-json"
+            ? ["--dry-run"]
+            : []),
+        ],
+      );
+      const blocked =
+        mode === "edited" ||
+        mode === "missing-baseline" ||
+        mode === "edited-apply" ||
+        mode === "suggestions" ||
+        mode === "suggestions-approved" ||
+        mode === "ambiguous" ||
+        mode.startsWith("grouped");
+      assert.equal(res.status, blocked ? 1 : 0, res.stdout + res.stderr);
+      if (blocked || mode === "dry-run" || mode === "dry-run-json") {
+        assert.equal(readFileSync(alias, "utf8"), originalAlias);
+        assert.equal(readFileSync(statePath, "utf8"), initial);
+        assert.match(
+          res.stdout + res.stderr,
+          mode.startsWith("suggestions") || mode === "ambiguous"
+            ? /Not linked to any resource/
+            : mode === "grouped-safe"
+              ? /no such file/
+              : blocked
+                ? /Delete it by hand/
+                : /would delete .*riley-aaaaaaaa.md/,
+        );
+        if (mode === "dry-run-json")
+          assert.deepEqual(JSON.parse(res.stdout), []);
+        const requests = (await (
+          await fetch(`http://127.0.0.1:${port}/__requests`)
+        ).json()) as { method: string }[];
+        assert.ok(requests.every((r) => r.method === "GET"));
+        if (mode !== "missing-baseline")
+          assert.ok(existsSync(join(hashes, UUID_A)));
+        if (mode === "grouped-json" || mode === "grouped-apply") {
+          const issues = JSON.parse(res.stdout);
+          assert.equal(issues.length, 4, res.stdout);
+          assert.ok(
+            issues.some((issue: { file: string }) =>
+              issue.file.endsWith("riley-aaaaaaaa.md"),
+            ),
+          );
+          assert.ok(
+            issues.some((issue: { file: string }) =>
+              issue.file.endsWith("new.md"),
+            ),
+          );
+          assert.ok(
+            issues.some((issue: { file: string }) => issue.file === "absent"),
+          );
+          assert.doesNotMatch(res.stdout + res.stderr, /orphan/i);
+        }
+        if (mode === "suggestions") {
+          assert.match(
+            res.stderr,
+            /Suggested command.*npm run push -- test-clobber --adopt riley resources\/test-clobber\/assistants\/riley.md/,
+          );
+        }
+        if (mode === "suggestions-approved") {
+          assert.match(
+            res.stderr,
+            /Suggested command.*--adopt riley resources\/test-clobber\/assistants\/riley.md --adopt new resources\/test-clobber\/assistants\/new.md/,
+          );
+        }
+        if (mode === "ambiguous") {
+          assert.doesNotMatch(res.stderr, /Suggested command/);
+          assert.match(res.stderr, new RegExp("--adopt riley=" + UUID_A));
+          assert.match(res.stderr, new RegExp("--adopt riley=" + UUID_B));
+          assert.match(res.stderr, /Human choice needed/);
+        }
+        if (mode === "grouped-text") {
+          assert.equal(res.stderr.match(/Push stopped:/g)?.length, 1);
+          assert.doesNotMatch(res.stderr, /Apply failed|orphan/i);
+        }
+      } else {
+        const requests = (await (
+          await fetch(`http://127.0.0.1:${port}/__requests`)
+        ).json()) as { method: string; body: string }[];
+        assert.equal(
+          requests.filter((request) => request.method === "PATCH").length,
+          1,
+          JSON.stringify(requests),
+        );
+        assert.ok(
+          requests.every(
+            (request) => request.method === "GET" || request.method === "PATCH",
+          ),
+        );
+        assert.match(
+          requests.find((request) => request.method === "PATCH")!.body,
+          /marker:A-original/,
+        );
+        assert.equal(existsSync(alias), false);
+        assert.match(
+          res.stdout,
+          /Deleted .*riley-aaaaaaaa.md: same remote resource, now adopted as riley/,
+        );
+        assert.deepEqual(
+          JSON.parse(readFileSync(statePath, "utf8")).assistants,
+          { riley: { uuid: UUID_A, origin: "adopted" } },
+        );
+        const next = run("push", []);
+        assert.doesNotMatch(
+          next.stdout + next.stderr,
+          /Push stopped|Files without state entry/,
+        );
+        assert.equal(existsSync(alias), false);
+      }
+    } finally {
+      await worker.terminate();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

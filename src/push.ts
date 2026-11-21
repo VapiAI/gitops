@@ -4,10 +4,8 @@ import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
 import {
-  ALLOW_NEW_FILES,
   APPLY_FILTER,
   BASE_DIR,
-  BOOTSTRAP_SYNC,
   DRY_RUN,
   FORCE_DELETE,
   loadIgnorePatterns,
@@ -20,22 +18,20 @@ import {
   VAPI_ENV,
 } from "./config.ts";
 import {
-  extractResourceName,
   findExistingResourceByName,
   type RemoteResource,
+  warnUnownedNameMatches,
 } from "./dep-dedup.ts";
 import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
 import { deleteBaseline, writeBaseline } from "./hash-store.ts";
+import { prepareResourceLinks } from "./link-preflight.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
-import { detectOrphanYamls, formatGateMessage } from "./new-file-gate.ts";
+import { NameCollisionReport } from "./name-collisions.ts";
 import { computePushPlan, pushBlockingFindings } from "./push-plan.ts";
-import {
-  formatRecanonicalizeReport,
-  recanonicalizeStateKeys,
-} from "./recanonicalize.ts";
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
+import { formatStopReport, jsonStopReport } from "./stop-report.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   summarizeFindings,
@@ -213,6 +209,8 @@ async function writeAssistantVersionMetadata(options: {
   }
 }
 
+let dryRunCollisions: NameCollisionReport | undefined;
+
 async function upsertResourceWithStateRecovery(options: {
   resourceLabel: string;
   resourceId: string;
@@ -242,8 +240,20 @@ async function upsertResourceWithStateRecovery(options: {
   } = options;
 
   if (!existingUuid) {
+    const resourceType = RESOURCE_LABEL_TO_TYPE[resourceLabel];
+    if (resourceType)
+      dryRunCollisions?.recordPost(
+        resourceType,
+        resourceId,
+        createPayload,
+        stateSection,
+      );
     console.log(`  ✨ Creating ${resourceLabel}: ${resourceId}`);
     const result = await vapiRequest("POST", createEndpoint, createPayload);
+    upsertState(stateSection, resourceId, {
+      uuid: result.id,
+      origin: "pushed",
+    });
     await writeBaselineFromResponse(result.id, result, fullState);
     if (resourceLabel === "assistant") {
       await writeAssistantVersionMetadata({
@@ -1025,8 +1035,10 @@ export async function applyEval(
     await writeBaselineFromResponse(existingUuid, result, state);
     return existingUuid;
   } else {
+    dryRunCollisions?.recordPost("evals", resourceId, payload, state.evals);
     console.log(`  ✨ Creating eval: ${resourceId}`);
     const result = await vapiRequest("POST", "/eval", payload);
+    upsertState(state.evals, resourceId, { uuid: result.id, origin: "pushed" });
     await writeBaselineFromResponse(result.id, result, state);
     return result.id;
   }
@@ -1317,20 +1329,15 @@ interface DependencyContext {
   touched: TouchedSets;
 }
 
-// Lazy-fetch the live dashboard inventory for a given resource type. Used by
-// the auto-apply path to detect existing dashboard resources before minting
-// a duplicate POST. Honors dry-run by skipping the API call entirely
-// (empty list → state-only dedup).
+// Lazy-fetch inventory for same-name warnings, not name-based adoption.
+// Dry-run inventories are shared with the collision report.
 async function getExistingRemoteTools(
   ctx: DependencyContext,
 ): Promise<RemoteResource[]> {
   if (ctx.existingRemoteTools !== undefined) return ctx.existingRemoteTools;
-  if (DRY_RUN) {
-    ctx.existingRemoteTools = [];
-    return ctx.existingRemoteTools;
-  }
   try {
-    const remote = await fetchAllResources("tools");
+    const remote = await (dryRunCollisions?.getRemoteList("tools") ??
+      fetchAllResources("tools"));
     ctx.existingRemoteTools = remote as unknown as RemoteResource[];
   } catch (err) {
     console.warn(
@@ -1348,12 +1355,10 @@ async function getExistingRemoteStructuredOutputs(
 ): Promise<RemoteResource[]> {
   if (ctx.existingRemoteStructuredOutputs !== undefined)
     return ctx.existingRemoteStructuredOutputs;
-  if (DRY_RUN) {
-    ctx.existingRemoteStructuredOutputs = [];
-    return ctx.existingRemoteStructuredOutputs;
-  }
   try {
-    const remote = await fetchAllResources("structuredOutputs");
+    const remote = await (dryRunCollisions?.getRemoteList(
+      "structuredOutputs",
+    ) ?? fetchAllResources("structuredOutputs"));
     ctx.existingRemoteStructuredOutputs = remote as unknown as RemoteResource[];
   } catch (err) {
     console.warn(
@@ -1371,12 +1376,9 @@ async function getExistingRemoteAssistants(
 ): Promise<RemoteResource[]> {
   if (ctx.existingRemoteAssistants !== undefined)
     return ctx.existingRemoteAssistants;
-  if (DRY_RUN) {
-    ctx.existingRemoteAssistants = [];
-    return ctx.existingRemoteAssistants;
-  }
   try {
-    const remote = await fetchAllResources("assistants");
+    const remote = await (dryRunCollisions?.getRemoteList("assistants") ??
+      fetchAllResources("assistants"));
     ctx.existingRemoteAssistants = remote as unknown as RemoteResource[];
   } catch (err) {
     console.warn(
@@ -1519,19 +1521,22 @@ async function ensureAssistantExists(
     stateSection: ctx.state.assistants,
     remoteList,
   });
+  warnUnownedNameMatches({
+    resourceType: "assistants",
+    localResourceId: assistantId,
+    localPayload: assistant.data,
+    stateSection: ctx.state.assistants,
+    remoteList,
+    reusedUuid: match?.uuid,
+  });
   if (match) {
-    if (match.ambiguous) {
-      const displayName = extractResourceName(assistant.data) ?? assistantId;
-      console.warn(
-        `  ⚠️  Multiple dashboard assistants share the name "${displayName}" — adopting ${match.uuid} (lex-smallest). Other UUIDs: ${match.duplicateUuids.join(", ")}. Run \`npm run cleanup -- ${VAPI_ENV}\` to prune duplicates.`,
-      );
-    }
     console.log(
       `  🔁 Reusing existing assistant: ${assistantId} → ${match.uuid} (matched via ${match.source})`,
     );
 
     upsertState(ctx.state.assistants, assistant.resourceId, {
       uuid: match.uuid,
+      origin: match.origin,
     });
 
     // Orphan-deletion guard — drop other state keys pointing at the SAME
@@ -1585,7 +1590,16 @@ async function ensureAssistantExists(
 // Main Apply Engine
 // ─────────────────────────────────────────────────────────────────────────────
 
+const reportOutput = console.log.bind(console);
+
 async function main(): Promise<void> {
+  const json = process.argv.includes("--json");
+  if (json) console.log = console.error.bind(console);
+  dryRunCollisions = DRY_RUN
+    ? new NameCollisionReport(
+        async (type) => (await fetchAllResources(type)) as RemoteResource[],
+      )
+    : undefined;
   // Guard here (not only in runPush): apply spawns `tsx src/push.ts` directly,
   // which enters via the isMainModule block below and never calls runPush.
   assertStateMigrated(STATE_FILE_PATH);
@@ -1615,6 +1629,7 @@ async function main(): Promise<void> {
 
   // Load current state (needed for reference resolution even in partial apply)
   let state = loadState();
+  let preflightComplete = false;
 
   // Track which resourceIds we actually mutate so the end-of-run save can
   // merge into existing on-disk state instead of rewriting wholesale.
@@ -1706,68 +1721,42 @@ async function main(): Promise<void> {
       evals: allEvalsRaw,
     };
 
-    state = await maybeBootstrapState(loadedResources, state);
-
-    // Recanonicalize stale UUID-suffixed state keys back to canonical slugs
-    // before the orphan-YAML gate runs. This is the safe collapse of the
-    // pull-side rekey-on-name-collision behavior (src/pull.ts) once the
-    // underlying collision has resolved (e.g. the conflicting twin was
-    // deleted on the dashboard). Without this pass, the orphan-YAML gate
-    // sees the canonical-slug local file as "new" — the recurring
-    // duplicate-creation root cause documented in improvements.md.
-    //
-    // Gating: `BOOTSTRAP_SYNC` (the user's explicit `--bootstrap` flag)
-    // skips this pass because state is being rebuilt from scratch. Note
-    // that the *internal* bootstrap-recovery pull triggered by
-    // `maybeBootstrapState` above does NOT set `BOOTSTRAP_SYNC` — so
-    // recanonicalize still runs after that recovery, which is intentional:
-    // bootstrap freshly generates UUID-suffixed keys for unresolved
-    // collisions, and recanonicalize collapses any that no longer have a
-    // live conflict.
-    //
-    // `touched` is plumbed through so scoped pushes flush the rename via
-    // `mergeScoped` at save time. Without this, the on-disk stale key
-    // would silently re-overwrite the in-memory canonical rename — H1 in
-    // the code review.
-    if (!BOOTSTRAP_SYNC) {
-      const recanonReport = recanonicalizeStateKeys({ state, touched });
-      const recanonSummary = formatRecanonicalizeReport(recanonReport);
-      if (recanonSummary) {
-        console.log(`\n${recanonSummary}`);
-      }
-    }
-
-    // Orphan-YAML pre-flight gate. Runs ONCE for ALL resource types after
-    // bootstrap (so state-recovery has a chance to rekey first) and BEFORE
-    // any apply phase. Halts push when local files exist with no state entry
-    // — the duplicate-creation pattern we surfaced in a customer fork's
-    // working session 2026-05-13 (see src/new-file-gate.ts for context).
-    //
-    // Skipped during explicit `--bootstrap` runs: a bootstrap is supposed to
-    // populate state from scratch, so every local file legitimately lacks a
-    // state entry at that point.
-    if (!BOOTSTRAP_SYNC) {
-      const orphanReport = detectOrphanYamls({
-        state,
-        filePathFilter: APPLY_FILTER.filePaths,
-      });
-      if (orphanReport.orphans.length > 0) {
-        if (ALLOW_NEW_FILES) {
-          const verb = DRY_RUN ? "would create" : "creating";
-          console.log(
-            `   ⚠️  bypassing new-file gate: ${verb} ${orphanReport.orphans.length} new resource(s) on the dashboard`,
-          );
-        } else {
-          console.error(
-            formatGateMessage(orphanReport, VAPI_ENV, {
-              color: process.stderr.isTTY === true,
-            }),
-          );
-          process.exit(1);
+    const inventories = new Map<ResourceType, Promise<RemoteResource[]>>();
+    const links = await prepareResourceLinks({
+      resources: loadedResources,
+      state,
+      touched,
+      getRemoteList: (type) => {
+        let inventory = inventories.get(type);
+        if (!inventory) {
+          inventory = (dryRunCollisions?.getRemoteList(type) ??
+            fetchAllResources(type)) as Promise<RemoteResource[]>;
+          inventories.set(type, inventory);
         }
+        return inventory;
+      },
+    });
+    if (links.issues.length) {
+      if (json) reportOutput(jsonStopReport(links.issues));
+      else console.error(formatStopReport(links.issues, VAPI_ENV));
+      process.exit(1);
+    }
+    await links.commit();
+    state = links.preview;
+    state = await maybeBootstrapState(loadedResources, state);
+    for (const type of ALL_RESOURCE_TYPES) {
+      for (const [id, entry] of Object.entries(links.preview[type])) {
+        if (entry.origin !== "adopted") continue;
+        for (const [key, value] of Object.entries(state[type])) {
+          if (key !== id && value.uuid === entry.uuid) {
+            delete state[type][key];
+            if (!DRY_RUN) touched[type].add(key);
+          }
+        }
+        state[type][id] = entry;
       }
     }
-
+    preflightComplete = true;
     // Validate the full local set; gate errors against the write plan below.
     console.log("\n🔎 Running validators...");
     const findings = [
@@ -2228,7 +2217,7 @@ async function main(): Promise<void> {
     if (DRY_RUN) {
       const counts = getDryRunCounts();
       console.log(
-        `🧪 Would create ${counts.POST}, would update ${counts.PATCH}, would delete ${counts.DELETE} (no API calls fired)`,
+        `🧪 Would create ${counts.POST}, would update ${counts.PATCH}, would delete ${counts.DELETE} (no API mutations fired)`,
       );
     }
 
@@ -2290,18 +2279,20 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   } finally {
+    if (json && preflightComplete) reportOutput("[]");
     // Always flush state, even on partial failure — resources that already
     // received UUIDs from the API must be recorded so the next run does not
     // re-create them.
     //
-    // EXCEPT in dry-run mode: no real API calls fired, so the state file
+    // EXCEPT in dry-run mode: no API mutations fired, so the state file
     // would be polluted with synthetic dry-run UUIDs. Skip the save entirely.
     if (DRY_RUN) {
       console.log(
         "\n🧪 [dry-run] Skipping state file write (would have written to " +
           `.vapi-state.${VAPI_ENV}.json)`,
       );
-    } else {
+      console.log(`\n${await dryRunCollisions!.format()}`);
+    } else if (preflightComplete) {
       try {
         // For scoped pushes, only persist entries we actually mutated.
         // Re-load disk state and merge our touched entries on top so

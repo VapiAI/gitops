@@ -20,6 +20,7 @@
 // store from the old hashes.
 export interface ResourceState {
   uuid: string;
+  origin?: "pushed" | "pulled" | "adopted";
 }
 
 // `StateFile` is the on-disk shape of `.vapi-state.<env>.json`. Each section
