@@ -10,7 +10,7 @@ The other commands are direct only.
 | Command | Usage | What it does |
 | --- | --- | --- |
 | `npm run setup` | `npm run setup [-- <org>]` | Connect an org: creates `.env.<org>` and `resources/<org>/`. |
-| `npm run validate` | `npm run validate -- <org>` | Check resource files offline: API shape rules, and that every reference names a file or a state entry. `apply` runs it first. On GitHub Actions, findings are also shown on the files in the pull request. |
+| `npm run validate` | `npm run validate -- <org> [--strict]` | Check resource files offline: API shape rules, references, and undefined squad variables. `variable-undefined` warns once per squad member, listing missing root names and where to define them; `--strict` makes this warning blocking in validate and push. `transfer-number-liquid` is always an error: the API rejects Liquid in transfer destination numbers, even with `numberE164CheckEnabled:false`; use per-practice literal numbers, e.g. inline in squad `membersOverrides['tools:append']` (see `examples/nhs-shared-squads`). Covers standalone tools, inline model tools and member/squad appended tools. `apply` runs validation first. On GitHub Actions, findings are also shown on the files in the pull request. |
 | `npm run apply` | `npm run apply -- <org> [types or paths]` | **The default deploy:** pull, merge, then push. See [workflows](workflows.md). |
 | `npm run pull` | `npm run pull -- <org> [--force] [--bootstrap]` | Sync platform changes down; never overwrites local edits unless `--force`. |
 | `npm run push` | `npm run push -- <org> [--dry-run] [--strict]` | Push without pulling first. Prefer `apply`. `--strict` aborts before any API call if validation finds an error. |
