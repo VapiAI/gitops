@@ -12,13 +12,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import type { CheckDefinition } from "../src/check-config.ts";
+import { promotionConfigParse } from "../src/promotion.ts";
 import type { PromotionGateResult } from "../src/promotion-gate.ts";
 import {
   gateBudgetMinutes,
   gateDeadline,
   gateResultReduce,
 } from "../src/promotion-gate.ts";
-import { promotionConfigParse } from "../src/promotion.ts";
 
 // promote-cmd.ts binds its root at import: one fixture repo for the file,
 // rebuilt per test.

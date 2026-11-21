@@ -65,7 +65,9 @@ test("one side alone still produces a usable line", () => {
   // A resource with no local file, or an unreadable stat, must not blank the
   // whole report.
   assert.match(
-    conflictTimingHint({ dashboardUpdatedAt: new Date(T0).toISOString() }) as string,
+    conflictTimingHint({
+      dashboardUpdatedAt: new Date(T0).toISOString(),
+    }) as string,
     /^dashboard changed 2026-08-01 12:00Z$/,
   );
   assert.match(
@@ -78,8 +80,14 @@ test("no usable timestamp yields no line at all", () => {
   // The caller appends this to an existing bullet, so an empty hint has to be
   // distinguishable from a hint that happens to be short.
   assert.equal(conflictTimingHint({}), undefined);
-  assert.equal(conflictTimingHint({ dashboardUpdatedAt: 1754049600000 }), undefined);
-  assert.equal(conflictTimingHint({ dashboardUpdatedAt: "not a date" }), undefined);
+  assert.equal(
+    conflictTimingHint({ dashboardUpdatedAt: 1754049600000 }),
+    undefined,
+  );
+  assert.equal(
+    conflictTimingHint({ dashboardUpdatedAt: "not a date" }),
+    undefined,
+  );
   assert.equal(conflictTimingHint({ localModifiedMs: Number.NaN }), undefined);
 });
 

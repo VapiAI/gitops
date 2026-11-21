@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   fetchAllPhoneNumbers,
-  updateEnvConnection,
   updateBindingEnv,
+  updateEnvConnection,
 } from "../src/bindings.ts";
 
 test("updateEnvConnection replaces auth settings without clobbering bindings", () => {
@@ -44,18 +44,12 @@ test("updateBindingEnv preserves manual env values and exports org-local binding
   const result = updateBindingEnv(
     existing,
     { "crm-api": { uuid: "credential-1" } },
-    [
-      { id: "phone-1", name: "Renamed Support Line" },
-      { id: "phone-2" },
-    ],
+    [{ id: "phone-1", name: "Renamed Support Line" }, { id: "phone-2" }],
   );
 
   assert.match(result.content, /^VAPI_TOKEN=secret$/m);
   assert.match(result.content, /^CUSTOM_SETTING=keep-me$/m);
-  assert.match(
-    result.content,
-    /^VAPI_CREDENTIAL_CRM_API=credential-1$/m,
-  );
+  assert.match(result.content, /^VAPI_CREDENTIAL_CRM_API=credential-1$/m);
   assert.match(
     result.content,
     /^VAPI_PHONE_NUMBER_OLD_NAME=phone-1$/m,
@@ -73,10 +67,7 @@ test("manual bindings outside the generated block win without duplication", () =
     [],
   );
 
-  assert.equal(
-    result.content.match(/^VAPI_CREDENTIAL_CRM_API=/gm)?.length,
-    1,
-  );
+  assert.equal(result.content.match(/^VAPI_CREDENTIAL_CRM_API=/gm)?.length, 1);
   assert.match(result.content, /^VAPI_CREDENTIAL_CRM_API=manual-id$/m);
   assert.match(result.warnings[0]!, /keeping the manually managed value/i);
 });
@@ -108,10 +99,7 @@ test("a previously confirmed phone alias wins over a new duplicate name", () => 
     ],
   );
 
-  assert.match(
-    result.content,
-    /^VAPI_PHONE_NUMBER_SUPPORT_LINE=phone-a$/m,
-  );
+  assert.match(result.content, /^VAPI_PHONE_NUMBER_SUPPORT_LINE=phone-a$/m);
   assert.doesNotMatch(result.content, /=phone-b$/m);
   assert.match(result.warnings[0]!, /already confirmed/i);
 });
@@ -137,7 +125,9 @@ test("fetchAllPhoneNumbers follows v2 pagination", async () => {
 
   const result = await fetchAllPhoneNumbers(async (endpoint) => {
     requested.push(endpoint);
-    const page = Number(new URL(endpoint, "https://example.test").searchParams.get("page"));
+    const page = Number(
+      new URL(endpoint, "https://example.test").searchParams.get("page"),
+    );
     return pages.get(page);
   }, 1);
 

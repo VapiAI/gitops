@@ -6,8 +6,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -21,13 +21,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { assertStateMigrated, migrateAll } from "../src/migrate-hash-store.ts";
 import {
-  OLD_LAYOUT_NOTICE,
-  StateLayoutError,
   baselinesDir,
   commitStepAcknowledge,
+  OLD_LAYOUT_NOTICE,
   orgPinFilePath,
   orgPinFileRead,
   orgPinFileWrite,
+  StateLayoutError,
   snapshotsDir,
   stateFileLeftover,
   stateFilePath,
@@ -507,7 +507,7 @@ test("two state files that disagree stop the command with both intact", () => {
 
 // ── npm run migrate and the legacy-format guard ──────────────────────────
 
-const FAT_STATE = `${JSON.stringify({ assistants: { intake: { uuid: UUID, lastPulledAt: "2026-01-01T00:00:00Z" } } })}\n`;
+const FAT_STATE = `${JSON.stringify({ assistants: { intake: { uuid: UUID, origin: "pulled", lastPulledAt: "2026-01-01T00:00:00Z" } } })}\n`;
 
 test("the legacy-format guard reads the state file in either place", () => {
   const root = mkdtempSync(join(tmpdir(), "state-layout-"));
@@ -575,7 +575,7 @@ test("under a commit step seen to stage state/, migrate slims and moves every or
         ],
         after: {
           ...MOVED,
-          state: { assistants: { intake: { uuid: UUID } } },
+          state: { assistants: { intake: { uuid: UUID, origin: "pulled" } } },
         },
         rootLeftovers: [],
         again: [
@@ -617,7 +617,7 @@ test("migrate slims in place and moves nothing while a workflow would drop state
         ".vapi-state.acme.json",
         true,
         [],
-        { assistants: { intake: { uuid: UUID } } },
+        { assistants: { intake: { uuid: UUID, origin: "pulled" } } },
         undefined,
         true,
         false,

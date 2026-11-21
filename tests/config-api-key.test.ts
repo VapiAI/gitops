@@ -36,9 +36,18 @@ function validateRun(
     const result = spawnSync(
       process.execPath,
       ["--import", "tsx", "src/validate-cmd.ts", "acme-prod"],
-      { cwd: dir, encoding: "utf8", timeout: 30_000, env: { ...process.env, ...env } },
+      {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: { ...process.env, ...env },
+      },
     );
-    return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+    return {
+      code: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -67,6 +76,9 @@ test("the org's own variable is used and named, with no warning", () => {
 
 test("a key only in .env.<org> is used quietly", () => {
   const run = validateRun("VAPI_PRIVATE_API_KEY=prod-key\n", {});
-  assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Using the API key|different key/);
+  assert.doesNotMatch(
+    `${run.stdout}${run.stderr}`,
+    /Using the API key|different key/,
+  );
   assert.equal(run.code, 0);
 });

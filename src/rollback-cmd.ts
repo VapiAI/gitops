@@ -8,9 +8,9 @@
 // Self-contained (does not import config.ts) so it can run in isolation
 // without triggering the global CLI parser.
 
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { baseDir } from "./base-dir.ts";
 import { OrgPinMismatchError, orgPinCheck, orgPinLabel } from "./org-pin.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
@@ -147,7 +147,12 @@ async function main(): Promise<void> {
     const outcome = await orgPinCheck({
       rootDir: BASE_DIR,
       org: args.env,
-      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
+      connection: {
+        token: cfg.token,
+        baseUrl: cfg.baseUrl,
+        userAgent: userAgentGet(),
+        vapiClient: vapiClientGet(),
+      },
       keySource: cfg.source,
     });
     if (outcome.kind === "unverified")

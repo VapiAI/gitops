@@ -17,8 +17,9 @@ import test from "node:test";
 // file; each test resets it.
 const ROOT = mkdtempSync(join(tmpdir(), "promote-cmd-"));
 process.env.VAPI_GITOPS_ROOT = ROOT;
-const { APPLIED_PATHS_FILE, promotionCommandRun } =
-  await import("../src/promote-cmd.ts");
+const { APPLIED_PATHS_FILE, promotionCommandRun } = await import(
+  "../src/promote-cmd.ts"
+);
 
 function git(...args: string[]): string {
   return execFileSync(

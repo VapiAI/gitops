@@ -463,6 +463,10 @@ test("promotionConfigParse reads an org's optional check gate and rejects a non-
   const parsed = promotionConfigParse(config("dev-core"));
   assert.deepEqual(
     [parsed.orgs.dev?.check, parsed.orgs.prod?.check, error],
-    ["dev-core", undefined, "org dev.check must be a check name from vapi-checks.yml"],
+    [
+      "dev-core",
+      undefined,
+      "org dev.check must be a check name from vapi-checks.yml",
+    ],
   );
 });

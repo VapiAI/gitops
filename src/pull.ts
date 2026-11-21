@@ -984,7 +984,10 @@ export async function pullResourceType(
           statSync(localFile).mtimeMs > statSync(stamp).mtimeMs
         ) {
           console.log(`   ✏️  ${resourceId} (locally modified, preserving)`);
-          upsertState(newStateSection, resourceId, { uuid: resource.id, origin: "pulled" });
+          upsertState(newStateSection, resourceId, {
+            uuid: resource.id,
+            origin: "pulled",
+          });
           skipped++;
           continue;
         }

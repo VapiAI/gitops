@@ -3,13 +3,6 @@ import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { join } from "path";
-import { baseDir } from "./base-dir.ts";
-import {
-  stateFileLabel,
-  stateFileLegacyPath,
-  stateFileRead,
-  stateOrgDir,
-} from "./state-paths.ts";
 import {
   API_KEY_VAR,
   API_KEYS_URL,
@@ -17,6 +10,7 @@ import {
   orgApiKeyVar,
   resolveOrgApiKey,
 } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
 import { updateEnvConnection } from "./bindings.ts";
 import { typeArgFor } from "./resource-type-args.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
@@ -27,6 +21,12 @@ import {
   SETUP_USAGE,
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
+import {
+  stateFileLabel,
+  stateFileLegacyPath,
+  stateFileRead,
+  stateOrgDir,
+} from "./state-paths.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,7 +418,9 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const resourceDir = join(BASE_DIR, "resources", slug);
   const stateFile = stateFileRead(BASE_DIR, slug);
 
-  console.log(c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`));
+  console.log(
+    c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`),
+  );
 
   // Never clobber an org that already has local state. Re-running setup is
   // a destructive operation in the wizard (it deletes and re-pulls), and an
@@ -451,7 +453,9 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   // Setup writes the key into .env.<org> and downloads that org, so a key
   // that may belong to another org is a hard stop here, not a warning.
   if (resolved.warning) {
-    fail(`${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`);
+    fail(
+      `${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`,
+    );
   }
   const otherOrg = orgWithKey(slug, resolved.token);
   if (otherOrg) {
@@ -571,7 +575,9 @@ async function main(): Promise<void> {
   // so explain the non-interactive path instead.
   if (!process.stdin.isTTY) {
     console.error(
-      c.red("\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n"),
+      c.red(
+        "\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n",
+      ),
     );
     console.error(SETUP_USAGE);
     process.exit(1);
@@ -820,12 +826,7 @@ async function main(): Promise<void> {
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(
-    slug,
-    downloadAll ? "all" : selectedIds,
-    trimmedKey,
-    vapiBaseUrl,
-  );
+  invokePull(slug, downloadAll ? "all" : selectedIds, trimmedKey, vapiBaseUrl);
 
   // ── Done ──────────────────────────────────────────────────────────────
 

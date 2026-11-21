@@ -1,5 +1,4 @@
 import "./engine-sandbox.ts";
-import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -15,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // new-file-gate.ts → pull.ts → config.ts: config.ts asserts argv[2] /
 // VAPI_TOKEN at module load. Prime both before importing the module under
@@ -646,7 +646,7 @@ test("integration: bootstrap UUID-suffixed mapping never takes over a local slug
     state,
   });
   try {
-    const statePath = join(fx.dir, `.vapi-state.${fx.env}.json`);
+    const statePath = stateFixturePath(fx.dir, fx.env);
     const before = readFileSync(statePath, "utf8");
     const res = runPush(fx, []);
     assert.equal(res.code, 1, res.stdout + res.stderr);

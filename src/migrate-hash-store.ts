@@ -19,8 +19,8 @@ import {
   writeBaseline,
 } from "./hash-store.ts";
 import {
-  STATE_DIR,
   commitStepAsk,
+  STATE_DIR,
   stateFileRead,
   stateMove,
   stateMoveRead,

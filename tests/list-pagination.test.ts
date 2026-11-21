@@ -101,9 +101,7 @@ test("a short first page is complete: no second request, no warning", async () =
 
 test("a full first page is paged through until a short page arrives", async () => {
   reset((url) =>
-    url.includes("createdAtLe")
-      ? { body: page(4, 100) }
-      : { body: page(100) },
+    url.includes("createdAtLe") ? { body: page(4, 100) } : { body: page(100) },
   );
   const { result, warnings } = await capturingWarnings(() =>
     fetchAllResources("tools"),
@@ -120,7 +118,10 @@ test("the cursor is inclusive, so items sharing the boundary timestamp survive",
   // Resources created in bulk do collide on `createdAt`, and a dropped item then
   // looks deleted to anything that infers absence.
   const shared = new Date(BASE - 99 * 60_000).toISOString();
-  const firstPage = [...page(99), { id: "boundary-a", name: "a", createdAt: shared }];
+  const firstPage = [
+    ...page(99),
+    { id: "boundary-a", name: "a", createdAt: shared },
+  ];
   const secondPage = [
     { id: "boundary-a", name: "a", createdAt: shared }, // re-read, deduped
     { id: "boundary-b", name: "b", createdAt: shared }, // would be lost by `Lt`
@@ -131,8 +132,15 @@ test("the cursor is inclusive, so items sharing the boundary timestamp survive",
   const result = await fetchAllResources("tools");
 
   const ids = result.map((r) => r.id);
-  assert.equal(new Set(ids).size, ids.length, "the boundary item is not duplicated");
-  assert.ok(ids.includes("boundary-b"), "the co-timestamped item is not dropped");
+  assert.equal(
+    new Set(ids).size,
+    ids.length,
+    "the boundary item is not duplicated",
+  );
+  assert.ok(
+    ids.includes("boundary-b"),
+    "the co-timestamped item is not dropped",
+  );
 });
 
 test("an endpoint that ignores the cursor is reported, not looped on", async () => {
@@ -150,14 +158,21 @@ test("an endpoint that ignores the cursor is reported, not looped on", async () 
 
 test("a page with no usable createdAt cannot be paged, and says so", async () => {
   reset(() => ({
-    body: Array.from({ length: 100 }, (_, i) => ({ id: `x-${i}`, name: `x ${i}` })),
+    body: Array.from({ length: 100 }, (_, i) => ({
+      id: `x-${i}`,
+      name: `x ${i}`,
+    })),
   }));
   const { result, warnings } = await capturingWarnings(() =>
     fetchAllResources("tools"),
   );
 
   assert.equal(result.length, 100);
-  assert.equal(requests.length, 1, "no cursor is guessable, so no second request");
+  assert.equal(
+    requests.length,
+    1,
+    "no cursor is guessable, so no second request",
+  );
   assert.match(warnings, /listing may be incomplete/);
 });
 
@@ -213,6 +228,9 @@ test("the cursor advances across several pages, not just one", async () => {
   const ids = new Set(result.map((r) => r.id));
   assert.equal(ids.size, result.length, "no duplicates across pages");
   assert.equal(result.length, 250, "every item across three pages is returned");
-  assert.ok(requests.length >= 3, `expected a multi-page walk, made ${requests.length}`);
+  assert.ok(
+    requests.length >= 3,
+    `expected a multi-page walk, made ${requests.length}`,
+  );
   assert.doesNotMatch(warnings, /incomplete/);
 });

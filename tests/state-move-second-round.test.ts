@@ -77,12 +77,19 @@ const rileyFile = (prompt: string): string =>
   "\n";
 
 // What a CI runner has: a clone of the committed repository and nothing else.
-function freshClone(layout: "root" | "folder"): { root: string; drop: () => void } {
+function freshClone(layout: "root" | "folder"): {
+  root: string;
+  drop: () => void;
+} {
   const source = mkdtempSync(join(tmpdir(), "fresh-clone-src-"));
   const root = mkdtempSync(join(tmpdir(), "fresh-clone-"));
   cpSync(join(REPO, "src"), join(source, "src"), { recursive: true });
   cpSync(join(REPO, "package.json"), join(source, "package.json"));
-  put(source, ".gitignore", "node_modules\nstate/*/local/\n.vapi-state-hash/\n");
+  put(
+    source,
+    ".gitignore",
+    "node_modules\nstate/*/local/\n.vapi-state-hash/\n",
+  );
   put(source, "resources/dev/assistants/riley.md", rileyFile(MERGED));
   put(
     source,
@@ -197,11 +204,16 @@ const TAIL = [
   "if git diff --cached --quiet; then exit 0; fi",
   'git commit -q -m "chore: record promoted Vapi state"',
 ];
-const HELPER = "#!/bin/bash\ngit add -A -- ':(glob).vapi-state.*.json' 2>/dev/null || true\ngit add -A -- resources\n";
+const HELPER =
+  "#!/bin/bash\ngit add -A -- ':(glob).vapi-state.*.json' 2>/dev/null || true\ngit add -A -- resources\n";
 
 const STEPS: Record<string, { run: string[]; extraJob?: string[] }> = {
   "git add . after cd resources": {
-    run: ["git add .vapi-state.*.json 2>/dev/null || true", "cd resources && git add . && cd ..", ...TAIL],
+    run: [
+      "git add .vapi-state.*.json 2>/dev/null || true",
+      "cd resources && git add . && cd ..",
+      ...TAIL,
+    ],
   },
   "git add -A in another job's folder": {
     run: ["./scripts/stage-state.sh", ...TAIL],
@@ -213,7 +225,11 @@ const STEPS: Record<string, { run: string[]; extraJob?: string[] }> = {
     ],
   },
   "git add -A -- state inside an echo": {
-    run: ['echo "state is staged by the helper, not by: git add -A -- state"', "./scripts/stage-state.sh", ...TAIL],
+    run: [
+      'echo "state is staged by the helper, not by: git add -A -- state"',
+      "./scripts/stage-state.sh",
+      ...TAIL,
+    ],
   },
 };
 
@@ -249,7 +265,11 @@ test("a git add that leaves state/ out is not read as staging state/", () => {
     try {
       put(root, ".vapi-state.dev.json", STATE);
       put(root, "promotion.yml", "version: 1\n");
-      put(root, ".github/workflows/promotion.yml", workflow(step.run, step.extraJob));
+      put(
+        root,
+        ".github/workflows/promotion.yml",
+        workflow(step.run, step.extraJob),
+      );
       const read = commitStepRead(root, {}).kind;
       seen[name] = {
         commitsState: stepCommitsStateFolder(step.run),
@@ -271,7 +291,11 @@ test("with nothing seen to stage state/, a command that is not migrate leaves co
     // An apply-on-merge job in another CI system: no .github/workflows, no
     // promotion.yml, and a script that stages .vapi-state.*.json.
     put(root, ".vapi-state.dev.json", STATE);
-    put(root, ".gitlab-ci.yml", "deploy:\n  script:\n    - npm run apply -- dev\n    - ./scripts/commit-state.sh\n");
+    put(
+      root,
+      ".gitlab-ci.yml",
+      "deploy:\n  script:\n    - npm run apply -- dev\n    - ./scripts/commit-state.sh\n",
+    );
     put(root, "scripts/commit-state.sh", HELPER);
     stateLayoutPrepare(root, ORG, {});
     assert.deepEqual(

@@ -4,25 +4,25 @@
 // triggering the CLI argument parser in `config.ts`. Env-loading is inlined
 // here (rather than importing from `config.ts`) for the same reason.
 
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { baseDir } from "./base-dir.ts";
 import {
-  simRunItemTerminal,
-  simRunVerdict,
   type SimRun,
   type SimRunItem,
   type SimRunItemCounts,
   type SimRunVerdict,
+  simRunItemTerminal,
+  simRunVerdict,
 } from "./sim-result.ts";
 import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 import {
   VapiApiError,
-  vapiFetchJson,
   type VapiConnection,
+  vapiFetchJson,
 } from "./vapi-client.ts";
 
 const BASE_DIR = baseDir();

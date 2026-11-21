@@ -5,20 +5,8 @@ import { fileURLToPath } from "node:url";
 import { baseDir } from "./base-dir.ts";
 import type { CheckDefinition } from "./check-config.ts";
 import type { OrgConnection } from "./org-connection.ts";
-import {
-  OLD_LAYOUT_NOTICE,
-  stateFileRead,
-  stateLayout,
-  stateNoticesPrint,
-} from "./state-paths.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
-import type { PromotionGateResult } from "./promotion-gate.ts";
-import {
-  promotionChecksLoad,
-  promotionGatePlanLine,
-  promotionGateRun,
-} from "./promotion-gate.ts";
 import {
   promotionConfigParse,
   promotionPlanApply,
@@ -26,6 +14,18 @@ import {
   promotionStateParse,
   promotionTransitionValidate,
 } from "./promotion.ts";
+import type { PromotionGateResult } from "./promotion-gate.ts";
+import {
+  promotionChecksLoad,
+  promotionGatePlanLine,
+  promotionGateRun,
+} from "./promotion-gate.ts";
+import {
+  OLD_LAYOUT_NOTICE,
+  stateFileRead,
+  stateLayout,
+  stateNoticesPrint,
+} from "./state-paths.ts";
 
 interface PromotionArguments {
   pipeline?: string;

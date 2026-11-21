@@ -37,8 +37,15 @@ export const HASH_STORE_BASE_DIR = BASE_DIR;
 // Guard against a UUID that would escape its org folder. Platform UUIDs never
 // contain these, but reading them straight into a path warrants a check.
 function assertSafeUuid(uuid: string): void {
-  if (!uuid || uuid.includes("/") || uuid.includes("\\") || uuid.includes("..")) {
-    throw new Error(`Refusing to use unsafe hash-store key: ${JSON.stringify(uuid)}`);
+  if (
+    !uuid ||
+    uuid.includes("/") ||
+    uuid.includes("\\") ||
+    uuid.includes("..")
+  ) {
+    throw new Error(
+      `Refusing to use unsafe hash-store key: ${JSON.stringify(uuid)}`,
+    );
   }
 }
 

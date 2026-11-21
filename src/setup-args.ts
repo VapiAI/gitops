@@ -119,7 +119,8 @@ export function parseSetupArgs(argv: string[]): SetupArgs {
   if (slug === undefined) {
     return {
       mode: "error",
-      message: "Non-interactive setup needs an org name: npm run setup -- <org>",
+      message:
+        "Non-interactive setup needs an org name: npm run setup -- <org>",
     };
   }
 
@@ -131,7 +132,9 @@ export function readEnvValue(content: string, key: string): string | undefined {
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
-    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    const match = line.match(
+      /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/,
+    );
     if (!match || match[1] !== key) continue;
     let value = match[2]!.trim();
     if (

@@ -35,7 +35,12 @@ import { VapiApiError } from "../src/vapi-client.ts";
 delete process.env.VAPI_GITOPS_ORG_PIN;
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
-const CONNECTION = { token: "test-token-not-used", baseUrl: "http://stub", userAgent: "test", vapiClient: "test" };
+const CONNECTION = {
+  token: "test-token-not-used",
+  baseUrl: "http://stub",
+  userAgent: "test",
+  vapiClient: "test",
+};
 const SOURCE = "the VAPI_PRIVATE_API_KEY_ACME environment variable";
 
 // A probe stub: endpoint (without the query) → response or error.
@@ -65,13 +70,24 @@ function orgDir(options: { folder: boolean; pin?: string }): string {
 }
 
 const serverError = new VapiApiError("GET", "/tool", 503, "unavailable", "");
-const unauthorized = new VapiApiError("GET", "/assistant", 401, "Unauthorized", "");
+const unauthorized = new VapiApiError(
+  "GET",
+  "/assistant",
+  401,
+  "Unauthorized",
+  "",
+);
 
 // ── Finding the key's org ────────────────────────────────────────────────
 
 test("keyOrgFetch reads orgId from the first resource listed", async () => {
-  const { probeFetch, seen } = probes({ "/assistant": [{ id: "a1", orgId: "org-a" }] });
-  assert.deepEqual(await keyOrgFetch(CONNECTION, probeFetch), { kind: "found", orgId: "org-a" });
+  const { probeFetch, seen } = probes({
+    "/assistant": [{ id: "a1", orgId: "org-a" }],
+  });
+  assert.deepEqual(await keyOrgFetch(CONNECTION, probeFetch), {
+    kind: "found",
+    orgId: "org-a",
+  });
   assert.deepEqual(seen, ["/assistant?limit=1"]);
 });
 
@@ -79,12 +95,17 @@ test("keyOrgFetch moves on from empty lists and reads { results } pages", async 
   const { probeFetch, seen } = probes({
     "/structured-output": { results: [{ id: "s1", orgId: "org-a" }] },
   });
-  assert.deepEqual(await keyOrgFetch(CONNECTION, probeFetch), { kind: "found", orgId: "org-a" });
+  assert.deepEqual(await keyOrgFetch(CONNECTION, probeFetch), {
+    kind: "found",
+    orgId: "org-a",
+  });
   assert.equal(seen.length, 6);
 });
 
 test("keyOrgFetch reports an org that lists nothing as empty", async () => {
-  assert.deepEqual(await keyOrgFetch(CONNECTION, probes({}).probeFetch), { kind: "empty" });
+  assert.deepEqual(await keyOrgFetch(CONNECTION, probes({}).probeFetch), {
+    kind: "empty",
+  });
 });
 
 test("keyOrgFetch reports unknown when a probe fails and none finds an org", async () => {
@@ -96,7 +117,9 @@ test("keyOrgFetch reports unknown when a probe fails and none finds an org", asy
 
 test("keyOrgFetch stops at a rejected key", async () => {
   const { probeFetch, seen } = probes({ "/assistant": unauthorized });
-  assert.deepEqual(await keyOrgFetch(CONNECTION, probeFetch), { kind: "unknown" });
+  assert.deepEqual(await keyOrgFetch(CONNECTION, probeFetch), {
+    kind: "unknown",
+  });
   assert.deepEqual(seen, ["/assistant?limit=1"]);
 });
 
@@ -109,7 +132,13 @@ test("orgPinCheck pins an unpinned folder to the key's org", async () => {
     mkdirSync(join(root, "state", "acme"), { recursive: true });
     writeFileSync(stateFilePath(root, "acme"), "{}\n");
     const { probeFetch } = probes({ "/assistant": [{ orgId: "org-a" }] });
-    const outcome = await orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch });
+    const outcome = await orgPinCheck({
+      rootDir: root,
+      org: "acme",
+      connection: CONNECTION,
+      keySource: SOURCE,
+      probeFetch,
+    });
     assert.deepEqual(outcome, { kind: "pinned", orgId: "org-a" });
     assert.equal(
       readFileSync(orgPinFilePath(root, "acme"), "utf8"),
@@ -124,7 +153,13 @@ test("orgPinCheck makes no request for an org with no folder and no pin", async 
   const root = orgDir({ folder: false });
   try {
     const { probeFetch, seen } = probes({ "/assistant": [{ orgId: "org-a" }] });
-    const outcome = await orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch });
+    const outcome = await orgPinCheck({
+      rootDir: root,
+      org: "acme",
+      connection: CONNECTION,
+      keySource: SOURCE,
+      probeFetch,
+    });
     assert.deepEqual(outcome, { kind: "unpinned" });
     assert.deepEqual(seen, []);
     assert.equal(existsSync(join(root, "resources")), false);
@@ -138,7 +173,13 @@ test("orgPinCheck passes a key for the pinned org", async () => {
   try {
     const { probeFetch } = probes({ "/assistant": [{ orgId: "org-a" }] });
     assert.deepEqual(
-      await orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch }),
+      await orgPinCheck({
+        rootDir: root,
+        org: "acme",
+        connection: CONNECTION,
+        keySource: SOURCE,
+        probeFetch,
+      }),
       { kind: "match" },
     );
   } finally {
@@ -151,12 +192,21 @@ test("orgPinCheck refuses a key for another org, naming both orgs and the source
   try {
     const { probeFetch } = probes({ "/assistant": [{ orgId: "org-b" }] });
     await assert.rejects(
-      orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch }),
+      orgPinCheck({
+        rootDir: root,
+        org: "acme",
+        connection: CONNECTION,
+        keySource: SOURCE,
+        probeFetch,
+      }),
       (error: Error) => {
         assert.ok(error instanceof OrgPinMismatchError);
         assert.match(error.message, /belongs to Vapi org org-b/);
         assert.match(error.message, /pinned to org org-a/);
-        assert.match(error.message, /VAPI_PRIVATE_API_KEY_ACME environment variable/);
+        assert.match(
+          error.message,
+          /VAPI_PRIVATE_API_KEY_ACME environment variable/,
+        );
         assert.doesNotMatch(error.message, /test-token-not-used/);
         return true;
       },
@@ -170,7 +220,13 @@ test("orgPinCheck refuses a key whose org is empty when the folder is pinned", a
   const root = orgDir({ folder: true, pin: '{"orgId":"org-a"}' });
   try {
     await assert.rejects(
-      orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch: probes({}).probeFetch }),
+      orgPinCheck({
+        rootDir: root,
+        org: "acme",
+        connection: CONNECTION,
+        keySource: SOURCE,
+        probeFetch: probes({}).probeFetch,
+      }),
       /belongs to an org with no resources/,
     );
   } finally {
@@ -183,7 +239,13 @@ test("orgPinCheck can't verify when the probes fail, and says so", async () => {
   try {
     const { probeFetch } = probes({ "/assistant": serverError });
     assert.deepEqual(
-      await orgPinCheck({ rootDir: root, org: "acme", connection: CONNECTION, keySource: SOURCE, probeFetch }),
+      await orgPinCheck({
+        rootDir: root,
+        org: "acme",
+        connection: CONNECTION,
+        keySource: SOURCE,
+        probeFetch,
+      }),
       { kind: "unverified" },
     );
   } finally {
@@ -229,15 +291,24 @@ test("pull stops before listing anything when the key belongs to another org", a
     };
     delete env.VAPI_GITOPS_ORG_PIN;
     // Async spawn: the stub server runs in this process.
-    const result = await new Promise<{ code: number | null; output: string }>((resolve) => {
-      const child = spawn(process.execPath, ["--import", "tsx", "src/pull.ts", "acme"], { cwd: dir, env });
-      let output = "";
-      child.stdout.on("data", (chunk) => (output += chunk));
-      child.stderr.on("data", (chunk) => (output += chunk));
-      child.on("close", (code) => resolve({ code, output }));
-    });
+    const result = await new Promise<{ code: number | null; output: string }>(
+      (resolve) => {
+        const child = spawn(
+          process.execPath,
+          ["--import", "tsx", "src/pull.ts", "acme"],
+          { cwd: dir, env },
+        );
+        let output = "";
+        child.stdout.on("data", (chunk) => (output += chunk));
+        child.stderr.on("data", (chunk) => (output += chunk));
+        child.on("close", (code) => resolve({ code, output }));
+      },
+    );
     assert.equal(result.code, 1);
-    assert.match(result.output, /belongs to Vapi org org-b, but resources\/acme\/ is pinned to org org-a/);
+    assert.match(
+      result.output,
+      /belongs to Vapi org org-b, but resources\/acme\/ is pinned to org org-a/,
+    );
     assert.doesNotMatch(result.output, /wrong-org-key/);
     // Only the probe went out: no listing, no writes.
     assert.deepEqual(seen, ["/assistant?limit=1"]);

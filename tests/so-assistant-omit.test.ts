@@ -50,7 +50,11 @@ test("one unresolved ref among the authored assistant_ids drops the whole assist
     !("assistantIds" in result),
     "the key must be absent so PATCH leaves the platform value untouched",
   );
-  assert.equal(result.name, "intake-schema", "the rest of the payload survives");
+  assert.equal(
+    result.name,
+    "intake-schema",
+    "the rest of the payload survives",
+  );
 });
 
 test("a fully resolved assistantIds array is sent unchanged", () => {
@@ -243,9 +247,7 @@ test("updateStructuredOutputAssistantRefs: an untracked raw UUID counts as unres
     assert.equal(fetchCalls.length, 0);
     assert.ok(
       warnings.some((args) =>
-        args.some(
-          (arg) => typeof arg === "string" && arg.includes(UUID_2),
-        ),
+        args.some((arg) => typeof arg === "string" && arg.includes(UUID_2)),
       ),
       "the untracked UUID should be named in the warning",
     );

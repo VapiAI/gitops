@@ -1,5 +1,4 @@
 import "./engine-sandbox.ts";
-import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -13,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // Regression tests for P0-4.
 //

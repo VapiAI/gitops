@@ -1,5 +1,4 @@
 import "./engine-sandbox.ts";
-import { stateFilePath } from "../src/state-paths.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -15,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { stateFilePath } from "../src/state-paths.ts";
 
 // Stack C — push --dry-run regression coverage.
 //

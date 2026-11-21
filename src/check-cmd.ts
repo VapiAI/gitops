@@ -22,7 +22,7 @@ import type { CheckReportSkipped } from "./check-report.ts";
 import { checkReportJson, checkReportMarkdown } from "./check-report.ts";
 import type { CheckTargetResult } from "./check-run.ts";
 import { checkRunAll, outcomeState } from "./check-run.ts";
-import { checkAffectedBy, changedFilesRead } from "./check-select.ts";
+import { changedFilesRead, checkAffectedBy } from "./check-select.ts";
 import type { CommitStatus, GitHubStatusEnv } from "./check-status.ts";
 import {
   AGGREGATE_CONTEXT,
@@ -294,7 +294,12 @@ async function liveRun(
   const vapiClient = vapiClientGet("check");
   const vapi = (job: CheckJob): VapiConnection => {
     const connection = connections.get(job.check.runOrg)!;
-    return { token: connection.token, baseUrl: connection.baseUrl!, userAgent, vapiClient };
+    return {
+      token: connection.token,
+      baseUrl: connection.baseUrl!,
+      userAgent,
+      vapiClient,
+    };
   };
   const post = async (status: CommitStatus) => {
     if (statusEnv) await commitStatusPost(statusEnv, status);
@@ -399,9 +404,7 @@ async function checksRun(
 
 export async function checkCommandRun(
   args = process.argv.slice(2),
-  root = resolve(
-    process.env.VAPI_GITOPS_ROOT ?? baseDir(),
-  ),
+  root = resolve(process.env.VAPI_GITOPS_ROOT ?? baseDir()),
 ): Promise<number> {
   let parsed: CheckArgs;
   try {

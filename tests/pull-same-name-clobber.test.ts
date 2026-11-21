@@ -1,5 +1,4 @@
 import "./engine-sandbox.ts";
-import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -20,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { parseResourceDataFromFile } from "../src/resource-parse.ts";
 import { hashPayload } from "../src/state-serialize.ts";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Integration test for the state-aware adoption fix in pull.ts.

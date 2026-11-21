@@ -32,14 +32,20 @@ test("resolveApiKey: earlier source wins regardless of variable name", () => {
   // process.env (legacy name) beats a .env file (canonical name), preserving
   // the engine's "real environment overrides .env files" rule.
   assert.equal(
-    resolveApiKey({ VAPI_TOKEN: "from-env" }, { VAPI_PRIVATE_API_KEY: "from-file" }),
+    resolveApiKey(
+      { VAPI_TOKEN: "from-env" },
+      { VAPI_PRIVATE_API_KEY: "from-file" },
+    ),
     "from-env",
   );
 });
 
 test("resolveApiKey: blank values are ignored", () => {
   assert.equal(
-    resolveApiKey({ VAPI_PRIVATE_API_KEY: "  ", VAPI_TOKEN: "" }, { VAPI_TOKEN: "x" }),
+    resolveApiKey(
+      { VAPI_PRIVATE_API_KEY: "  ", VAPI_TOKEN: "" },
+      { VAPI_TOKEN: "x" },
+    ),
     "x",
   );
   assert.equal(resolveApiKey({}, {}), undefined);
@@ -61,24 +67,27 @@ test("missingApiKeyMessage points at the dashboard and the canonical name", () =
 // different .env.<org> key is reported.
 
 test("orgApiKeyVar upper-cases the slug and turns hyphens into underscores", () => {
-  assert.deepEqual(
-    ["acme", "acme-dev", "team2-prod"].map(orgApiKeyVar),
-    [
-      "VAPI_PRIVATE_API_KEY_ACME",
-      "VAPI_PRIVATE_API_KEY_ACME_DEV",
-      "VAPI_PRIVATE_API_KEY_TEAM2_PROD",
-    ],
-  );
+  assert.deepEqual(["acme", "acme-dev", "team2-prod"].map(orgApiKeyVar), [
+    "VAPI_PRIVATE_API_KEY_ACME",
+    "VAPI_PRIVATE_API_KEY_ACME_DEV",
+    "VAPI_PRIVATE_API_KEY_TEAM2_PROD",
+  ]);
 });
 
 test("resolveOrgApiKey: the org's own variable beats the generic one and the file", () => {
   assert.deepEqual(
     resolveOrgApiKey(
       "acme-dev",
-      { VAPI_PRIVATE_API_KEY_ACME_DEV: "org-key", VAPI_PRIVATE_API_KEY: "generic-key" },
+      {
+        VAPI_PRIVATE_API_KEY_ACME_DEV: "org-key",
+        VAPI_PRIVATE_API_KEY: "generic-key",
+      },
       { VAPI_PRIVATE_API_KEY: "file-key" },
     ),
-    { token: "org-key", source: "the VAPI_PRIVATE_API_KEY_ACME_DEV environment variable" },
+    {
+      token: "org-key",
+      source: "the VAPI_PRIVATE_API_KEY_ACME_DEV environment variable",
+    },
   );
 });
 
@@ -95,7 +104,11 @@ test("resolveOrgApiKey: another org's variable is ignored", () => {
 
 test("resolveOrgApiKey: a generic key matching the file has no warning", () => {
   assert.deepEqual(
-    resolveOrgApiKey("acme-dev", { VAPI_PRIVATE_API_KEY: "same" }, { VAPI_PRIVATE_API_KEY: "same" }),
+    resolveOrgApiKey(
+      "acme-dev",
+      { VAPI_PRIVATE_API_KEY: "same" },
+      { VAPI_PRIVATE_API_KEY: "same" },
+    ),
     { token: "same", source: "the VAPI_PRIVATE_API_KEY environment variable" },
   );
 });
@@ -107,8 +120,14 @@ test("resolveOrgApiKey: a generic key overriding a different file key warns", ()
     { VAPI_PRIVATE_API_KEY: "prod-key" },
   );
   assert.equal(resolved?.token, "dev-key");
-  assert.match(resolved?.warning ?? "", /not the different key in \.env\.acme-prod/);
-  assert.match(resolved?.warning ?? "", /export VAPI_PRIVATE_API_KEY_ACME_PROD/);
+  assert.match(
+    resolved?.warning ?? "",
+    /not the different key in \.env\.acme-prod/,
+  );
+  assert.match(
+    resolved?.warning ?? "",
+    /export VAPI_PRIVATE_API_KEY_ACME_PROD/,
+  );
 });
 
 test("resolveOrgApiKey: the warning never contains either key", () => {
@@ -139,6 +158,9 @@ test("resolveOrgApiKey: a placeholder in the file doesn't trigger the warning", 
       { VAPI_PRIVATE_API_KEY: "real-key" },
       { VAPI_PRIVATE_API_KEY: "your-vapi-private-key-here" },
     ),
-    { token: "real-key", source: "the VAPI_PRIVATE_API_KEY environment variable" },
+    {
+      token: "real-key",
+      source: "the VAPI_PRIVATE_API_KEY environment variable",
+    },
   );
 });

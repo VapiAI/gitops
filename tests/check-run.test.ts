@@ -14,7 +14,14 @@ import { checkRunAll, MIN_START_MS } from "../src/check-run.ts";
 // assistant's name picks the stub's behaviour for that run.
 
 type Behaviour =
-  "pass" | "fail" | "skipped" | "hang" | "slow" | "unmocked" | "402" | "502";
+  | "pass"
+  | "fail"
+  | "skipped"
+  | "hang"
+  | "slow"
+  | "unmocked"
+  | "402"
+  | "502";
 
 interface StubRun {
   id: string;

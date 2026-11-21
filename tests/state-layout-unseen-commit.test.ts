@@ -18,14 +18,14 @@ import { fileURLToPath } from "node:url";
 import { migrateAll } from "../src/migrate-hash-store.ts";
 import {
   COMMIT_STEP_FLAG,
-  OLD_LAYOUT_NOTICE,
-  StateLayoutError,
   commitStepAcknowledge,
   commitStepAsk,
   commitStepFilePath,
   commitStepRead,
+  OLD_LAYOUT_NOTICE,
   orgPinFileLegacyPath,
   orgPinFileWrite,
+  StateLayoutError,
   stateFileLegacyPath,
   stateFilePath,
   stateFileWrite,

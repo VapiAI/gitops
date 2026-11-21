@@ -1,8 +1,8 @@
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { extname, join, relative } from "path";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { baseDir } from "./base-dir.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // slug-utils is config-free (no config.ts side effects) — safe to import in

@@ -204,8 +204,15 @@ test("childRun throws when the script fails", () => {
 test("connectionLoad uses VAPI_PRIVATE_API_KEY_<ORG> before .env.<org>", () => {
   const root = mkdtempSync(join(tmpdir(), "org-connection-"));
   try {
-    writeFileSync(join(root, ".env.acme-dev"), "VAPI_PRIVATE_API_KEY=file-key\n");
-    const base = { rootDir: root, org: "acme-dev", tokensEnvName: "TEST_TOKENS" };
+    writeFileSync(
+      join(root, ".env.acme-dev"),
+      "VAPI_PRIVATE_API_KEY=file-key\n",
+    );
+    const base = {
+      rootDir: root,
+      org: "acme-dev",
+      tokensEnvName: "TEST_TOKENS",
+    };
     assert.deepEqual(
       withEnv("VAPI_PRIVATE_API_KEY_ACME_DEV", "org-var-key", () => [
         connectionLoad({ ...base, tokens: new Map([["acme-dev", "map-key"]]) }),
