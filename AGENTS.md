@@ -192,6 +192,7 @@ how sync, conflicts and output icons work:
 | Edit an assistant's system prompt | Edit the Markdown body of `resources/<org>/assistants/<name>.md` |
 | Change assistant settings | Edit the YAML frontmatter of the same file |
 | Add a tool / assistant / squad | Create `resources/<org>/tools/<name>.yml`, `assistants/<name>.md`, `squads/<name>.yml` |
+| Add another practice / location sharing the same assistants | Copy a squad file in `examples/nhs-shared-squads/`; change its `variableValues` and inline transfer numbers. |
 | Share prompt text or config between files | Put it in `templates/blocks/<name>.md` or `templates/config/<name>.yml` and include it (see [Blocks](#blocks)) |
 | See which resources a block edit reaches | `npm run sync-blocks` (a list; `--apply` deploys and needs a yes) |
 | Add post-call analysis | Create `resources/<org>/structuredOutputs/<name>.yml` and list it in the assistant's `artifactPlan.structuredOutputIds` |
