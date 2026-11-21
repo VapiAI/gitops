@@ -1,0 +1,23 @@
+name: nhs-test-practice-a
+members:
+  - assistantId: nhs-test-reception
+  - assistantId: nhs-test-appointments
+membersOverrides:
+  'tools:append':
+    - type: transferCall
+      function:
+        name: nhs-test-transfer
+        description: Demonstration only. Do not invoke; these Ofcom drama numbers are not working clinical services.
+      destinations:
+        - type: number
+          number: '+442079460101'
+          description: Example urgent reception destination, not for emergencies or dialing in this demonstration.
+        - type: number
+          number: '+442079460102'
+          description: Example administrative reception destination, not for dialing in this demonstration.
+  variableValues:
+    practice_name: Example Willow GP Practice
+    practice_mailbox: willow.demo@example.nhs.uk
+    opening_hours: Monday to Friday, 08:00 to 18:30 UK local time
+    urgent_handover_number: '+442079460101'
+    admin_handover_number: '+442079460102'
