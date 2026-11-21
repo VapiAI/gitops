@@ -11,9 +11,9 @@ The other commands are direct only.
 | --- | --- | --- |
 | `npm run setup` | `npm run setup [-- <org>]` | Connect an org: creates `.env.<org>` and `resources/<org>/`. |
 | `npm run validate` | `npm run validate -- <org>` | Check resource files offline: API shape rules, and that every reference names a file or a state entry. `apply` runs it first. On GitHub Actions, findings are also shown on the files in the pull request. |
-| `npm run apply` | `npm run apply -- <org> [types or paths] [--adopt <id>[=<uuid>]]` | **The default deploy:** pull, merge, then push. See [workflows](workflows.md). |
+| `npm run apply` | `npm run apply -- <org> [types or paths] [--adopt <id>[=<uuid>]]` | **The default deploy:** pull, merge, then push. The push preflight below runs before remote writes. See [workflows](workflows.md). |
 | `npm run pull` | `npm run pull -- <org> [--force] [--bootstrap]` | Sync platform changes down; never overwrites local edits unless `--force`. |
-| `npm run push` | `npm run push -- <org> [--dry-run] [--json] [--strict] [--adopt <id>[=<uuid>]]` | Push without pulling first. Prefer `apply`. `--strict` aborts before any API call if validation finds an error. |
+| `npm run push` | `npm run push -- <org> [--dry-run] [--json] [--strict] [--adopt <id>[=<uuid>]]` | Push without pulling first. Prefer `apply`. Preflight blocks validation errors and unresolved credential names in the write plan (selected resources plus auto-applied dependencies) before any remote mutation, including deletions. `--dry-run` uses the same gate. `--strict` additionally blocks error-severity findings outside the plan; warnings remain advisory. Bootstrap reads may run before preflight. |
 | `npm run rollback` | `npm run rollback -- <org> --list` or `--to <ISO>` | Restore a pre-deploy snapshot from `.vapi-state.<org>.snapshots/`. |
 | `npm run cleanup` | `npm run cleanup -- <org> [--force --confirm <org>]` | List platform resources with no file; delete them only with both flags. |
 | `npm run audit` | `npm run audit -- <org> [--type <type>]` | Report drift between files, state and the platform. Exits 1 on any finding, so it can run in CI. |

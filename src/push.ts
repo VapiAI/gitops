@@ -27,6 +27,7 @@ import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { prepareResourceLinks } from "./link-preflight.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { NameCollisionReport } from "./name-collisions.ts";
+import { computePushPlan, pushBlockingFindings } from "./push-plan.ts";
 import {
   filterResourcesByPaths,
   shouldApplyResourceType,
@@ -1717,10 +1718,7 @@ async function main(): Promise<void> {
       }
     }
     preflightComplete = true;
-    // Run client-side validators against the loaded resource set. In default
-    // mode, errors are surfaced as warnings so a single bad spec doesn't block
-    // an otherwise-good push. With --strict, any error-severity finding aborts
-    // before any API call.
+    // Validate the full local set; gate errors against the write plan below.
     console.log("\n🔎 Running validators...");
     const findings = [
       ...validateResources(loadedResources),
@@ -1740,18 +1738,6 @@ async function main(): Promise<void> {
       console.log(summarizeFindings(findings));
     } else {
       console.log("   ✅ No validation issues.");
-    }
-    const errorCount = findings.filter((f) => f.severity === "error").length;
-    if (errorCount > 0) {
-      if (STRICT_VALIDATION) {
-        console.error(
-          `\n❌ Validation failed (${errorCount} error(s)). --strict refuses to push. Fix the issues above or drop --strict.`,
-        );
-        process.exit(1);
-      }
-      console.warn(
-        `   ⚠️  ${errorCount} validation error(s) detected — push will continue (use --strict to abort on errors).`,
-      );
     }
 
     // Resolve credential names → UUIDs in all resource data before applying
@@ -1839,6 +1825,46 @@ async function main(): Promise<void> {
     const evals = shouldApplyResourceType("evals")
       ? filterResourcesByPaths(allEvals, "evals")
       : [];
+
+    const plan = computePushPlan(
+      {
+        tools,
+        structuredOutputs,
+        assistants,
+        squads,
+        personalities,
+        scenarios,
+        simulations,
+        simulationSuites,
+        evals,
+      },
+      {
+        tools: allTools,
+        structuredOutputs: allStructuredOutputs,
+        assistants: allAssistants,
+        squads: allSquads,
+        personalities: allPersonalities,
+        scenarios: allScenarios,
+        simulations: allSimulations,
+        simulationSuites: allSimulationSuites,
+        evals: allEvals,
+      },
+      state,
+    );
+    const blocking = pushBlockingFindings(findings, plan, STRICT_VALIDATION);
+    if (blocking.length > 0) {
+      console.error(summarizeFindings(blocking));
+      console.error(
+        `\n❌ Push preflight failed (${blocking.length} blocking finding(s))${STRICT_VALIDATION ? " (--strict)" : ""}. Nothing was written to the remote API.`,
+      );
+      process.exit(1);
+    }
+    const outsideErrors = findings.filter((f) => f.severity === "error").length;
+    if (outsideErrors > 0) {
+      console.warn(
+        `   ⚠️  ${outsideErrors} validation error(s) outside the push plan — push will continue (use --strict to abort on all errors).`,
+      );
+    }
 
     // Scoped run: print exactly what's in scope (the load above was quiet).
     if (partial) {

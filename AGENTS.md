@@ -200,6 +200,14 @@ are needed to remove a verified unchanged leftover of an already-adopted
 resource. The engine never auto-adopts, auto-allows new files or deletes edited
 files without approval.
 
+**When a deploy stops at the push preflight** ("Push preflight failed …
+Nothing was written to the remote API"), a resource the push would write (one
+you selected, or a dependency it would create) has a validation error or an
+unresolved credential. Fix the listed findings and rerun; nothing was applied,
+so there is nothing to roll back. Errors in files outside the push only warn
+(`--strict` blocks those too). The preflight only catches what `validate`
+knows about, so an API rejection can still leave a push partly applied.
+
 If something goes wrong: `npm run rollback -- <org> --list`, then (with a yes)
 `--to <timestamp>`. Details for every workflow:
 [Everyday workflows](docs/guides/workflows.md);
