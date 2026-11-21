@@ -110,6 +110,7 @@ you which stack PR closes the row.**
 | 37  | Resource validation ran only at deploy time, after merge | A config `apply` refuses could merge and block deploys and promotion | #32        | RESOLVED 2026-10-03 (#76)                       |
 | 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
 | 39  | Engine state looked like temp files and sat in three places | Deleting the state file makes the next push duplicate every resource | None       | RESOLVED 2026-11-17 (#97)                |
+| 40  | Nothing checked a `credentialIds` list against the keys an org has saved | A list that hides the org's own key runs the call on Vapi's key, silently | None       | RESOLVED 2026-11-17 (#96)                |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2200,6 +2201,64 @@ run's hand-off to the workflow, and an older workflow reads it there.
 ### Status
 
 **RESOLVED 2026-11-17.**
+
+---
+
+## 40. Nothing checked a `credentialIds` list against the keys an org has saved
+
+**[RESOLVED 2026-11-17] (#96)**
+
+**Discovered:** 2026-11-17, while planning one squad per site in an org that
+holds an Azure OpenAI key per site.
+
+### Problem
+
+A `credentialIds` list is the full set of keys a call may use, and every
+squad member's list is pooled into one. A provider left off the list does
+not fail the call: it runs on Vapi's own key. The engine could not tell a
+complete list from one that hides the org's own voice, transcriber or
+storage key.
+
+### Current behavior (Verified)
+
+- The state file records `name → uuid` for a credential and nothing else,
+  so the engine did not know which provider a saved key is for.
+- `validate` only checked that each name on a list exists in the state file.
+- Promotion dropped a `credentialIds` entry whose binding policy is `omit`
+  without saying so.
+- Two credentials with no name and the same provider get the same slug on
+  pull, and the second silently replaces the first in the state file.
+
+### Risk
+
+An org that must run only on its own keys sends audio or prompts to Vapi's
+provider accounts when one entry is missed in one squad file, with nothing
+in the push output or the call to show it.
+
+### Current mitigation
+
+None before this change, other than reading every list by hand.
+
+### Possible fix
+
+Record each credential's provider on pull, report a list that leaves out a
+key the org has saved for something the call uses, and let an org mark
+itself customer-keys-only so the report is an error there.
+
+### Status
+
+**RESOLVED 2026-11-17.** Pull writes
+`state/<org>/credential-providers.json`
+(`resources/<org>/.vapi-credential-providers.json` while the org's state is
+in the older layout) and warns when two
+credentials collide on one name. `validate` has the
+`credential-pin-hides-key` rule, an error in an org whose
+`.vapi-policy.yml` sets `customerKeysOnly: true`. The promotion plan warns
+when `omit` drops a `credentialIds` entry. See
+[Credential pins](docs/guides/credential-pins.md).
+
+Still open: the slug collision itself is only warned about, and the check
+does not know which models or regions a key covers.
 
 ---
 

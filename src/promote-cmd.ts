@@ -271,6 +271,7 @@ async function transitionRun(
   );
   for (const change of plan.changes)
     console.log(`  ${change.kind.padEnd(6)} ${change.path}`);
+  for (const warning of plan.warnings) console.warn(`  ⚠️  ${warning}`);
   if (plan.changes.length === 0) console.log("  no changes");
   if (plan.changes.length === 0) return false;
   const check = gates.checks.get(transition.source);

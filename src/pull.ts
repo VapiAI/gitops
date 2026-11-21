@@ -26,6 +26,11 @@ import {
   VAPI_ENV,
   VAPI_TOKEN,
 } from "./config.ts";
+import {
+  type CredentialKinds,
+  credentialKindOf,
+  credentialKindsWrite,
+} from "./credential-kinds.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import {
   classifyDrift,
@@ -338,19 +343,32 @@ async function pullCredentials(state: StateFile): Promise<void> {
     existingReverse.set(entry.uuid, slug);
   }
 
+  const kinds: CredentialKinds = {};
   for (const cred of credentials) {
     // Reuse existing slug if available, otherwise generate a new one
     let slug = existingReverse.get(cred.id);
     if (!slug) {
       slug = credentialSlug(cred);
     }
+    // Two keys with the same name (or none, and the same provider) get the
+    // same slug, and the later one replaces the earlier in state.
+    const twin = newSection[slug];
+    if (twin)
+      console.warn(
+        `   ⚠️  Credentials ${twin.uuid} and ${cred.id} are both named "${slug}"; only the second is kept. Give each a name of its own in Vapi, then pull again.`,
+      );
     newSection[slug] = existingReverse.has(cred.id)
       ? state.credentials[slug]!
       : { uuid: cred.id, origin: "pulled" };
+    const kind = credentialKindOf(cred);
+    if (kind) kinds[slug] = kind;
     console.log(`   🔑 ${slug} -> ${cred.id}`);
   }
 
   state.credentials = newSection;
+  // The state file stays a name → UUID map. What each key is for goes in a
+  // file of its own, which the credential-pin check reads.
+  credentialKindsWrite(BASE_DIR, VAPI_ENV, kinds);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -55,6 +55,8 @@ export interface PromotionPlan {
   rootDir: string;
   target: string;
   changes: PromotionChange[];
+  // Things a reviewer should know that don't stop the promotion.
+  warnings: string[];
 }
 
 export interface PromotionPlanOptions {
@@ -396,6 +398,8 @@ export function promotionBindingsApply(
   bindings: PromotionBindings,
   resolved: PromotionBindingsResolved,
   targetState: StateFile,
+  // Collects the credentialIds entries the "omit" policy left out.
+  omittedFromLists: string[] = [],
 ): unknown {
   function credential(ref: string): string | undefined {
     const alias = resolved.credentialReverse.get(ref) ?? ref;
@@ -436,10 +440,15 @@ export function promotionBindingsApply(
         continue;
       }
       if (key === "credentialIds" && Array.isArray(child)) {
-        output[key] = child
-          .filter((item): item is string => typeof item === "string")
-          .map(credential)
-          .filter((item): item is string => item !== undefined);
+        const kept: string[] = [];
+        for (const item of child) {
+          if (typeof item !== "string") continue;
+          const bound = credential(item);
+          if (bound) kept.push(bound);
+          else
+            omittedFromLists.push(resolved.credentialReverse.get(item) ?? item);
+        }
+        output[key] = kept;
         continue;
       }
       if (key === "phoneNumberIds" && Array.isArray(child)) {
@@ -599,14 +608,17 @@ export async function promotionPlanBuild(
   const targetByPath = new Map(target.map((file) => [file.path, file]));
   const sourcePaths = new Set([...wanted.values()].map((file) => file.path));
   const changes: PromotionChange[] = [];
+  const warnings: string[] = [];
   for (const file of wanted.values()) {
     const parsed = await resourceData(file, options.rootDir, options.source);
     const canonical = referencesCanonicalize(parsed.data, options.sourceState);
+    const omitted: string[] = [];
     const transformed = promotionBindingsApply(
       canonical,
       bindings,
       resolved,
       options.targetState,
+      omitted,
     );
     if (
       extname(file.path) === ".ts" &&
@@ -621,12 +633,19 @@ export async function promotionPlanBuild(
         ? file.content
         : renderContent(transformed, file.path, parsed.body);
     const existing = targetByPath.get(file.path);
-    if (!existing || existing.content !== content)
+    if (!existing || existing.content !== content) {
       changes.push({
         kind: existing ? "update" : "create",
         path: file.path,
         content,
       });
+      // A credentialIds list is the only set of keys a call may use, so an
+      // entry left out of it is not neutral the way an omitted credentialId is.
+      for (const alias of new Set(omitted))
+        warnings.push(
+          `${file.path}: credentialIds entry "${alias}" is left out in ${options.target} (binding policy "omit"). Calls there can use only the keys still on the list, so that provider would run on Vapi's own key.`,
+        );
+    }
   }
   for (const file of target)
     if (
@@ -636,7 +655,12 @@ export async function promotionPlanBuild(
     )
       changes.push({ kind: "delete", path: file.path });
   changes.sort((left, right) => left.path.localeCompare(right.path));
-  return { rootDir: options.rootDir, target: options.target, changes };
+  return {
+    rootDir: options.rootDir,
+    target: options.target,
+    changes,
+    warnings,
+  };
 }
 
 export async function promotionPlanApply(plan: PromotionPlan): Promise<void> {

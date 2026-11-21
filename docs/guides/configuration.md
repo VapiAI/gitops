@@ -49,6 +49,7 @@ Set these in GitHub under **Settings → Secrets and variables → Actions**.
 | --- | --- |
 | `promotion.yml` | Promotion pipelines between orgs. Start from `promotion.example.yml`. |
 | `vapi-checks.yml` | PR checks. Start from `vapi-checks.example.yml`. |
+| `resources/<org>/.vapi-policy.yml` | Rules the org must hold, written by hand. `customerKeysOnly: true` makes a `credentialIds` list that hides one of the org's keys an error instead of a warning. See [Credential pins](credential-pins.md). |
 | `resources/<org>/.vapi-ignore` | Platform resources this repo shouldn't manage, as glob patterns. See `resources/.vapi-ignore.example` and [YAML conventions](../learnings/yaml-conventions.md). |
 
 These are hand-written. The files the engine writes live apart from them, in
@@ -58,6 +59,7 @@ These are hand-written. The files the engine writes live apart from them, in
 | --- | --- |
 | `state/<org>/state.json` | Which platform resource (UUID) each file under `resources/<org>/` is. |
 | `state/<org>/org.json` | The Vapi org ID the folder belongs to. Written by the first command that can see the key's org, then checked by every command before any request: a key for another org stops the command. If a folder genuinely moves to another org, delete the file in a reviewed commit. |
+| `state/<org>/credential-providers.json` | The provider of each saved credential, by name. Written by every pull and committed with the state file. It holds no secret. The credential-pin check reads it. While an org's state is in the older layout it is `resources/<org>/.vapi-credential-providers.json`. |
 
 ## Other environment variables
 

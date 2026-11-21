@@ -26,6 +26,7 @@ import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
 import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { prepareResourceLinks } from "./link-preflight.ts";
 import { NameCollisionReport } from "./name-collisions.ts";
+import { orgPolicyRead } from "./org-policy.ts";
 import { computePushPlan, pushBlockingFindings } from "./push-plan.ts";
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
 import { writeSnapshot } from "./snapshot.ts";
@@ -37,6 +38,7 @@ import {
   validateNoIgnoredReferences,
   validateResources,
 } from "./validate.ts";
+import { validateCredentialPins } from "./validate-credential-pins.ts";
 import { validateReferences } from "./validate-refs.ts";
 import {
   changedFieldPaths,
@@ -57,6 +59,10 @@ const RESOURCE_LABEL_TO_TYPE: Record<string, ResourceType> = {
   "simulation suite": "simulationSuites",
 };
 
+import {
+  credentialKindsLabel,
+  credentialKindsRead,
+} from "./credential-kinds.ts";
 import {
   credentialForwardMap,
   credentialReverseMap,
@@ -1796,6 +1802,14 @@ async function main(): Promise<void> {
         org: VAPI_ENV,
         state,
         ignorePatterns: loadIgnorePatterns(),
+      }),
+      ...validateCredentialPins({
+        loaded: loadedResources,
+        org: VAPI_ENV,
+        state,
+        kinds: credentialKindsRead(BASE_DIR, VAPI_ENV),
+        kindsFile: credentialKindsLabel(BASE_DIR, VAPI_ENV),
+        customerKeysOnly: orgPolicyRead(RESOURCES_DIR).customerKeysOnly,
       }),
     ];
     if (findings.length > 0) {

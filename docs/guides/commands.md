@@ -233,6 +233,7 @@ tell it. Nothing changes inside the files.
 | --- | --- |
 | `.vapi-state.<org>.json` | `state/<org>/state.json` |
 | `resources/<org>/.vapi-org.json` | `state/<org>/org.json` |
+| `resources/<org>/.vapi-credential-providers.json` | `state/<org>/credential-providers.json` |
 | `.vapi-state-hash/<org>/` | `state/<org>/local/baselines/` |
 | `.vapi-state.<org>.snapshots/` | `state/<org>/local/snapshots/` |
 
@@ -345,6 +346,13 @@ git add state/commit-step.json
   baselines yet, the first `pull` after upgrading keeps every local file, and
   an edit made in the dashboard comes down on the next `pull`. Nothing is
   lost.
+- **`credential-pin-unchecked`** from `validate`, once for each org that has a
+  `credentialIds` list, until that org's credential providers record is
+  committed. It is a warning and changes no exit code. Run
+  `npm run pull -- <org> --bootstrap` and commit the file it writes:
+  `state/<org>/credential-providers.json`, or
+  `resources/<org>/.vapi-credential-providers.json` while the org's state is
+  in the older layout. See [credential pins](credential-pins.md).
 
 After `npm run migrate`:
 
@@ -373,6 +381,7 @@ for dir in state/*/; do
   org=$(basename "$dir")
   if [ -f "state/$org/state.json" ]; then mv "state/$org/state.json" ".vapi-state.$org.json"; fi
   if [ -f "state/$org/org.json" ]; then mv "state/$org/org.json" "resources/$org/.vapi-org.json"; fi
+  if [ -f "state/$org/credential-providers.json" ]; then mv "state/$org/credential-providers.json" "resources/$org/.vapi-credential-providers.json"; fi
   # This machine's baselines and snapshots. They are not in git, so everyone
   # who has pulled or pushed since the move runs these two on their machine.
   if [ -d "state/$org/local/baselines" ]; then mkdir -p .vapi-state-hash && mv "state/$org/local/baselines" ".vapi-state-hash/$org"; fi

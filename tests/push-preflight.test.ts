@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { computePushPlan, pushBlockingFindings } from "../src/push-plan.ts";
 import type { LoadedResources, ResourceType, StateFile } from "../src/types.ts";
 import { VALID_RESOURCE_TYPES } from "../src/types.ts";
+import { validateCredentialPins } from "../src/validate-credential-pins.ts";
 
 process.argv = ["node", "test", "preflight"];
 process.env.VAPI_TOKEN = "fake";
@@ -129,18 +130,71 @@ test("plan: squad auto-applied assistant errors block, including existing assist
   assert.deepEqual(pushBlockingFindings([], new Set(), false), []);
 });
 
+test("credential-pin severity and scope survive push preflight", () => {
+  const local = loaded({
+    assistants: {
+      bot: { credentialIds: ["model"], voice: { provider: "11labs" } },
+    },
+    squads: { team: { members: [{ assistantId: "bot" }] } },
+  });
+  const tracked = state();
+  tracked.credentials = { model: { uuid: UUID }, voice: { uuid: "voice-id" } };
+  const kinds = {
+    model: { provider: "openai" },
+    voice: { provider: "11labs" },
+  };
+  for (const customerKeysOnly of [false, true]) {
+    for (const recorded of [kinds, undefined]) {
+      const findings = validateCredentialPins({
+        loaded: local,
+        org: "preflight",
+        state: tracked,
+        kinds: recorded,
+        kindsFile: "state/preflight/credential-providers.json",
+        customerKeysOnly,
+      });
+      assert.equal(findings.length, recorded ? 2 : 1);
+      assert.ok(
+        findings.every(
+          (finding) =>
+            finding.rule ===
+            (recorded
+              ? "credential-pin-hides-key"
+              : "credential-pin-unchecked"),
+        ),
+      );
+      const plan = computePushPlan(
+        { ...loaded(), squads: local.squads },
+        local,
+        tracked,
+      );
+      assert.equal(
+        pushBlockingFindings(findings, plan, false).length,
+        customerKeysOnly ? findings.length : 0,
+      );
+      assert.deepEqual(pushBlockingFindings(findings, new Set(), false), []);
+      assert.equal(
+        pushBlockingFindings(findings, new Set(), true).length,
+        customerKeysOnly ? findings.length : 0,
+      );
+    }
+  }
+  assert.deepEqual(pushBlockingFindings([], new Set(), true), []);
+});
+
 async function runFixture(options: {
   scoped?: boolean;
   dryRun?: boolean;
   credential?: boolean;
   strict?: boolean;
+  credentialPin?: boolean;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "push-preflight-"));
   const mutations: string[] = [];
   const good = { id: UUID, name: "Good" };
   const bad = {
     id: "b0000000-0000-4000-8000-000000000002",
-    name: options.credential ? "Bad" : BAD,
+    name: options.credential || options.credentialPin ? "Bad" : BAD,
     ...(options.credential
       ? { server: { url: "https://example.com", credentialId: "missing" } }
       : {}),
@@ -173,11 +227,25 @@ async function runFixture(options: {
     writeFileSync(join(folder, "good.yml"), "name: Good\n");
     writeFileSync(
       join(folder, "zbad.yml"),
-      `name: ${bad.name}\n${options.credential ? "server:\n  url: https://example.com\n  credentialId: missing\n" : ""}`,
+      `name: ${bad.name}\n${options.credential ? "server:\n  url: https://example.com\n  credentialId: missing\n" : ""}${options.credentialPin ? "credentialIds:\n  - unused\nvoice:\n  provider: 11labs\n  voiceId: sarah\n" : ""}`,
     );
     const initial = state();
     initial.assistants.good = { uuid: good.id };
     initial.assistants.zbad = { uuid: bad.id };
+    if (options.credentialPin) {
+      initial.credentials.voice = { uuid: "voice-id" };
+      writeFileSync(
+        join(dir, "resources/preflight/.vapi-policy.yml"),
+        "customerKeysOnly: true\n",
+      );
+      writeFileSync(
+        join(dir, "resources/preflight/.vapi-credential-providers.json"),
+        JSON.stringify({
+          unused: { provider: "openai" },
+          voice: { provider: "11labs" },
+        }),
+      );
+    }
     writeFileSync(
       join(dir, ".vapi-state.preflight.json"),
       JSON.stringify(initial),
@@ -225,6 +293,12 @@ for (const [label, options] of [
   ["dry-run", { dryRun: true }],
   ["unresolved credential", { credential: true }],
   ["strict scoped push", { scoped: true, strict: true }],
+  ["credential pin", { credentialPin: true }],
+  ["credential pin dry-run", { credentialPin: true, dryRun: true }],
+  [
+    "credential pin strict scoped push",
+    { credentialPin: true, scoped: true, strict: true },
+  ],
 ] as const) {
   test(`preflight blocks ${label} before any mutation`, async () => {
     const result = await runFixture(options);
@@ -233,6 +307,8 @@ for (const [label, options] of [
     assert.deepEqual(result.mutations, []);
     if ("credential" in options)
       assert.match(result.output, /unresolved-credential/);
+    if ("credentialPin" in options)
+      assert.match(result.output, /credential-pin-hides-key/);
   });
 }
 
