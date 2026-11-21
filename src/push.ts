@@ -28,6 +28,10 @@ import { prepareResourceLinks } from "./link-preflight.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { NameCollisionReport } from "./name-collisions.ts";
 import { computePushPlan, pushBlockingFindings } from "./push-plan.ts";
+import {
+  filterResourcesByPaths,
+  shouldApplyResourceType,
+} from "./push-scope.ts";
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
 import { writeSnapshot } from "./snapshot.ts";
 import { mergeScoped } from "./state-merge.ts";
@@ -76,11 +80,9 @@ import {
   resolveReferences,
 } from "./resolver.ts";
 import {
-  FOLDER_MAP,
   loadResources,
   loadSingleResource,
   parseResourceFilePath,
-  pathMatchesFolder,
 } from "./resources.ts";
 import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
 import type {
@@ -1180,47 +1182,6 @@ function isPartialApply(): boolean {
   return !!(
     APPLY_FILTER.resourceTypes?.length || APPLY_FILTER.filePaths?.length
   );
-}
-
-function shouldApplyResourceType(type: ResourceType): boolean {
-  if (APPLY_FILTER.filePaths?.length) {
-    const folder = FOLDER_MAP[type];
-    return APPLY_FILTER.filePaths.some((fp) => pathMatchesFolder(fp, folder));
-  }
-  if (APPLY_FILTER.resourceTypes?.length) {
-    return APPLY_FILTER.resourceTypes.includes(type);
-  }
-  return true;
-}
-
-function filterResourcesByPaths<T>(
-  resources: ResourceFile<T>[],
-  type: ResourceType,
-): ResourceFile<T>[] {
-  if (!APPLY_FILTER.filePaths?.length) return resources;
-
-  const matchingIds = new Set<string>();
-
-  for (const filePath of APPLY_FILTER.filePaths) {
-    const resolvedInput = resolve(BASE_DIR, filePath);
-
-    for (const resource of resources) {
-      if (
-        resource.filePath === resolvedInput ||
-        resource.filePath.endsWith(filePath) ||
-        filePath.endsWith(resource.resourceId + ".yml") ||
-        filePath.endsWith(resource.resourceId + ".yaml") ||
-        filePath.endsWith(resource.resourceId + ".md") ||
-        filePath.endsWith(resource.resourceId + ".ts") ||
-        resource.filePath === filePath ||
-        resource.resourceId === filePath.replace(/\.(yml|yaml|md|ts)$/, "")
-      ) {
-        matchingIds.add(resource.resourceId);
-      }
-    }
-  }
-
-  return resources.filter((r) => matchingIds.has(r.resourceId));
 }
 
 function scopeLoadedResourcesForApply(

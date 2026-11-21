@@ -2116,3 +2116,20 @@ Alias cleanup now checks canonical file content against the UUID-keyed baseline,
 removes unchanged copies, and requires approval for edited/unbaselined copies.
 Link preflight groups all stop reasons with per-file commands (exit 1); `--json`
 emits the machine-readable report. Apply runs this read-only check before pull.
+
+## Scoped dependency creation approval (2026-11-21)
+
+- **Problem:** a scoped assistant push could bypass the new-file check and
+  POST an unlinked tool or structured output without approval.
+- **Current behavior:** link preflight follows the same scope selection and
+  auto-apply paths, including squad → assistant → tool/output, before writes.
+  All unlinked dependencies that would be created join the grouped stop report
+  with the selected file that needs them.
+- **Risk:** unexpected new remote resources and changed assistant references.
+- **Current mitigation:** review the whole plan, then explicitly approve
+  `--allow-new-files` or adopt the intended resource. Dependency paths need not
+  be listed separately; the flag applies throughout the selected scope.
+- **Possible fix:** implemented in `src/push-dependencies.ts` and
+  `src/link-preflight.ts`, with shared selection in `src/push-scope.ts`.
+- **Status:** resolved; local-HTTP tests cover blocked, approved, adopted,
+  linked, dry-run, JSON and transitive creation plans.

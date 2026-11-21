@@ -52,6 +52,20 @@ block and exits **1**, before API mutations, state writes or alias deletion.
 "Not linked to any resource in <org> yet" means pushing would create a new
 resource; the engine cannot infer new versus renamed/stale intent.
 
+Before a scoped push writes anything, preflight also follows its auto-apply
+paths: selected assistants' tools and structured outputs, and selected squads'
+member assistants plus their tools/outputs. This includes dependencies of
+already-linked member assistants. Any dependency that would need a POST is
+included in the same grouped report, marked "Needed by <selected file>" (also
+in JSON's `problem` field). Linked dependencies and safe reuse of repo-owned
+mappings behave as before. References without an auto-apply path do not expand
+the creation plan.
+
+`--allow-new-files` approves the selected scope and all its new dependencies;
+dependency paths do not need to be listed separately. Alternatively, explicitly
+adopt the dependency with `--adopt <id>[=<uuid>]`. Without approval, preflight
+stops with exit 1 before mutations, including during `--dry-run`.
+
 Each file has exact commands: approve `--allow-new-files` for genuinely new
 resources, approve `--adopt <id>[=<uuid>]` for a takeover, or merge needed edits
 and remove a renamed/stale file. A single ready-to-run combined command appears
