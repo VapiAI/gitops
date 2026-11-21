@@ -109,6 +109,33 @@ When the files are genuinely new resources:
 npm run apply -- <org> --allow-new-files
 ```
 
+Before deploying, review the collision preview (the flag still needs approval
+for every genuinely new file):
+
+```bash
+npm run push -- <org> --dry-run --allow-new-files
+```
+
+The final **Name collisions** section includes same-name state and dashboard
+resources for every planned create, including dependencies. Names alone never
+take over an org resource. The plan POSTs a new one unless you explicitly adopt:
+
+```bash
+npm run apply -- <org> --adopt my-agent assistants/my-agent.md
+# If multiple candidates exist:
+npm run apply -- <org> --adopt my-agent=<uuid> assistants/my-agent.md
+```
+
+Adoption needs the human's explicit yes for that resource, just like new-file
+approval. It requires a local file with no state mapping. Pull never links
+unknown remote UUIDs to local files by name, and dependency aliases are reused
+only when state records pushed/adopted ownership. Adoption removes unchanged alias files automatically. Edited aliases or
+missing baselines require per-file approval in a terminal; headless runs stop
+so you can merge their edits into the adopted file or remove them manually.
+
+Both `push --dry-run` and `apply --dry-run` perform read-only dashboard GETs
+for the collision preview; apply skips its pull stage to avoid local writes.
+
 Check each listed file before you pass the flag: it confirms every one is
 new. If a coding agent runs your deploys, it should show you the list rather
 than pass the flag itself; [`AGENTS.md`](../../AGENTS.md) instructs it to.
@@ -202,7 +229,7 @@ npm run cleanup -- <org> --force --confirm <org>
 ```
 
 Cleanup treats every platform resource that isn't in
-`.vapi-state.<org>.json` as an orphan, except those matched by
+`.vapi-state.<org>.json` as unmanaged, except those matched by
 `resources/<org>/.vapi-ignore`: it lists those as retained and never deletes
 them. Still read the dry-run list before a destructive run.
 
@@ -213,7 +240,7 @@ through the API, then refresh state:
 
 ```bash
 curl -X DELETE -H "Authorization: Bearer $VAPI_PRIVATE_API_KEY" \
-  https://api.vapi.ai/assistant/<orphan-uuid>
+  https://api.vapi.ai/assistant/<resource-uuid>
 npm run pull -- <org> --bootstrap
 ```
 

@@ -208,8 +208,8 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | `npm run setup` | Connect an org: create `.env.<org>` and `resources/<org>/` |
 | `npm run validate -- <org>` | Check resource files offline before deploying |
 | `npm run apply -- <org>` | Deploy: pull, merge, then push (the default) |
-| `npm run pull -- <org>` | Sync platform changes down without overwriting local edits |
-| `npm run push -- <org>` | Push without pulling first (prefer `apply`) |
+| `npm run pull -- <org>` | Sync platform changes down without overwriting local edits; unknown UUIDs get separate files, never name-linked |
+| `npm run push -- <org>` | Push without pulling first (prefer `apply`); review `--dry-run` Name collisions, and use `--adopt <id>[=<uuid>]` only with explicit approval to take over a resource; unchanged alias files are removed, edited/unbaselined copies need review. Push/apply support `--json` for one grouped link-preflight report (exit 1 on blockers); see [Running in CI](docs/guides/commands.md#running-in-ci). |
 | `npm run rollback -- <org>` | Restore a pre-deploy snapshot |
 | `npm run cleanup -- <org>` | Find, and optionally delete, platform resources with no file |
 | `npm run audit -- <org>` | Report drift between files, state and the platform |

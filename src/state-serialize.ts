@@ -58,7 +58,7 @@ export function hashPayload(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
-// Normalize a state value to the slim `{ uuid }` shape. Accepts a bare string
+// Normalize a state value, preserving optional provenance. Accepts a bare string
 // (oldest legacy form) or an object with a `uuid` field, and discards any other
 // fields a legacy file may still carry (lastPulledHash, lastPulledAt,
 // lastPushedHash). Returns undefined if no uuid can be recovered — at load time
@@ -72,20 +72,27 @@ export function asResourceState(value: unknown): ResourceState | undefined {
     typeof value === "object" &&
     typeof (value as { uuid?: unknown }).uuid === "string"
   ) {
-    return { uuid: (value as { uuid: string }).uuid };
+    const { uuid, origin } = value as ResourceState;
+    return {
+      uuid,
+      ...(origin === "pushed" || origin === "pulled" || origin === "adopted"
+        ? { origin }
+        : {}),
+    };
   }
   return undefined;
 }
 
-// Set the `{ uuid }` mapping for a resource. The state file no longer carries
-// any per-resource field beyond the UUID, so this is a plain assignment — the
-// drift baseline now lives in the hash store, not here.
+// Preserve provenance on existing entries, including legacy entries without it.
 export function upsertState(
   section: Record<string, ResourceState>,
   resourceId: string,
   patch: ResourceState,
 ): void {
-  section[resourceId] = { uuid: patch.uuid };
+  const existing = section[resourceId];
+  section[resourceId] = asResourceState(
+    existing ? { uuid: patch.uuid, origin: existing.origin } : patch,
+  )!;
 }
 
 // Pronunciation-dictionary drop check. Detects when a dictionary attachment

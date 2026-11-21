@@ -1,28 +1,4 @@
-// Dependency deduplication helpers for the push pipeline.
-//
-// On a targeted assistant push, `ensureToolExists` / `ensureStructuredOutputExists`
-// previously skipped auto-create only when (a) the dep id was UUID-shaped,
-// (b) `state.tools[depId]` was an exact key match, or (c) we'd already
-// auto-applied this id in the current run. Bootstrap pull stores resources
-// under `<slug>-<uuid8>` keys (e.g. `end-call-67aea057`), so a local file
-// referencing `my-end-call` would miss the exact-key check and POST a
-// duplicate dashboard tool. Repeated targeted pushes accumulated orphans
-// on the dashboard.
-//
-// This module's helpers detect those collisions BEFORE create:
-//   - `findExistingResourceByName` — match local payload's canonical name
-//     against existing state entries (renamed/state-only keys) and the live
-//     dashboard list. Returns the UUID to adopt, plus an `ambiguous` flag
-//     when multiple distinct UUIDs share the same name (real on-dashboard
-//     duplicates from prior bug runs — the caller should warn and surface
-//     the loser UUIDs so a follow-up `npm run cleanup` can prune them).
-//
-// `slugify` and `extractBaseSlug` previously lived inline here as a
-// deliberate copy of pull.ts's definitions — pull.ts imports config.ts
-// which `process.exit(1)`s under unit tests, blocking direct reuse. They
-// now live in `./slug-utils.ts` (config-free, side-effect-free) and are
-// re-exported below so any existing test importing them from this module
-// keeps working unchanged.
+// Dependency reuse requires recorded ownership; names alone are not authorization.
 
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
 import type { ResourceState } from "./types.ts";
@@ -37,7 +13,8 @@ export interface RemoteResource {
 
 export interface DedupMatch {
   uuid: string;
-  source: "state" | "dashboard" | "both";
+  origin: "pushed" | "adopted";
+  source: "state";
   ambiguous: boolean;
   // Other distinct UUIDs we saw under the same canonical name. Empty when
   // `ambiguous` is false. Caller should surface these in a warning so the
@@ -72,20 +49,7 @@ export function extractResourceName(
   return undefined;
 }
 
-// Find an existing resource (in state or dashboard) whose canonical name
-// matches the local payload's canonical name. Used by ensureToolExists /
-// ensureStructuredOutputExists to avoid creating a duplicate when bootstrap
-// pull has already stored the same dashboard resource under a different
-// state key.
-//
-// `localResourceId` is the key the engine WANTS to use in state. If a state
-// entry already exists under that exact key, the caller short-circuits BEFORE
-// calling this — so we exclude it here as a safety belt.
-//
-// Tiebreaker for >1 distinct UUID matching the same slugified name (i.e.
-// real on-dashboard duplicates from prior bug runs): pick lexically smallest
-// UUID for stable, deterministic adoption. Set `ambiguous=true` and surface
-// the loser UUIDs in `duplicateUuids` so the caller can warn.
+// Only repo-created or explicitly adopted state entries can be reused.
 export function findExistingResourceByName(args: {
   localResourceId: string;
   localPayload: NameablePayload;
@@ -96,26 +60,15 @@ export function findExistingResourceByName(args: {
   if (!localName) return undefined;
   const localSlug = slugify(localName);
 
-  // uuid -> set of source labels (state:<key>, dashboard:<id>)
-  const matches = new Map<string, Set<string>>();
+  const matches = new Map<string, "pushed" | "adopted">();
 
   for (const [stateKey, entry] of Object.entries(args.stateSection)) {
     if (stateKey === args.localResourceId) continue;
-    if (extractBaseSlug(stateKey) === localSlug) {
-      const set = matches.get(entry.uuid) ?? new Set<string>();
-      set.add(`state:${stateKey}`);
-      matches.set(entry.uuid, set);
-    }
-  }
-
-  for (const remote of args.remoteList ?? []) {
-    const remoteName =
-      (typeof remote.name === "string" && remote.name) || remote.function?.name;
-    if (!remoteName) continue;
-    if (slugify(remoteName) === localSlug) {
-      const set = matches.get(remote.id) ?? new Set<string>();
-      set.add(`dashboard:${remote.id}`);
-      matches.set(remote.id, set);
+    if (
+      extractBaseSlug(stateKey) === localSlug &&
+      (entry.origin === "pushed" || entry.origin === "adopted")
+    ) {
+      matches.set(entry.uuid, entry.origin);
     }
   }
 
@@ -123,18 +76,39 @@ export function findExistingResourceByName(args: {
 
   const sorted = [...matches.keys()].sort();
   const winner = sorted[0]!;
-  const winnerSources = matches.get(winner)!;
-  const hasState = [...winnerSources].some((s) => s.startsWith("state:"));
-  const hasDashboard = [...winnerSources].some((s) =>
-    s.startsWith("dashboard:"),
-  );
-  const source: DedupMatch["source"] =
-    hasState && hasDashboard ? "both" : hasState ? "state" : "dashboard";
 
   return {
     uuid: winner,
-    source,
+    origin: matches.get(winner)!,
+    source: "state",
     ambiguous: matches.size > 1,
     duplicateUuids: sorted.slice(1),
   };
+}
+
+export function warnUnownedNameMatches(args: {
+  resourceType: string;
+  localResourceId: string;
+  localPayload: NameablePayload;
+  stateSection: Record<string, ResourceState>;
+  remoteList: RemoteResource[];
+  reusedUuid?: string;
+}): void {
+  const name = extractResourceName(args.localPayload) ?? args.localResourceId;
+  const slug = slugify(name);
+  const matches = new Map<string, string>();
+  for (const [key, entry] of Object.entries(args.stateSection)) {
+    if (extractBaseSlug(key) === slug) matches.set(entry.uuid, name);
+  }
+  for (const remote of args.remoteList) {
+    const remoteName = extractResourceName(remote);
+    if (remoteName && slugify(remoteName) === slug)
+      matches.set(remote.id, remoteName);
+  }
+  for (const [uuid, remoteName] of matches) {
+    if (uuid === args.reusedUuid) continue;
+    console.warn(
+      `  ⚠️  Existing ${args.resourceType} "${remoteName}" (${uuid}) was NOT linked by name. --adopt ${args.localResourceId} takes it over instead.`,
+    );
+  }
 }

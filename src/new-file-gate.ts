@@ -29,6 +29,7 @@ import { matchesIgnore, VAPI_ENV } from "./config.ts";
 import { listExistingResourceIds } from "./pull.ts";
 import { FOLDER_MAP } from "./resources.ts";
 import { extractBaseSlug } from "./slug-utils.ts";
+import { formatStopReport, shellQuote } from "./stop-report.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
@@ -40,6 +41,7 @@ export interface OrphanFile {
   type: ResourceType;
   resourceId: string;
   relativePath: string;
+  sameNameResourceIds?: string[];
 }
 
 export interface RenameSource {
@@ -178,7 +180,20 @@ export function detectOrphanYamls(
       ) {
         continue;
       }
-      orphans.push({ type, resourceId: localId, relativePath });
+      const sameNameResourceIds = Object.entries(state[type])
+        .filter(
+          ([id, entry]) =>
+            id.toLowerCase() ===
+              `${localId}-${entry.uuid.slice(0, 8)}`.toLowerCase() &&
+            /^[a-f0-9]{8}$/i.test(entry.uuid.slice(0, 8)),
+        )
+        .map(([id]) => id);
+      orphans.push({
+        type,
+        resourceId: localId,
+        relativePath,
+        ...(sameNameResourceIds.length ? { sameNameResourceIds } : {}),
+      });
       const baseSet = orphanBaseSlugsByType.get(type) ?? new Set<string>();
       baseSet.add(baseSlugFn(localId));
       orphanBaseSlugsByType.set(type, baseSet);
@@ -222,96 +237,21 @@ export function detectOrphanYamls(
 // AI-agent stdout captures get plain text.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface AnsiPalette {
-  red: string;
-  yellow: string;
-  bold: string;
-  reset: string;
-}
-
-function buildPalette(color: boolean): AnsiPalette {
-  if (!color) {
-    return { red: "", yellow: "", bold: "", reset: "" };
-  }
-  return {
-    red: "\x1b[31m",
-    yellow: "\x1b[33m",
-    bold: "\x1b[1m",
-    reset: "\x1b[0m",
-  };
-}
-
 export function formatGateMessage(
   report: OrphanReport,
   env: string,
   options: { color?: boolean } = {},
 ): string {
-  const ansi = buildPalette(options.color === true);
-  const { red, yellow, bold, reset } = ansi;
-
-  const lines: string[] = [];
-  const count = report.orphans.length;
-  const scopeNote = report.scopedToPaths
-    ? " (scoped to the selective-push file set)"
-    : "";
-
-  lines.push("");
-  lines.push(
-    `${red}${bold}❌ Push refused${reset}${red}: ${count} file(s) on disk have no state-file UUID mapping for env "${env}"${scopeNote}.${reset}`,
+  const text = formatStopReport(
+    report.orphans.map((file) => ({
+      file: file.relativePath,
+      resourceType: file.type,
+      problem: `Not linked to any resource in ${env} yet.`,
+      fix: "If new, approve --allow-new-files. If same-named, approve --adopt. If renamed/stale, delete the file after preserving needed edits.",
+      command: `npm run push -- ${shellQuote(env)} --allow-new-files ${shellQuote(file.relativePath)} OR npm run push -- ${shellQuote(env)} --adopt ${shellQuote(file.resourceId)} ${shellQuote(file.relativePath)} OR rm -- ${shellQuote(file.relativePath)}`,
+      needsChoice: true,
+    })),
+    env,
   );
-  lines.push("");
-  lines.push("The engine cannot tell whether each is:");
-  lines.push("  - A NEW resource you intentionally want to create");
-  lines.push(
-    "  - A RENAME of an existing resource (state has the old slug; YAML has new name)",
-  );
-  lines.push("  - A MOVED file (file copied without state updated)");
-  lines.push("");
-  lines.push(`${bold}Files without state entry:${reset}`);
-  for (const orphan of report.orphans) {
-    lines.push(`  - ${orphan.relativePath}`);
-  }
-
-  lines.push("");
-  lines.push(
-    `${bold}State entries with no matching local file (possible rename SOURCES):${reset}`,
-  );
-  if (report.possibleRenameSources.length === 0) {
-    lines.push("  (none — no plausible rename pairings found)");
-  } else {
-    for (const src of report.possibleRenameSources) {
-      const shortUuid = `${src.uuid.slice(0, 8)}…`;
-      lines.push(
-        `  - ${src.type}/${src.resourceId} → ${shortUuid} (no ${src.resourceId} on disk)`,
-      );
-    }
-  }
-
-  lines.push("");
-  lines.push(
-    `${yellow}${bold}⚠️ FOR AI AGENTS reading this:${reset} do NOT auto-pass --allow-new-files. Pause`,
-  );
-  lines.push(
-    "and ask the human to confirm, for EACH file above, whether it is:",
-  );
-  lines.push("  (a) intentionally new (then pass --allow-new-files)");
-  lines.push(
-    "  (b) a rename (then rename it back and use `npm run pull` to re-key",
-  );
-  lines.push("      state, or apply the rename explicitly)");
-  lines.push("  (c) stale cruft (then delete the local file)");
-  lines.push("");
-  lines.push(
-    "If the user is reachable, surface this gate to them. If running headless,",
-  );
-  lines.push(
-    "abort. Silent --allow-new-files defeats the entire purpose of this gate.",
-  );
-  lines.push("");
-  lines.push(
-    `To proceed (after confirming intent for every file above): re-run with ${bold}--allow-new-files${reset}.`,
-  );
-  lines.push("");
-
-  return lines.join("\n");
+  return options.color ? `\x1b[31m\x1b[33m\x1b[1m${text}\x1b[0m` : text;
 }

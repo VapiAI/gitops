@@ -99,3 +99,22 @@ test("canonicalize: preserves array order", () => {
   const result = canonicalize({ ids: ["c", "a", "b"] });
   assert.deepEqual(result, { ids: ["c", "a", "b"] });
 });
+
+test("state provenance survives serialization and updates without backfilling legacy entries", () => {
+  for (const origin of ["pushed", "pulled", "adopted"] as const) {
+    const entry = { uuid: "u", origin };
+    assert.deepEqual(asResourceState(JSON.parse(JSON.stringify(entry))), entry);
+    const section = { agent: entry };
+    upsertState(section, "agent", { uuid: "u", origin: "pulled" });
+    assert.deepEqual(section.agent, entry);
+  }
+  const legacy: Record<string, ResourceState> = { agent: { uuid: "u" } };
+  upsertState(legacy, "agent", { uuid: "u", origin: "pulled" });
+  assert.deepEqual(legacy.agent, { uuid: "u" });
+  const fresh: Record<string, ResourceState> = {};
+  upsertState(fresh, "agent", { uuid: "u", origin: "pushed" });
+  assert.deepEqual(fresh.agent, { uuid: "u", origin: "pushed" });
+  assert.deepEqual(asResourceState({ uuid: "u", origin: "invalid" }), {
+    uuid: "u",
+  });
+});
