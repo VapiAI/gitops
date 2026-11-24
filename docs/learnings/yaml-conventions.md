@@ -143,15 +143,15 @@ Mixing `|` and `|-` inconsistently across resources makes the rendered output ha
 
 ---
 
-## Anchors and Aliases: Engine Support Varies
+## Anchors, Aliases and Merge Keys: Use Blocks Instead
 
-YAML supports `&anchor` and `*alias` for DRY-ing repeated structures. **Many gitops engines do NOT round-trip anchors faithfully** — they parse them, but on save they expand the alias inline. This means:
+YAML supports `&anchor` and `*alias` for DRY-ing repeated structures, and `<<: *alias` for "this mapping plus overrides". Neither is a safe way to share content here:
 
-- A resource file you wrote with anchors will get rewritten with the anchors expanded after the next push.
-- The diff after `npm run pull` will look enormous because every alias becomes its full expansion.
-- Reviewers reading the rewritten file lose the "this section is intentionally a copy of X" signal.
+- **An alias is parsed, but pull writes it back expanded.** `npm run pull` rewrites a resource file from the platform's copy, so every alias becomes its full expansion, the diff looks enormous, and reviewers lose the "this section is intentionally a copy of X" signal.
+- **A merge key (`<<`) is not processed at all.** The engine parses it as an ordinary key and sends it to Vapi as a field named `<<`, so the "defaults plus overrides" pattern does not work. `npm run validate` warns when it finds one.
+- **An anchor only reaches inside one file**, and never into the Markdown body where an assistant's prompt lives.
 
-**Recommendation:** avoid anchors/aliases in gitops resource YAML even if your local parser supports them. Duplicate the content explicitly. The maintenance cost of duplication is real but visible; the maintenance cost of silently-expanding anchors is invisible until someone tries to update both copies and only finds one.
+**Recommendation:** share content with [blocks](../guides/blocks.md). A config block is a YAML file under `templates/config/` that any mapping includes with `$include: <name>`, with the file's own keys winning; a prompt block is a Markdown file under `templates/blocks/` that a system prompt includes with `@include <name>`. Blocks work across files and orgs, and pull never rewrites a file that uses them.
 
 ---
 

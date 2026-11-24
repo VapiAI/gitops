@@ -39,6 +39,7 @@ change, before running:
 | --- | --- |
 | `npm run apply`, `npm run push` | Changes live assistants |
 | `npm run promote -- … --apply` | Changes the next org (often production) |
+| `npm run sync-blocks -- --apply` | Changes live resources in every org that uses the edited block |
 | `npm run rollback -- <org> --to …` | Reverts live resources |
 | `npm run cleanup -- <org> --force --confirm <org>` | Deletes platform resources |
 | `npm run pull -- <org> --force` | Overwrites local edits |
@@ -48,8 +49,12 @@ change, before running:
 
 Safe to run without asking: `npm run validate`, `npm run audit`,
 `npm run check -- … --dry-run`, `npm run promote` without `--apply` (a plan),
+`npm run sync-blocks` without `--apply` (a list),
 plain `npm run pull` (it never overwrites local edits), `npm run push -- <org>
 --dry-run`, `npm run build`, `npm test`.
+
+- `variable-undefined`: set squad members' `{{vars}}` in squad/member `variableValues`; `--strict` blocks missing values.
+- `transfer-number-liquid`: transfer destination numbers must be literal; put per-squad numbers in an inline `transferCall` in `membersOverrides["tools:append"]`.
 
 **2. Never handle API keys.** Don't ask the human to paste a key into chat,
 don't print or read out `.env.*` files, never pass a key as a command-line
@@ -149,6 +154,8 @@ precisely.
    never ask for a real key just to validate. Don't weaken the check or the
    workflow to get past it, and never edit the state file, `.vapi-ignore` or
    `state/<org>/org.json` to make a reference resolve: fix the name, or pull.
+   - `variable-undefined`: set squad members' `{{vars}}` in squad/member `variableValues`; `--strict` blocks this warning in validate and push.
+   - `transfer-number-liquid`: use literal transfer numbers; append a per-squad inline `transferCall` in the squad's `membersOverrides["tools:append"]`.
 4. **Build PR checks offline** if `vapi-checks.yml` exists:
    `npm run check -- --all --dry-run`. Fix anything it reports.
 5. **Review the dry-run Name collisions list**, then **deploy only with a yes**
@@ -202,7 +209,8 @@ Nothing was written to the remote API"), a resource the push would write (one
 you selected, or a dependency it would create) has a validation error or an
 unresolved credential. Fix the listed findings and rerun; nothing was applied,
 so there is nothing to roll back. Errors in files outside the push only warn
-(`--strict` blocks those too). The preflight only catches what `validate`
+(`--strict` blocks those too, as well as `variable-undefined` warnings).
+The preflight only catches what `validate`
 knows about, so an API rejection can still leave a push partly applied.
 
 If something goes wrong: `npm run rollback -- <org> --list`, then (with a yes)
@@ -220,6 +228,9 @@ how sync, conflicts and output icons work:
 | Edit an assistant's system prompt | Edit the Markdown body of `resources/<org>/assistants/<name>.md` |
 | Change assistant settings | Edit the YAML frontmatter of the same file |
 | Add a tool / assistant / squad | Create `resources/<org>/tools/<name>.yml`, `assistants/<name>.md`, `squads/<name>.yml` |
+| Add another practice / location sharing the same assistants | Copy a squad file in `examples/nhs-shared-squads/`; change its `variableValues` and inline transfer numbers. |
+| Share prompt text or config between files | Put it in `templates/blocks/<name>.md` or `templates/config/<name>.yml` and include it (see [Blocks](#blocks)) |
+| See which resources a block edit reaches | `npm run sync-blocks` (a list; `--apply` deploys and needs a yes) |
 | Add post-call analysis | Create `resources/<org>/structuredOutputs/<name>.yml` and list it in the assistant's `artifactPlan.structuredOutputIds` |
 | Write simulation tests | Create files under `resources/<org>/simulations/` (see [Simulations](#simulations-and-pr-checks)) |
 | Check files offline | `npm run validate -- <org>` |
@@ -288,6 +299,24 @@ derived key, dropping `gitops` and `metadata` only if they become empty.
 | --- | --- |
 | The display name | Change `name` in the file (or in the dashboard, then pull). The filename stays. |
 | The file itself | A renamed or moved file has no state entry. With the human's agreement, use `--adopt <new-resourceId>=<uuid>` to keep managing the same platform resource under the new path. Without adoption, an unlinked file is created as a new resource, not matched by name. |
+
+### Blocks
+
+A line that says only `@include <name>` in a system prompt, or a
+`$include: <name>` key in a mapping, pulls in a shared file from
+`resources/<org>/templates/` (the org's own) or `templates/` (shared by
+every org). The engine expands it before validate, push and PR checks.
+
+- To change shared wording or settings, edit the block, not the files that
+  include it. Never replace a marker with the block's text.
+- A block edit changes every resource that includes it, in every org. Run
+  `npm run sync-blocks` and show the human the list before any deploy.
+- Don't use Liquid `{% include %}` / `{% render %}` or YAML merge keys (`<<`)
+  to share content: Vapi and the engine drop them silently.
+- Commit `state/<org>/blocks.json` when push changes it; never edit or
+  delete it.
+
+Syntax, merge rules and dashboard-edit handling: [Blocks](docs/guides/blocks.md).
 
 ### Excluding resources (`.vapi-ignore`)
 
@@ -405,6 +434,7 @@ For changes under `src/`, `tests/` or `.github/`:
 | --- | --- |
 | Every resource setting, with examples | [Resource reference](docs/guides/resource-reference.md) |
 | Minimal tested files | [File formats](docs/guides/file-formats.md), [`examples/starter/`](examples/starter/README.md) |
+| Shared prompt text and config | [Blocks](docs/guides/blocks.md), [`examples/blocks/`](examples/blocks/README.md) |
 | System prompts | [Writing system prompts](docs/guides/writing-prompts.md), [Vapi Prompt Optimization Guide](docs/Vapi%20Prompt%20Optimization%20Guide.md) |
 | Commands, flags, test-call output | [Commands](docs/guides/commands.md) |
 | Sync, conflicts, drift, output icons | [How the engine works](docs/guides/how-it-works.md), [sync behavior](docs/learnings/sync-behavior.md) |

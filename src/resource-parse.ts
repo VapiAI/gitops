@@ -10,6 +10,12 @@ import { existsSync, readFileSync } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
 import { extname, join, relative } from "path";
 import { parse as parseYaml } from "yaml";
+import {
+  type BlockUsage,
+  blockLayers,
+  blocksExpand,
+  blocksUsedIn,
+} from "./blocks.ts";
 import { isBackupCopyFile } from "./slug-utils.ts";
 import type { ResourceFile, ResourceType } from "./types.ts";
 
@@ -40,12 +46,7 @@ export const FOLDER_MAP: Record<ResourceType, string> = {
   evals: "evals",
 };
 
-// Single source of truth for resource file extensions. Imported by
-// `recanonicalize.ts` so the precondition-5 "both files exist" check
-// stays in lockstep with the loader — without this, a `.ts`-authored
-// resource paired with a UUID-suffixed `.ts` twin would be invisible to
-// the safety check and silently allow the data-loss shape the
-// recanonicalize header explicitly refuses.
+// Single source of truth for resource file extensions.
 export const VALID_EXTENSIONS: readonly string[] = [
   ".yml",
   ".yaml",
@@ -104,9 +105,8 @@ export function markdownResourceParse(
   return config;
 }
 
-export function parseResourceDataFromFile(
-  filePath: string,
-): Record<string, unknown> {
+// A `.md`, `.yml` or `.yaml` resource file as written, blocks not expanded.
+function resourceFileParse(filePath: string): Record<string, unknown> {
   const ext = extname(filePath);
 
   if (ext === ".md") {
@@ -122,6 +122,36 @@ export function parseResourceDataFromFile(
     throw new Error(`YAML must be an object in ${filePath}`);
   }
   return data;
+}
+
+// The resource a file describes, blocks expanded: what push sends, and so
+// what every drift hash is computed from. Blocks are looked up from
+// `resourcesDir` (the org's folder), so a file that uses them needs it.
+export function parseResourceDataFromFile(
+  filePath: string,
+  resourcesDir?: string,
+): Record<string, unknown> {
+  const data = resourceFileParse(filePath);
+  if (resourcesDir) return blocksExpand(data, blockLayers(resourcesDir)).data;
+  if (blocksUsedIn(data))
+    throw new Error(
+      `${filePath} uses blocks; pass its org folder to expand them`,
+    );
+  return data;
+}
+
+// Whether a resource file uses blocks. Pull must never rewrite such a file:
+// the platform holds the expanded text, so writing it back would replace
+// every marker with a copy of the block. A file that can't be parsed counts
+// as using blocks when its text looks like it does.
+export function resourceFileUsesBlocks(filePath: string): boolean {
+  try {
+    return blocksUsedIn(resourceFileParse(filePath));
+  } catch {
+    return /^\s*(?:@include\s+\S|(?:- )?["']?\$include["']?\s*:)/m.test(
+      readFileSync(filePath, "utf-8"),
+    );
+  }
 }
 
 /**
@@ -196,6 +226,7 @@ export async function resourceDirLoad<T>(
   }
 
   const filePaths = await scanDirectory(resourceDir, resourceDir);
+  const layers = blockLayers(resourcesDir);
   const resources: ResourceFile<T>[] = [];
   const seenIds = new Map<string, string>(); // resourceId -> filePath
 
@@ -274,7 +305,16 @@ export async function resourceDirLoad<T>(
       }
     }
 
-    resources.push({ resourceId, filePath, data });
+    let blocks: BlockUsage;
+    try {
+      ({ data, usage: blocks } = blocksExpand(data, layers));
+    } catch (error) {
+      throw new Error(
+        `Failed to expand blocks in "${folderPath}/${relativePath}": ${error instanceof Error ? error.message : error}`,
+      );
+    }
+
+    resources.push({ resourceId, filePath, data, blocks });
     if (!options.quiet) console.log(`  📦 Loaded ${resourceId}`);
   }
 
@@ -286,6 +326,8 @@ export interface OrgResource {
   id: string;
   filePath: string;
   data: Record<string, unknown>;
+  // The blocks the file resolved to; empty when it uses none.
+  blocks: BlockUsage;
 }
 
 export interface OrgResourcesReadOptions {
@@ -319,6 +361,7 @@ export async function orgResourcesRead(
         id: file.resourceId,
         filePath: file.filePath,
         data: file.data,
+        blocks: file.blocks ?? {},
       });
     }
   }

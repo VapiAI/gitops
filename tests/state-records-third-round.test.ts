@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 //
 //   resources/<org>/.vapi-org.json                     shown as deleted between migrate and its commit
 //   resources/<org>/.vapi-credential-providers.json    written by every pull
+//   resources/<org>/.vapi-blocks.json                  written by a push that uses blocks
 //
 // If pull counted one as a local edit, the keep rule would be off and pull
 // would overwrite the committed change with the platform's copy.
@@ -191,6 +192,21 @@ test("older layout: a credential providers record the engine wrote, not committe
       "resources/dev/.vapi-credential-providers.json",
       '{\n  "crm-api": {\n    "provider": "webhook"\n  }\n}\n',
     ),
+  );
+  assert.equal(kept, true, "pull overwrote the merged change");
+});
+
+test("older layout: a blocks record a push rewrote, not committed yet, is not a local edit", async () => {
+  // What a push that used a block and recorded a new UUID leaves behind: the
+  // state file and the blocks record, both modified. (With the record as the
+  // only changed file the keep rule happens to stay on, because the first
+  // line of git status loses its leading space before it is parsed.)
+  const kept = await pullKeepsMerged(
+    freshClone("root", { ["resources/dev/.vapi-blocks.json"]: "{}\n" }),
+    (root) => {
+      put(root, ".vapi-state.dev.json", STATE.replace("\n}\n", "\n}\n\n"));
+      put(root, "resources/dev/.vapi-blocks.json", '{\n  "blocks": {}\n}\n');
+    },
   );
   assert.equal(kept, true, "pull overwrote the merged change");
 });

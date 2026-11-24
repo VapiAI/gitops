@@ -43,6 +43,9 @@ export interface ResourceFile<T = Record<string, unknown>> {
   resourceId: string; // Path relative to resource type dir (e.g., "support/intake" or just "intake")
   filePath: string;
   data: T;
+  // Block file → content hash for each block the file resolved to (see
+  // blocks.ts). Absent or empty when the file uses none.
+  blocks?: Record<string, string>;
 }
 
 export interface VapiResponse {

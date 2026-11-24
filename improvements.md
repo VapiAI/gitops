@@ -111,6 +111,8 @@ you which stack PR closes the row.**
 | 38  | Promotion can't carry a simulation that uses a stock personality by UUID | Gated orgs, and any promoted tests, need local personality files | None       | Open                                            |
 | 39  | Engine state looked like temp files and sat in three places | Deleting the state file makes the next push duplicate every resource | None       | RESOLVED 2026-11-17 (#97)                |
 | 40  | Nothing checked a `credentialIds` list against the keys an org has saved | A list that hides the org's own key runs the call on Vapi's key, silently | None       | RESOLVED 2026-11-17 (#96)                |
+| 41  | Shared prompt text and config had no home, and pull would erase any include marker | Repeated paragraphs drift apart across assistants and orgs | None       | RESOLVED 2026-11-16 (#94)                |
+| 42  | An org with no credentials is re-bootstrapped on every push, which disables the drift check | A dashboard edit is overwritten without a warning in such an org | None       | Open                                     |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2259,6 +2261,131 @@ when `omit` drops a `credentialIds` entry. See
 
 Still open: the slug collision itself is only warned about, and the check
 does not know which models or regions a key covers.
+
+---
+
+## 41. Shared prompt text and config had no home, and pull would erase any include marker
+
+### Problem
+
+Assistants in one org, and the same assistant across orgs, repeat the same
+paragraphs (safety wording, tone) and the same settings (voice, transcriber).
+There was no way to keep one copy. YAML anchors only reach inside one file and
+are expanded by the next pull; merge keys (`<<`) are not processed at all and
+are sent to the API as a field; Liquid `{% include %}` renders as nothing on a
+call.
+
+### Current behavior (Verified)
+
+Before blocks: a marker of any kind in a resource file was sent to Vapi as
+literal text. Had the loader expanded it, `pull` would still have destroyed
+it: pull rewrites a file from the platform copy not only when the dashboard
+is ahead but whenever the two sides agree (the `clean` case falls through to
+the write), and under `--force` and `--resolve=theirs`. Promotion compares
+file text, so a change to a shared file would never have reached the next org.
+
+### Risk
+
+Safety wording drifts between copies. With a naive include, the first pull
+after a push silently turns every marker back into a copy.
+
+### Current mitigation
+
+None needed; fixed.
+
+### Possible fix (landed)
+
+Blocks (`src/blocks.ts`, `docs/guides/blocks.md`): `@include <name>` in system
+prompts and `$include` in mappings, looked up in `resources/<org>/templates/`
+then `templates/`, expanded in the loader. Pull never writes a file that uses
+blocks and saves the dashboard version beside it instead. Push records the
+block content each resource went up with in
+`state/<org>/blocks.json` (`resources/<org>/.vapi-blocks.json` while the
+org's state is in the older layout); `npm run sync-blocks` and the promotion
+plan (`sync` entries) read it to find resources a block edit has not reached.
+
+### Status
+
+**[RESOLVED 2026-11-16] (#94)**
+
+---
+
+## 42. An org with no credentials is re-bootstrapped on every push, which disables the drift check
+
+### Problem
+
+The push drift check refuses to overwrite a resource that was edited in the
+dashboard since the last pull. In an org that has no credentials stored in
+Vapi, it never refuses.
+
+### Current behavior (Verified)
+
+`maybeBootstrapState` in `src/push.ts` treats a state file with an empty
+`credentials` section as uninitialized and runs a bootstrap pull before
+applying. A bootstrap pull writes every resource's baseline as the hash of
+the platform's current content. The drift check then compares the platform
+with a baseline taken a moment earlier, finds them equal, and pushes. Seen
+in `tests/blocks-sync.test.ts`: with the stub's `/credential` route removed,
+the dashboard-edited assistant is PATCHed with no drift message; with one
+credential present it is refused.
+
+### Risk
+
+A dashboard edit in such an org is overwritten silently by `push`, `apply`
+and `sync-blocks --apply`, with no prompt in a terminal and no block in CI.
+An org that uses only Vapi-provided models, voices and numbers can have no
+credentials.
+
+### Current mitigation
+
+None. `npm run pull -- <org>` first still shows a dashboard edit before it is
+overwritten, for anyone who reads the output.
+
+### Possible fix
+
+Decide "uninitialized" from the resource sections alone (and from a marker
+that a pull has completed), not from the credentials section being empty; or
+have a bootstrap pull leave existing baselines alone.
+
+### Status
+
+**Open.**
+
+---
+
+## 43. Missing practice variables reached live prompts literally
+
+Shared assistants can run in many practice squads, each supplying practice
+details through variableValues. A missing value stayed as `{{name}}` on a call.
+`variable-undefined` now checks each squad member's expanded prompts and attached
+tools against squad/member values, Vapi built-ins and runtime assignments. It
+warns by default and blocks with `--strict`. Standalone assistants remain
+unchecked because their values may arrive when a call is created.
+
+### Status
+
+**Implemented.** Covered by `tests/validate-variables.test.ts`.
+
+---
+
+## 44. Liquid transfer destination numbers passed offline validation
+
+### Problem
+
+The API rejects Liquid in transfer number destinations: the default E.164
+validator rejects it, and disabling that check still requires alphanumeric
+characters with an optional leading plus. Runtime template support does not
+make these tool payloads API-valid. A push could therefore fail partway through.
+
+### Current behavior and mitigation
+
+`transfer-number-liquid` reports an error before deployment for standalone and
+inline transfer tools, including member/squad appended tools. Use literal
+per-practice numbers in inline squad overrides; see `examples/nhs-shared-squads`.
+
+### Status
+
+**Implemented.** Covered by `tests/validate-transfer-numbers.test.ts`.
 
 ---
 
