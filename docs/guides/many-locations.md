@@ -166,10 +166,20 @@ The full rules are in [Config blocks](blocks.md#config-blocks).
 squad. `apply` stops when it meets files it has never deployed, and lists
 them:
 
-The grouped link preflight reports "Not linked to any resource in north-clinic
-yet" for each unlinked file, with commands for creating a new resource or
-explicitly adopting an existing one. It stops before file deletion, state
-writes or remote mutations. Same-named resources are never linked automatically.
+```text
+Push stopped: review 3 file(s) for north-clinic. Exit code: 1.
+The engine cannot tell new / renamed / stale files apart; pushing an unlinked file would create a new resource.
+Nothing has been changed by this preflight check.
+- resources/north-clinic/assistants/pharmacy.md (assistants)
+  Not linked to any resource in north-clinic yet.
+  Fix: If new, approve --allow-new-files. If renamed/stale, delete the file (merge any needed edits first).
+  Command: npm run push -- north-clinic --allow-new-files resources/north-clinic/assistants/pharmacy.md OR rm -- resources/north-clinic/assistants/pharmacy.md
+…
+Do not auto-pass --adopt or --allow-new-files; get explicit approval.
+```
+
+In the test run it only read from the org: it sent no write to the API,
+created no `state/` folder and left the env file as it was.
 
 Read the list. When every file on it is meant to be new, confirm with the
 flag (see
@@ -180,24 +190,24 @@ npm run apply -- north-clinic --allow-new-files
 npm run apply -- south-clinic --allow-new-files
 ```
 
-If a file should manage an existing resource instead, get explicit approval
-for `--adopt <resourceId>[=<uuid>]`, not `--allow-new-files`. Unchanged leftover
-alias files are removed using their last-synced baseline; edited or unbaselined
-aliases require review. Never bypass this choice just to make a deploy pass.
-
-After linking, push preflights the write plan, including dependencies, before
-any remote mutation. Validation errors and unresolved credentials in that
-plan block even a dry run. `--strict` also blocks errors outside the plan and
-`variable-undefined` warnings; other warnings remain advisory.
-
 ```text
-   ⚠️  bypassing new-file gate: creating 3 new resource(s) on the dashboard
   ✨ Creating assistant: pharmacy
   ✨ Creating assistant: triage
   ✨ Creating squad: front-desk
 …
 ✅ Apply complete! (Pull → Merge → Push)
 ```
+
+If a file should manage an existing resource instead, get explicit approval
+for `--adopt <resourceId>[=<uuid>]`, not `--allow-new-files`. Resources with
+the same name are never linked automatically. Unchanged leftover alias files
+are removed using their last-synced baseline; edited or unbaselined aliases
+require review. Never bypass this choice just to make a deploy pass.
+
+After linking, push preflights the write plan, including dependencies, before
+any remote mutation. Validation errors and unresolved credentials in that
+plan block even a dry run. `--strict` also blocks errors outside the plan and
+`variable-undefined` warnings; other warnings remain advisory.
 
 Then commit what you copied and what the deploy recorded:
 
@@ -207,7 +217,10 @@ git commit -m "Add two clinics that share blocks"
 ```
 
 `state/<org>/` is the engine's record of each org: `state.json` maps resource
-IDs to UUIDs and `org.json` pins the folder to its org. One other file in it,
+IDs to UUIDs and `org.json` pins the folder to its org. In the test run the
+first deploy did not write `org.json`; the next command that reached the org
+did, and printed `📌 Pinned resources/north-clinic/ to Vapi org … Commit that file.`
+One other file in it,
 `blocks.json`, records which block text each resource was last pushed with.
 That record is how `sync-blocks` knows what a block edit has not reached
 yet. Commit `state/` whenever a command changes it, and never edit it by
@@ -579,6 +592,8 @@ and greeting against its variable values and known built-ins. A block that
 says `We are open {{opening_hours}}.` produces `variable-undefined` when a
 squad uses it without defining `opening_hours`. Normal validate and push
 warn; `--strict` makes the finding blocking in both, including scoped pushes.
+`sync-blocks` does not take `--strict`: run
+`npm run validate -- <org> --strict` before a rollout.
 This is a static squad check, not a guarantee about values supplied on a live
 call. Give every variable a value in each squad that uses the block; see
 [Override Merge Order](../learnings/squads.md#override-merge-order).
@@ -614,10 +629,10 @@ run at all:
 - **Live simulations.** The PR check was built with `--dry-run`, so no
   simulation ran.
 
-That run predates the current adoption/link preflight and undefined-variable
-checks. The descriptions of those checks above reflect the current engine;
-the old first-deploy refusal output has been replaced with a description of
-the grouped report.
+Five things on this page describe the engine without a run behind them:
+`--adopt`, pull meeting a resource whose name matches an unlinked file, the
+removal of leftover alias files, the `metadata.gitops.folderPath` field of an
+assistant in a subfolder, and a dry run stopped by an unresolved credential.
 
 The stand-in is not Vapi. Where a result depends on how the API stores an
 update, as with the dashboard-only setting in step 5, check it on your own
