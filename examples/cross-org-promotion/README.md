@@ -13,12 +13,13 @@ This fixture shows the shape of a linear `example-dev` → `example-staging` →
 
 The example state files intentionally assign different UUIDs to the same
 logical resources in each org. They are reference material only. Never copy
-them into the repository root or use them with a real Vapi organization.
+them into the repository's `state/` folder or use them with a real Vapi
+organization.
 
 ## What the promotion engine does
 
 The engine resolves tools, structured outputs, assistants, and credentials
-through each org's own `.vapi-state.<org>.json`. `npm run promote` mirrors only
+through each org's own `state/<org>/state.json`. `npm run promote` mirrors only
 the resource patterns reviewed in `promotion.yml`, includes referenced managed
 dependencies, and lets the destination push mint or reuse that org's UUIDs.
 Source-org managed UUIDs are never copied as destination references.
@@ -85,7 +86,7 @@ Use real disposable orgs, not the fake IDs in this directory.
 After the first successful apply, compare the three generated state files:
 
 ```bash
-node -e 'for (const org of ["example-dev", "example-staging", "example-production"]) { const s = require(`./.vapi-state.${org}.json`); console.log(org, { credential: s.credentials["crm-api"].uuid, tool: s.tools["customer-lookup"].uuid, assistant: s.assistants["support-assistant"].uuid }); }'
+node -e 'for (const org of ["example-dev", "example-staging", "example-production"]) { const s = require(`./state/${org}/state.json`); console.log(org, { credential: s.credentials["crm-api"].uuid, tool: s.tools["customer-lookup"].uuid, assistant: s.assistants["support-assistant"].uuid }); }'
 ```
 
 The aliases should be identical while every org's physical IDs are different.

@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
@@ -11,13 +12,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import type { CheckDefinition } from "../src/check-config.ts";
+import { promotionConfigParse } from "../src/promotion.ts";
 import type { PromotionGateResult } from "../src/promotion-gate.ts";
 import {
   gateBudgetMinutes,
   gateDeadline,
   gateResultReduce,
 } from "../src/promotion-gate.ts";
-import { promotionConfigParse } from "../src/promotion.ts";
 
 // promote-cmd.ts binds its root at import: one fixture repo for the file,
 // rebuilt per test.
@@ -67,7 +68,7 @@ function fixture(args: FixtureArgs): void {
   if (args.checks !== undefined)
     write("vapi-checks.yml", `version: 1\nchecks:\n${args.checks}`);
   for (const org of Object.keys(args.orgs))
-    write(`.vapi-state.${org}.json`, "{}\n");
+    write(`state/${org}/state.json`, "{}\n");
   for (const [path, content] of Object.entries(args.files ?? {}))
     write(path, content);
   write(".gitignore", "tmp/\n.env.*\n");

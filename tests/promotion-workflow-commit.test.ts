@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -12,6 +13,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { migrateAll } from "../src/migrate-hash-store.ts";
+import {
+  OLD_LAYOUT_NOTICE,
+  StateLayoutError,
+  stateLayoutPrepare,
+} from "../src/state-paths.ts";
 
 // Runs the promotion workflow's real "Commit reconciled files and UUID
 // state" step (read from .github/workflows/promotion.yml, run with bash -e)
@@ -73,7 +80,14 @@ function repoReset(
     "promotion.yml",
     `version: 1\norgs:\n${orgs.map((org) => `  ${org}: {}`).join("\n")}\npipelines:\n${pipelineYaml}\n`,
   );
-  for (const org of orgs) write(`.vapi-state.${org}.json`, "{}\n");
+  for (const org of orgs) write(`state/${org}/state.json`, "{}\n");
+  // The repository carries the workflow whose commit step runs here:
+  // `npm run migrate` moves state only under a commit step it can see
+  // stages state/.
+  write(
+    ".github/workflows/promotion.yml",
+    readFileSync(join(REPO, ".github/workflows/promotion.yml"), "utf8"),
+  );
   write(".gitignore", "tmp/\n.env.*\n");
   for (const [path, content] of Object.entries(files)) write(path, content);
   git(CLONE, "add", "-A");
@@ -83,7 +97,10 @@ function repoReset(
 
 // promote --all --apply: every apply writes its org's state (as apply.ts
 // does), and the `failAt`-th apply (1-based) then fails.
-async function promote(failAt?: number): Promise<string | undefined> {
+async function promote(
+  failAt?: number,
+  statePath = (org: string) => `state/${org}/state.json`,
+): Promise<string | undefined> {
   let applies = 0;
   process.env.VAPI_PROMOTION_TOKENS = '{"a":"t","b":"t","c":"t"}';
   const log = console.log;
@@ -93,7 +110,7 @@ async function promote(failAt?: number): Promise<string | undefined> {
       childRun: (script: string, org: string) => {
         if (script !== "src/apply.ts") return;
         write(
-          `.vapi-state.${org}.json`,
+          statePath(org),
           `{"assistants":{"intake":{"uuid":"uuid-${org}"}}}\n`,
         );
         if (++applies === failAt)
@@ -149,8 +166,8 @@ test("a failed promotion still pushes state and the files of transitions that ap
       code: step.code,
       b: originFile("resources/b/assistants/intake.yml"),
       c: originFile("resources/c/assistants/intake.yml"),
-      bState: originFile(".vapi-state.b.json"),
-      cState: originFile(".vapi-state.c.json"),
+      bState: originFile("state/b/state.json"),
+      cState: originFile("state/c/state.json"),
     },
     {
       failure: "src/apply.ts failed for c",
@@ -196,7 +213,7 @@ test("a successful promotion commits every resource change and the state", async
       failure,
       step.code,
       originFile("resources/b/assistants/intake.yml"),
-      originFile(".vapi-state.b.json"),
+      originFile("state/b/state.json"),
     ],
     [
       undefined,
@@ -227,6 +244,212 @@ test("a promotion that changed nothing pushes nothing", async () => {
       git(ORIGIN, "rev-parse", "main"),
     ],
     [undefined, 0, true, head],
+  );
+});
+
+// ── Repositories that still keep state at the root ───────────────────────
+
+const OLD_STATE = (org: string) => `.vapi-state.${org}.json`;
+
+// The fixture as a repository looked before state/ existed.
+function repoResetOldLayout(): void {
+  repoReset(
+    ["a", "b"],
+    { release: ["a", "b"] },
+    { "resources/a/assistants/intake.yml": INTAKE("a") },
+  );
+  for (const org of ["a", "b"])
+    git(CLONE, "mv", `state/${org}/state.json`, OLD_STATE(org));
+  git(CLONE, "commit", "-qm", "old layout");
+  git(CLONE, "push", "-q", "origin", "main");
+}
+
+test("a repository that has not moved its state still commits the root state file", async () => {
+  repoResetOldLayout();
+  // A CI run writes state in place (tests/state-layout.test.ts).
+  const failure = await promote(undefined, OLD_STATE);
+  const step = commitStep("success");
+  assert.deepEqual(
+    [
+      failure,
+      step.code,
+      originFile(OLD_STATE("b")),
+      originFile("state/b/state.json"),
+      originFile("resources/b/assistants/intake.yml"),
+    ],
+    [
+      undefined,
+      0,
+      '{"assistants":{"intake":{"uuid":"uuid-b"}}}\n',
+      undefined,
+      INTAKE("a"),
+    ],
+    step.output,
+  );
+});
+
+test("a move is committed whole: the old file's removal and the new file in one commit", async () => {
+  repoResetOldLayout();
+  const base = git(ORIGIN, "rev-parse", "main").trim();
+  // `npm run migrate`, then a promotion, committed by the same run.
+  await migrateAll(CLONE);
+  const failure = await promote();
+  const step = commitStep("success");
+  assert.deepEqual(
+    {
+      failure,
+      code: step.code,
+      commits: git(ORIGIN, "rev-list", "--count", `${base}..main`).trim(),
+      old: [originFile(OLD_STATE("a")), originFile(OLD_STATE("b"))],
+      a: originFile("state/a/state.json"),
+      b: originFile("state/b/state.json"),
+    },
+    {
+      failure: undefined,
+      code: 0,
+      commits: "1",
+      old: [undefined, undefined],
+      a: "{}\n",
+      b: '{"assistants":{"intake":{"uuid":"uuid-b"}}}\n',
+    },
+    step.output,
+  );
+});
+
+test("a failed promotion after a move still commits the move whole", async () => {
+  repoResetOldLayout();
+  await migrateAll(CLONE);
+  const failure = await promote(1);
+  const step = commitStep("failure");
+  assert.deepEqual(
+    [
+      failure,
+      step.code,
+      originFile(OLD_STATE("b")),
+      originFile("state/b/state.json"),
+      originFile("state/a/state.json"),
+    ],
+    [
+      "src/apply.ts failed for b",
+      0,
+      undefined,
+      '{"assistants":{"intake":{"uuid":"uuid-b"}}}\n',
+      "{}\n",
+    ],
+    step.output,
+  );
+});
+
+// The step as it was before state/ existed. It stages only the root files,
+// so on a moved repository it would commit their removal and nothing else.
+const OLD_COMMIT_STEP = [
+  "set -euo pipefail",
+  "git add -A -- ':(glob).vapi-state.*.json'",
+  "git add -A -- resources",
+  'git commit -qm "chore: record promoted Vapi state [skip promotion]"',
+].join("\n");
+
+test("the step from before state/ can't commit a moved repository, so the engine refuses to run under it", async () => {
+  repoReset(
+    ["a", "b"],
+    { release: ["a", "b"] },
+    { "resources/a/assistants/intake.yml": INTAKE("a") },
+  );
+  const head = git(ORIGIN, "rev-parse", "main");
+  await promote();
+  const old = spawnSync("bash", ["-e", "-c", OLD_COMMIT_STEP], {
+    cwd: CLONE,
+    encoding: "utf8",
+  });
+  write(
+    ".github/workflows/promotion.yml",
+    `jobs:\n  promote:\n    steps:\n      - run: |\n${OLD_COMMIT_STEP.replace(/^/gm, "          ")}\n`,
+  );
+  assert.deepEqual(
+    [
+      // git add fails on a pathspec that matches no file: nothing is
+      // committed, and the UUIDs this run recorded never reach git.
+      old.status,
+      git(ORIGIN, "rev-parse", "main"),
+      (() => {
+        try {
+          stateLayoutPrepare(CLONE, "b", { CI: "true" });
+          return "ran";
+        } catch (error) {
+          return error instanceof StateLayoutError ? "stopped" : "other";
+        }
+      })(),
+    ],
+    [128, head, "stopped"],
+    `${old.stdout}${old.stderr}`,
+  );
+});
+
+// A repository whose own commit step stages the old state file through a
+// script. The engine can't read that, so it must leave state where that
+// script looks for it, on a person's machine and in the run.
+const HELPER_COMMIT_STEP = [
+  "set -euo pipefail",
+  "./scripts/stage-state.sh",
+  "git add -A -- resources",
+  'git commit -qm "chore: record promoted Vapi state [skip promotion]"',
+  "git push -q origin main",
+].join("\n");
+
+test("under a commit step the engine can't read, state stays at the root and keeps being committed", async () => {
+  repoResetOldLayout();
+  write(
+    ".github/workflows/promotion.yml",
+    `jobs:\n  promote:\n    steps:\n      - run: |\n${HELPER_COMMIT_STEP.replace(/^/gm, "          ")}\n`,
+  );
+  write(
+    "scripts/stage-state.sh",
+    "#!/bin/bash\ngit add -A -- ':(glob).vapi-state.*.json'\n",
+  );
+  spawnSync("chmod", ["+x", join(CLONE, "scripts/stage-state.sh")]);
+  git(CLONE, "add", "-A");
+  git(CLONE, "commit", "-qm", "ci: our own commit step");
+  git(CLONE, "push", "-q", "origin", "main");
+  // A command on a person's machine, `npm run migrate` without the flag,
+  // then the run in CI.
+  const local = ["a", "b"].flatMap((org) => stateLayoutPrepare(CLONE, org, {}));
+  const migrated = (await migrateAll(CLONE)).orgs.flatMap((org) => org.moved);
+  const run = ["a", "b"].flatMap((org) =>
+    stateLayoutPrepare(CLONE, org, { CI: "true" }),
+  );
+  const failure = await promote(undefined, OLD_STATE);
+  const step = spawnSync(
+    "bash",
+    [
+      "-e",
+      "-c",
+      `git config user.name t && git config user.email t@example.com\n${HELPER_COMMIT_STEP}`,
+    ],
+    { cwd: CLONE, encoding: "utf8" },
+  );
+  assert.deepEqual(
+    {
+      held: [...local, ...run].every((line) => line === OLD_LAYOUT_NOTICE),
+      notices: [local.length, run.length],
+      migrated,
+      failure,
+      code: step.status,
+      b: originFile(OLD_STATE("b")),
+      folder: originFile("state/b/state.json"),
+      // Nothing the run wrote is left uncommitted.
+      leftovers: git(CLONE, "status", "--porcelain"),
+    },
+    {
+      held: true,
+      notices: [2, 2],
+      migrated: [],
+      failure: undefined,
+      code: 0,
+      b: '{"assistants":{"intake":{"uuid":"uuid-b"}}}\n',
+      folder: undefined,
+      leftovers: "",
+    },
+    `${step.stdout}${step.stderr}`,
   );
 });
 

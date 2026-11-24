@@ -15,7 +15,7 @@ acknowledge the report and keep you updated as we investigate.
 - **Never commit API keys.** Keys live in `.env.<org>` files, which are
   gitignored, or in CI secrets. The tools never accept a key as a command-line
   flag, so it can't leak into shell history.
-- **Committed state contains IDs, not secrets.** `.vapi-state.<org>.json` maps
+- **Committed state contains IDs, not secrets.** `state/<org>/state.json` maps
   resource names to Vapi UUIDs. Credential secrets and phone-number
   provisioning are never written to the repository.
 - **`.ts` resource files run code.** Loading a TypeScript resource executes its

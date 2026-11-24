@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -11,7 +12,7 @@ import type { ResourceState } from "../src/types.ts";
 // Stack F — state schema migration coverage.
 //
 // Each state value is a ResourceState — a pure `{ uuid }`. Drift baselines
-// moved to the per-developer hash store (.vapi-state-hash/), so the helpers
+// moved to the per-developer hash store (state/<org>/local/baselines/), so the helpers
 // must strip any legacy hash/timestamp field rather than carry it forward:
 // saveState must never re-emit one. These specs pin the behavior of the public
 // helpers without importing the full state.ts module (which loads config.ts

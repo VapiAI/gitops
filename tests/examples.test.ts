@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -112,7 +113,7 @@ test("the starter example's PR check builds with no errors or warnings", async (
     readFileSync(join(root, "vapi-checks.yml"), "utf8"),
   ).checks.core!;
   const state = promotionStateParse(
-    readFileSync(join(root, ".vapi-state.starter.json"), "utf8"),
+    readFileSync(join(root, "state/starter/state.json"), "utf8"),
   );
   const result = checkPayloadBuild({
     check,

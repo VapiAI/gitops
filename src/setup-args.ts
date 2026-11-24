@@ -37,7 +37,7 @@ Options (non-interactive):
   --region us|eu           Vapi region. Default: VAPI_BASE_URL if set, else
                            auto-detect (tries US, then EU).
   --resources all|none     all  = download every resource into resources/<org>/ (default)
-                           none = seed .vapi-state.<org>.json only, no resource files
+                           none = seed state/<org>/state.json only, no resource files
   -h, --help               Show this help
 
 Needs a Vapi PRIVATE API key, from https://dashboard.vapi.ai/org/api-keys
@@ -119,7 +119,8 @@ export function parseSetupArgs(argv: string[]): SetupArgs {
   if (slug === undefined) {
     return {
       mode: "error",
-      message: "Non-interactive setup needs an org name: npm run setup -- <org>",
+      message:
+        "Non-interactive setup needs an org name: npm run setup -- <org>",
     };
   }
 
@@ -131,7 +132,9 @@ export function readEnvValue(content: string, key: string): string | undefined {
   for (const rawLine of content.split("\n")) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
-    const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    const match = line.match(
+      /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/,
+    );
     if (!match || match[1] !== key) continue;
     let value = match[2]!.trim();
     if (

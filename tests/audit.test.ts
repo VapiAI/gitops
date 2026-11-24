@@ -1,8 +1,8 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 // audit.ts → config.ts: config.ts asserts argv[2] / VAPI_TOKEN at module load
 // time. Prime both before importing the module under test — same trick used in
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 process.argv = ["node", "test", "test-fixture-org"];
 process.env.VAPI_TOKEN = process.env.VAPI_TOKEN || "test-token-not-used";
 
-const { _resetIgnoreCache } = await import("../src/config.ts");
+const { _resetIgnoreCache, RESOURCES_DIR } = await import("../src/config.ts");
 const { formatFinding, runAudit, summarizeFindings } = await import(
   "../src/audit.ts"
 );
@@ -391,14 +391,11 @@ test("dashboard-orphan: .vapi-ignore matching the candidate slug suppresses the 
   // matchesIgnore reads patterns from resources/<env>/.vapi-ignore via a
   // module-private cache. There is no DI seam for patterns on the audit
   // path, so prime the cache by writing a real fixture and resetting
-  // between/around the test. Cleanup runs in finally so a thrown assertion
-  // still scrubs the filesystem.
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = join(__dirname, "..");
-  const ignoreDir = join(repoRoot, "resources", "test-fixture-org");
-  const ignorePath = join(ignoreDir, ".vapi-ignore");
+  // between/around the test. The file goes where the engine reads it: under
+  // the temporary directory it works in during tests (tests/no-vapi-api.ts).
+  const ignorePath = join(RESOURCES_DIR, ".vapi-ignore");
 
-  mkdirSync(ignoreDir, { recursive: true });
+  mkdirSync(RESOURCES_DIR, { recursive: true });
   writeFileSync(ignorePath, "assistants/wild-bot\n", "utf-8");
   _resetIgnoreCache();
   try {
@@ -413,12 +410,6 @@ test("dashboard-orphan: .vapi-ignore matching the candidate slug suppresses the 
     assert.equal(orphans.length, 0);
   } finally {
     rmSync(ignorePath, { force: true });
-    // Best-effort dir cleanup; ignore failure if other tests populated it.
-    try {
-      rmSync(ignoreDir, { recursive: false });
-    } catch {
-      /* dir not empty — fine */
-    }
     _resetIgnoreCache();
   }
 });

@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -13,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { stateFilePath } from "../src/state-paths.ts";
 
 // Stack C — push --dry-run regression coverage.
 //
@@ -100,9 +102,9 @@ test("--dry-run prints the dry-run banner so the operator sees it", () => {
 test("--dry-run does NOT write the state file", () => {
   const fx = setupFixture();
   try {
-    const stateFilePath = join(fx.dir, ".vapi-state.test-dry-run.json");
+    const statePath = stateFilePath(fx.dir, "test-dry-run");
     assert.equal(
-      existsSync(stateFilePath),
+      existsSync(statePath),
       false,
       "precondition: state file should not exist before run",
     );
@@ -112,7 +114,7 @@ test("--dry-run does NOT write the state file", () => {
     // would normally write the state file with refreshed credentials/UUIDs;
     // in dry-run we want zero filesystem mutation.
     assert.equal(
-      existsSync(stateFilePath),
+      existsSync(statePath),
       false,
       `state file must not be created in dry-run; stdout=${res.stdout}`,
     );

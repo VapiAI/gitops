@@ -1,23 +1,23 @@
 // CLI entry: `npm run rollback -- <org> --to <ISO-timestamp>` |
 //             `npm run rollback -- <org> --list`
 //
-// Reads .vapi-state.<env>.snapshots/<timestamp>/<resource-type>/<id>.json
+// Reads state/<org>/local/snapshots/<timestamp>/<resource-type>/<id>.json
 // and re-applies the captured *platform* payload via PATCH, restoring the
 // dashboard to its state at that snapshot moment.
 //
 // Self-contained (does not import config.ts) so it can run in isolation
 // without triggering the global CLI parser.
 
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { existsSync, readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
-import { ORG_PIN_FILE, OrgPinMismatchError, orgPinCheck } from "./org-pin.ts";
+import { join } from "path";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
+import { OrgPinMismatchError, orgPinCheck, orgPinLabel } from "./org-pin.ts";
 import { listSnapshotTimestamps, loadSnapshot } from "./snapshot.ts";
+import { stateFileRead } from "./state-paths.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 interface RollbackEnv {
   env: string;
@@ -72,7 +72,7 @@ function printUsage(): void {
       "  npm run rollback -- <org> --to <ISO-timestamp>",
       "",
       "Snapshots are written automatically before each `npm run push` operation",
-      "to .vapi-state.<env>.snapshots/<timestamp>/. Use --list to inspect available",
+      "to state/<org>/local/snapshots/<timestamp>/. Use --list to inspect available",
       "timestamps; use --to <ts> to re-apply the platform payloads from that snapshot.",
     ].join("\n"),
   );
@@ -147,12 +147,17 @@ async function main(): Promise<void> {
     const outcome = await orgPinCheck({
       rootDir: BASE_DIR,
       org: args.env,
-      connection: { token: cfg.token, baseUrl: cfg.baseUrl, userAgent: userAgentGet(), vapiClient: vapiClientGet() },
+      connection: {
+        token: cfg.token,
+        baseUrl: cfg.baseUrl,
+        userAgent: userAgentGet(),
+        vapiClient: vapiClientGet(),
+      },
       keySource: cfg.source,
     });
     if (outcome.kind === "unverified")
       console.warn(
-        `⚠️  Couldn't confirm which Vapi org the key belongs to, so it wasn't checked against resources/${args.env}/${ORG_PIN_FILE}.`,
+        `⚠️  Couldn't confirm which Vapi org the key belongs to, so it wasn't checked against ${orgPinLabel(BASE_DIR, args.env)}.`,
       );
   } catch (error) {
     if (!(error instanceof OrgPinMismatchError)) throw error;
@@ -169,7 +174,7 @@ async function main(): Promise<void> {
   // Snapshot files don't store the UUID directly because the snapshot is
   // keyed by resourceId; the same resourceId points at the same UUID across
   // pushes (unless renamed, in which case the snapshot is stale anyway).
-  const stateFile = join(BASE_DIR, `.vapi-state.${args.env}.json`);
+  const stateFile = stateFileRead(BASE_DIR, args.env);
   if (!existsSync(stateFile)) {
     console.error(`❌ State file not found: ${stateFile}`);
     process.exit(1);

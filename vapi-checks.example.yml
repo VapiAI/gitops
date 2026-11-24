@@ -25,7 +25,7 @@ checks:
     simulations: []            # optional: extra resources/example-dev/simulations/tests/<id>
 
   # A check that runs in a separate CI org. Credentials are bound by name,
-  # the same way promotion.yml binds them, using .vapi-state.<runOrg>.json.
+  # the same way promotion.yml binds them, using state/<runOrg>/state.json.
   # staging-core:
   #   org: example-staging
   #   runOrg: example-ci

@@ -1,13 +1,14 @@
-import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
 import { confirm, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { dirname, extname, join, relative } from "path";
-import { fileURLToPath } from "url";
+import { extname, join, relative } from "path";
+import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
 // slug-utils is config-free (no config.ts side effects) — safe to import in
 // the launcher, which runs before any org/token is selected.
 import { isBackupCopyFile } from "./slug-utils.ts";
+import { stateFileLabel, stateFileRead } from "./state-paths.ts";
 import type { StateFile } from "./types.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
@@ -15,8 +16,7 @@ import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -417,7 +417,7 @@ function gitStatusLabel(code: GitStatusCode): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function loadKnownUuids(slug: string): Set<string> {
-  const statePath = join(BASE_DIR, `.vapi-state.${slug}.json`);
+  const statePath = stateFileRead(BASE_DIR, slug);
   if (!existsSync(statePath)) return new Set();
   try {
     const raw = readFileSync(statePath, "utf-8");
@@ -1085,10 +1085,10 @@ export async function runInteractiveCall(): Promise<void> {
 
   const slug = await selectOrg("call");
 
-  const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
+  const stateFile = stateFileRead(BASE_DIR, slug);
   if (!existsSync(stateFile)) {
     console.log(
-      c.yellow(`\n  No state file found (.vapi-state.${slug}.json).`),
+      c.yellow(`\n  No state file found (${stateFileLabel(BASE_DIR, slug)}).`),
     );
     console.log(c.yellow("  Run pull first to populate resource mappings.\n"));
     return;

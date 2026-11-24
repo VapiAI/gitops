@@ -2,16 +2,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseDir } from "./base-dir.ts";
 import type { CheckDefinition } from "./check-config.ts";
 import type { OrgConnection } from "./org-connection.ts";
 import { childRun, connectionLoad, tokensParse } from "./org-connection.ts";
 import type { PromotionConfig, PromotionPipeline } from "./promotion.ts";
-import type { PromotionGateResult } from "./promotion-gate.ts";
-import {
-  promotionChecksLoad,
-  promotionGatePlanLine,
-  promotionGateRun,
-} from "./promotion-gate.ts";
 import {
   promotionConfigParse,
   promotionPlanApply,
@@ -19,6 +14,18 @@ import {
   promotionStateParse,
   promotionTransitionValidate,
 } from "./promotion.ts";
+import type { PromotionGateResult } from "./promotion-gate.ts";
+import {
+  promotionChecksLoad,
+  promotionGatePlanLine,
+  promotionGateRun,
+} from "./promotion-gate.ts";
+import {
+  OLD_LAYOUT_NOTICE,
+  stateFileRead,
+  stateLayout,
+  stateNoticesPrint,
+} from "./state-paths.ts";
 
 interface PromotionArguments {
   pipeline?: string;
@@ -35,9 +42,7 @@ interface PromotionTransition {
   definition: PromotionPipeline;
 }
 
-const ROOT_DIR = resolve(
-  process.env.VAPI_GITOPS_ROOT ?? fileURLToPath(new URL("..", import.meta.url)),
-);
+const ROOT_DIR = resolve(process.env.VAPI_GITOPS_ROOT ?? baseDir());
 
 // Files that transitions which finished applying left changed, one
 // `<blob>\t<path>` line each: the content as it stood when that transition
@@ -219,7 +224,7 @@ function appliedPathsRecord(org: string): void {
 }
 
 function stateLoad(org: string) {
-  const path = resolve(ROOT_DIR, `.vapi-state.${org}.json`);
+  const path = stateFileRead(ROOT_DIR, org);
   if (!existsSync(path))
     throw new Error(
       `Missing state for ${org}; run promotion with --apply to bootstrap bindings first`,
@@ -327,6 +332,13 @@ export async function promotionCommandRun(
     const file = resolve(ROOT_DIR, APPLIED_PATHS_FILE);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, "");
+    // Said once here, so the pull and push of each org don't repeat it.
+    const orgs = transitionsBuild(config, parsed).flatMap((transition) => [
+      transition.source,
+      transition.target,
+    ]);
+    if (orgs.some((org) => stateLayout(ROOT_DIR, org) === "root"))
+      stateNoticesPrint([OLD_LAYOUT_NOTICE]);
   }
   // Applying a deletion removes the intermediate org's state entry. Carry the
   // reviewed authorization forward so the same deletion can reach later orgs.

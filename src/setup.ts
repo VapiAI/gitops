@@ -2,8 +2,7 @@ import { confirm, input, password, select } from "@inquirer/prompts";
 import { execSync } from "child_process";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
 import {
   API_KEY_VAR,
   API_KEYS_URL,
@@ -11,6 +10,7 @@ import {
   orgApiKeyVar,
   resolveOrgApiKey,
 } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
 import { updateEnvConnection } from "./bindings.ts";
 import { typeArgFor } from "./resource-type-args.ts";
 import searchableCheckbox, { BACK_SENTINEL } from "./searchableCheckbox.js";
@@ -21,14 +21,19 @@ import {
   SETUP_USAGE,
 } from "./setup-args.ts";
 import { slugify } from "./slug-utils.ts";
+import {
+  stateFileLabel,
+  stateFileLegacyPath,
+  stateFileRead,
+  stateOrgDir,
+} from "./state-paths.ts";
 import { userAgentGet, vapiClientGet } from "./user-agent.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 const VAPI_REGIONS: Record<string, string> = {
   us: "https://api.vapi.ai",
   eu: "https://api.eu.vapi.ai",
@@ -290,14 +295,13 @@ async function writeEnvFile(
 
 async function deleteExistingOrg(slug: string): Promise<void> {
   const resourceDir = join(BASE_DIR, "resources", slug);
-  const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
 
   if (existsSync(resourceDir)) {
     await rm(resourceDir, { recursive: true, force: true });
   }
-  if (existsSync(stateFile)) {
-    await rm(stateFile);
-  }
+  // Both layouts: the wizard starts the org over, wherever its state sits.
+  await rm(stateOrgDir(BASE_DIR, slug), { recursive: true, force: true });
+  await rm(stateFileLegacyPath(BASE_DIR, slug), { force: true });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -412,16 +416,18 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   const { slug, region, resources } = options;
   const envPath = join(BASE_DIR, `.env.${slug}`);
   const resourceDir = join(BASE_DIR, "resources", slug);
-  const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
+  const stateFile = stateFileRead(BASE_DIR, slug);
 
-  console.log(c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`));
+  console.log(
+    c.bold(`\n  Vapi GitOps — non-interactive setup for "${slug}"\n`),
+  );
 
   // Never clobber an org that already has local state. Re-running setup is
   // a destructive operation in the wizard (it deletes and re-pulls), and an
   // agent should not do that without a human deciding to.
   if (existsSync(resourceDir) || existsSync(stateFile)) {
     fail(
-      `Org "${slug}" is already set up locally (resources/${slug}/ or .vapi-state.${slug}.json exists).\n` +
+      `Org "${slug}" is already set up locally (resources/${slug}/ or ${stateFileLabel(BASE_DIR, slug)} exists).\n` +
         `    To refresh it, run: npm run pull -- ${slug}\n` +
         `    To start over, a human should run the interactive wizard: npm run setup`,
     );
@@ -447,7 +453,9 @@ async function runDirectSetup(options: DirectSetupOptions): Promise<void> {
   // Setup writes the key into .env.<org> and downloads that org, so a key
   // that may belong to another org is a hard stop here, not a warning.
   if (resolved.warning) {
-    fail(`${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`);
+    fail(
+      `${resolved.warning}\n    Setup stopped before writing .env.${slug} or downloading anything.`,
+    );
   }
   const otherOrg = orgWithKey(slug, resolved.token);
   if (otherOrg) {
@@ -567,7 +575,9 @@ async function main(): Promise<void> {
   // so explain the non-interactive path instead.
   if (!process.stdin.isTTY) {
     console.error(
-      c.red("\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n"),
+      c.red(
+        "\n  ✗ The setup wizard needs an interactive terminal (stdin is not a TTY).\n",
+      ),
     );
     console.error(SETUP_USAGE);
     process.exit(1);
@@ -671,7 +681,7 @@ async function main(): Promise<void> {
 
   // Check if org already exists locally
   const resourceDir = join(BASE_DIR, "resources", slug);
-  const stateFile = join(BASE_DIR, `.vapi-state.${slug}.json`);
+  const stateFile = stateFileRead(BASE_DIR, slug);
 
   if (existsSync(resourceDir) || existsSync(stateFile)) {
     console.log(c.yellow(`\n  ⚠ Org "${slug}" already exists locally.`));
@@ -811,17 +821,12 @@ async function main(): Promise<void> {
   await writeEnvFile(slug, trimmedKey, vapiBaseUrl);
   console.log(c.green(`  ✓ Created .env.${slug}\n`));
   // Before the first pull, as non-interactive setup does: the org pin
-  // (.vapi-org.json) is only written into a folder that already exists.
+  // (state/<org>/org.json) is only written for a folder that already exists.
   await mkdir(resourceDir, { recursive: true });
 
   console.log(c.bold("  Downloading...\n"));
 
-  invokePull(
-    slug,
-    downloadAll ? "all" : selectedIds,
-    trimmedKey,
-    vapiBaseUrl,
-  );
+  invokePull(slug, downloadAll ? "all" : selectedIds, trimmedKey, vapiBaseUrl);
 
   // ── Done ──────────────────────────────────────────────────────────────
 
@@ -840,7 +845,7 @@ function printSummary(slug: string): void {
   console.log("");
   console.log(`  📁 Resources:   resources/${slug}/`);
   console.log(`  🔑 Env file:    .env.${slug}`);
-  console.log(`  📄 State file:  .vapi-state.${slug}.json`);
+  console.log(`  📄 State file:  ${stateFileLabel(BASE_DIR, slug)}`);
   console.log("");
   console.log("  Next steps:");
   console.log(

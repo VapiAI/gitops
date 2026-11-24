@@ -1,9 +1,10 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import {
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,13 +18,14 @@ import {
   tokensParse,
 } from "../src/org-connection.ts";
 
-// childRun starts `node --import tsx` in rootDir, so child fixtures live
-// under the repo (gitignored tmp/) where tsx resolves.
-const REPO_TMP = fileURLToPath(new URL("../tmp/", import.meta.url));
+// childRun starts `node --import tsx` in rootDir, and tsx resolves from
+// there: a temporary directory with a link to this repository's node_modules.
+const NODE_MODULES = fileURLToPath(new URL("../node_modules", import.meta.url));
 
 function repoTempDir(): string {
-  mkdirSync(REPO_TMP, { recursive: true });
-  return mkdtempSync(join(REPO_TMP, "org-connection-"));
+  const root = mkdtempSync(join(tmpdir(), "org-connection-"));
+  symlinkSync(NODE_MODULES, join(root, "node_modules"), "dir");
+  return root;
 }
 
 function withEnv<T>(name: string, value: string | undefined, run: () => T): T {
@@ -202,8 +204,15 @@ test("childRun throws when the script fails", () => {
 test("connectionLoad uses VAPI_PRIVATE_API_KEY_<ORG> before .env.<org>", () => {
   const root = mkdtempSync(join(tmpdir(), "org-connection-"));
   try {
-    writeFileSync(join(root, ".env.acme-dev"), "VAPI_PRIVATE_API_KEY=file-key\n");
-    const base = { rootDir: root, org: "acme-dev", tokensEnvName: "TEST_TOKENS" };
+    writeFileSync(
+      join(root, ".env.acme-dev"),
+      "VAPI_PRIVATE_API_KEY=file-key\n",
+    );
+    const base = {
+      rootDir: root,
+      org: "acme-dev",
+      tokensEnvName: "TEST_TOKENS",
+    };
     assert.deepEqual(
       withEnv("VAPI_PRIVATE_API_KEY_ACME_DEV", "org-var-key", () => [
         connectionLoad({ ...base, tokens: new Map([["acme-dev", "map-key"]]) }),

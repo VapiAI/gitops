@@ -13,7 +13,6 @@ import {
   OVERWRITE_DRIFT,
   RESOURCES_DIR,
   removeExcludedKeys,
-  STATE_FILE_PATH,
   STRICT_VALIDATION,
   VAPI_BASE_URL,
   VAPI_ENV,
@@ -26,7 +25,6 @@ import {
 import { checkDriftForUpdate, type DriftCheckResult } from "./drift.ts";
 import { deleteBaseline, writeBaseline } from "./hash-store.ts";
 import { prepareResourceLinks } from "./link-preflight.ts";
-import { assertStateMigrated } from "./migrate-hash-store.ts";
 import { NameCollisionReport } from "./name-collisions.ts";
 import { computePushPlan, pushBlockingFindings } from "./push-plan.ts";
 import { reconcileStateKeyForResource } from "./reconcile-state-key.ts";
@@ -83,7 +81,14 @@ import {
   parseResourceFilePath,
   pathMatchesFolder,
 } from "./resources.ts";
-import { hashPayload, loadState, saveState, upsertState } from "./state.ts";
+import {
+  hashPayload,
+  loadState,
+  saveState,
+  stateWritePrepare,
+  upsertState,
+} from "./state.ts";
+import { stateFileLabel } from "./state-paths.ts";
 import type {
   LoadedResources,
   ResourceFile,
@@ -1622,7 +1627,7 @@ async function main(): Promise<void> {
     : undefined;
   // Guard here (not only in runPush): apply spawns `tsx src/push.ts` directly,
   // which enters via the isMainModule block below and never calls runPush.
-  assertStateMigrated(STATE_FILE_PATH);
+  stateWritePrepare({ dryRun: DRY_RUN });
 
   const partial = isPartialApply();
 
@@ -2309,7 +2314,7 @@ async function main(): Promise<void> {
     if (DRY_RUN) {
       console.log(
         "\n🧪 [dry-run] Skipping state file write (would have written to " +
-          `.vapi-state.${VAPI_ENV}.json)`,
+          `${stateFileLabel(BASE_DIR, VAPI_ENV)})`,
       );
       console.log(`\n${await dryRunCollisions!.format()}`);
     } else if (preflightComplete) {

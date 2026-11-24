@@ -110,12 +110,15 @@ wizard needs a terminal. Instead:
    - Authoring from scratch → `npm run setup -- <org> --resources none` (state only, no files).
    Add `--region eu` for EU orgs if auto-detection picks the wrong one.
 4. Verify: `npm run validate -- <org>` passes, and `resources/<org>/` plus
-   `.vapi-state.<org>.json` exist.
-5. Commit `resources/<org>/` (including `.vapi-org.json`) and `.vapi-state.<org>.json`. Never commit `.env.<org>`.
+   `state/<org>/state.json` exist.
+5. Commit `resources/<org>/` and `state/<org>/`. Never commit `.env.<org>`.
+
+`resources/<org>/` is hand-written: edit it. `state/<org>/` is written by the
+engine: never edit or delete anything in it (see [state/README.md](state/README.md)).
 
 If a command stops because the key "belongs to Vapi org …, but resources/<org>/
 is pinned to org …", the key is for another org. Stop and tell the human.
-Never delete or edit `.vapi-org.json` to get past it: that file is the only
+Never delete or edit `state/<org>/org.json` to get past it: that file is the only
 thing tying the folder to its org.
 
 If setup says the org is "already set up locally", don't delete anything to
@@ -123,7 +126,7 @@ work around it — run `npm run pull -- <org>`, or ask the human.
 
 **Working in an existing repository for the first time?** Run a plain
 `npm run pull -- <org>` before your first deploy. It seeds your local drift
-baselines (`.vapi-state-hash/`, which is per-developer and gitignored);
+baselines (`state/<org>/local/baselines/`, which is per-developer and gitignored);
 until then, the engine can't tell your edits from dashboard edits as
 precisely.
 
@@ -145,7 +148,7 @@ precisely.
    `.env.<org>`, run `VAPI_PRIVATE_API_KEY=validate-only npm run validate -- <org>`;
    never ask for a real key just to validate. Don't weaken the check or the
    workflow to get past it, and never edit the state file, `.vapi-ignore` or
-   `.vapi-org.json` to make a reference resolve: fix the name, or pull.
+   `state/<org>/org.json` to make a reference resolve: fix the name, or pull.
 4. **Build PR checks offline** if `vapi-checks.yml` exists:
    `npm run check -- --all --dry-run`. Fix anything it reports.
 5. **Review the dry-run Name collisions list**, then **deploy only with a yes**
@@ -155,7 +158,7 @@ precisely.
    scoped to files: `npm run apply -- <org> resources/<org>/assistants/my-agent.md`.
 6. **Verify** with the human's agreement: `npm run call -- <org> -a <name>` or
    `npm run sim -- <org> --suite <name> --target <name>`.
-7. **Commit** the resource files and `.vapi-state.<org>.json`.
+7. **Commit** the resource files and `state/<org>/`.
 
 **Why `apply`, not `push`:** `apply` pulls the platform's current state, merges
 your local edits, then pushes, so it never silently overwrites changes made in
@@ -372,6 +375,14 @@ For changes under `src/`, `tests/` or `.github/`:
   use a local HTTP stub, as the existing tests do.
 - Run `npx biome check <changed files>` before you finish. It uses the pinned
   local Biome version and the config in `biome.json`.
+- An engine test file's first import is `import "./engine-sandbox.ts";`. It
+  makes the engine work in a temporary directory and stops the test changing
+  files in the repository. A test of your own, for your own repository,
+  leaves it out and works in the repository as before. The suite asks for
+  the import only in CI for `VapiAI/gitops` itself, so a clone on your
+  machine is never asked.
+- A test that starts a test runner of its own goes in `tests/repository/`
+  and runs with `npm run test:repository`, not with `npm test`.
 - Changing a command's flags or behaviour? Update
   [`docs/guides/commands.md`](docs/guides/commands.md) and the README command
   table in the same change.

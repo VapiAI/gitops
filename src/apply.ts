@@ -1,8 +1,14 @@
 import { execSync } from "child_process";
-import { dirname, join, resolve } from "path";
+import { join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parseAdoptArgs } from "./adopt.ts";
+import { baseDir } from "./base-dir.ts";
 import { assertStateMigrated } from "./migrate-hash-store.ts";
+import {
+  stateFileRead,
+  stateLayoutPrepare,
+  stateNoticesPrint,
+} from "./state-paths.ts";
 // Pins this command's User-Agent label for the pull and push it spawns.
 import "./user-agent.ts";
 
@@ -14,8 +20,7 @@ import "./user-agent.ts";
 // 3. If conflicts, stop — user resolves, then runs push manually
 // ─────────────────────────────────────────────────────────────────────────────
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, "..");
+const BASE_DIR = baseDir();
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -41,10 +46,13 @@ export async function runApply(): Promise<void> {
   const hasForce = allArgs.includes("--force");
   const dryRun = allArgs.includes("--dry-run");
 
-  // Fail fast with one clear message if this org's state file is still legacy,
-  // rather than letting the spawned pull/push subprocess surface it later.
+  // Check the org's state layout once, here, and fail fast with one clear
+  // message if the state file is still in the legacy format, rather than
+  // letting the spawned pull/push subprocess surface either later. What is
+  // printed here is not printed again by the pull and push below.
   if (env && SLUG_RE.test(env)) {
-    assertStateMigrated(join(BASE_DIR, `.vapi-state.${env}.json`));
+    stateNoticesPrint(stateLayoutPrepare(BASE_DIR, env));
+    assertStateMigrated(stateFileRead(BASE_DIR, env));
   }
 
   // Default drift resolution is "defer": pull preserves the local file AND

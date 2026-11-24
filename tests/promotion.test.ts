@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -410,12 +411,12 @@ test("promote CLI dry run uses the reviewed config without writing target files"
     await put(fx.root, "promotion.yml", configText);
     await put(
       fx.root,
-      ".vapi-state.source.json",
+      "state/source/state.json",
       `${JSON.stringify(state(), null, 2)}\n`,
     );
     await put(
       fx.root,
-      ".vapi-state.target.json",
+      "state/target/state.json",
       `${JSON.stringify(state(), null, 2)}\n`,
     );
     await put(fx.root, "resources/source/tools/t.yml", "type: function\n");
@@ -462,6 +463,10 @@ test("promotionConfigParse reads an org's optional check gate and rejects a non-
   const parsed = promotionConfigParse(config("dev-core"));
   assert.deepEqual(
     [parsed.orgs.dev?.check, parsed.orgs.prod?.check, error],
-    ["dev-core", undefined, "org dev.check must be a check name from vapi-checks.yml"],
+    [
+      "dev-core",
+      undefined,
+      "org dev.check must be a check name from vapi-checks.yml",
+    ],
   );
 });

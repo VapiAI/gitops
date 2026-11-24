@@ -1,10 +1,11 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  simRunItemTerminal,
-  simRunVerdict,
   type SimRunItem,
   type SimRunItemCounts,
+  simRunItemTerminal,
+  simRunVerdict,
 } from "../src/sim-result.ts";
 
 // The verdict `npm run sim` and the PR check share. It must never report a

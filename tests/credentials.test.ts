@@ -1,9 +1,10 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
   credentialForwardMap as forwardMap,
-  credentialReverseMap as reverseMap,
   replaceCredentialRefs,
+  credentialReverseMap as reverseMap,
 } from "../src/credentials.ts";
 import type { StateFile } from "../src/types.ts";
 

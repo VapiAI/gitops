@@ -1,8 +1,9 @@
 // Per-developer drift baseline store.
 //
 // The "last known platform state" content hash for each resource lives here,
-// in `.vapi-state-hash/<org>/<uuid>` — one file per resource, filename is the
-// platform UUID, contents are the sha256 baseline hash. This is the hash a
+// in `state/<org>/local/baselines/<uuid>` (`.vapi-state-hash/<org>/<uuid>`
+// while the org's state is still in the old layout) — one file per resource,
+// filename is the platform UUID, contents are the sha256 baseline hash. This is the hash a
 // push compares against the live dashboard to decide whether someone changed
 // the resource out of band since I last pulled or pushed it.
 //
@@ -19,40 +20,64 @@
 
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { rename, writeFile } from "fs/promises";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+import { baseDir } from "./base-dir.ts";
+import {
+  baselinesDir,
+  baselinesLegacyDir,
+  baselinesWriteDir,
+} from "./state-paths.ts";
 
 // Same expression as config.ts: the repo root is one level up from src/.
-const BASE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
+const BASE_DIR = baseDir();
 
-// Top-level store directory. Per-org subfolders live beneath it. Exported so
-// the migration can locate every org's baselines and so `.gitignore` reasoning
-// stays in one place.
-export const HASH_STORE_ROOT = join(BASE_DIR, ".vapi-state-hash");
+// Exported so the migration works on the same repository root.
+export const HASH_STORE_BASE_DIR = BASE_DIR;
 
 // Guard against a UUID that would escape its org folder. Platform UUIDs never
 // contain these, but reading them straight into a path warrants a check.
 function assertSafeUuid(uuid: string): void {
-  if (!uuid || uuid.includes("/") || uuid.includes("\\") || uuid.includes("..")) {
-    throw new Error(`Refusing to use unsafe hash-store key: ${JSON.stringify(uuid)}`);
+  if (
+    !uuid ||
+    uuid.includes("/") ||
+    uuid.includes("\\") ||
+    uuid.includes("..")
+  ) {
+    throw new Error(
+      `Refusing to use unsafe hash-store key: ${JSON.stringify(uuid)}`,
+    );
   }
 }
 
+// Where baselines are written: state/<org>/local/baselines/, or
+// .vapi-state-hash/<org>/ while the org's state is still in the old layout.
 export function hashStoreDir(org: string): string {
-  return join(HASH_STORE_ROOT, org);
+  return baselinesWriteDir(BASE_DIR, org);
 }
 
-function baselinePath(org: string, uuid: string): string {
+// Every place a baseline can be, the one that is written first.
+function baselinePaths(org: string, uuid: string): string[] {
   assertSafeUuid(uuid);
-  return join(hashStoreDir(org), uuid);
+  const dirs = new Set([
+    hashStoreDir(org),
+    baselinesDir(BASE_DIR, org),
+    baselinesLegacyDir(BASE_DIR, org),
+  ]);
+  return [...dirs].map((dir) => join(dir, uuid));
 }
 
 // Read the baseline hash for a resource, or undefined if none has been
 // recorded yet (fresh clone, never pulled/pushed). Undefined maps to the
 // `no-baseline` drift direction — the caller proceeds without blocking.
+//
+// After `npm run migrate` on another machine, this machine's baselines still
+// sit in .vapi-state-hash/<org>/ until its next pull, push or apply moves the
+// folder. Read from both places, so a read-only command sees the same drift.
 export function readBaseline(org: string, uuid: string): string | undefined {
-  const path = baselinePath(org, uuid);
-  if (!existsSync(path)) return undefined;
+  const path = baselinePaths(org, uuid).find((candidate) =>
+    existsSync(candidate),
+  );
+  if (!path) return undefined;
   const contents = readFileSync(path, "utf-8").trim();
   return contents.length > 0 ? contents : undefined;
 }
@@ -66,7 +91,7 @@ export async function writeBaseline(
   uuid: string,
   hash: string,
 ): Promise<void> {
-  const path = baselinePath(org, uuid);
+  const path = baselinePaths(org, uuid)[0]!;
   mkdirSync(hashStoreDir(org), { recursive: true });
   const tmpPath = `${path}.tmp`;
   await writeFile(tmpPath, `${hash}\n`);
@@ -77,8 +102,6 @@ export async function writeBaseline(
 // no longer exists on the platform), mirroring the existing
 // `delete stateSection[resourceId]` recovery. Missing file is a no-op.
 export async function deleteBaseline(org: string, uuid: string): Promise<void> {
-  const path = baselinePath(org, uuid);
-  if (!existsSync(path)) return;
   const { rm } = await import("fs/promises");
-  await rm(path, { force: true });
+  for (const path of baselinePaths(org, uuid)) await rm(path, { force: true });
 }

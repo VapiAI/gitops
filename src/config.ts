@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "fs";
-import { basename, dirname, join, relative, resolve } from "path";
-import { fileURLToPath } from "url";
+import { basename, join, relative, resolve } from "path";
 import { parseAdoptArgs } from "./adopt.ts";
 import { missingApiKeyMessage, resolveOrgApiKey } from "./api-key.ts";
+import { baseDir } from "./base-dir.ts";
 import {
   ignorePatternsRead,
   matchesIgnore as matchesIgnorePatterns,
@@ -235,8 +235,7 @@ function loadEnvFile(env: string, baseDir: string): Record<string, string> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Base directory for the gitops project
-const __dirname = dirname(fileURLToPath(import.meta.url));
-export const BASE_DIR = join(__dirname, "..");
+export const BASE_DIR = baseDir();
 
 // Parse environment, flags, and load env files
 export const VAPI_ENV = parseEnvironment();
@@ -282,7 +281,6 @@ process.env.VAPI_TOKEN = VAPI_TOKEN;
 
 // Paths
 export const RESOURCES_DIR = join(BASE_DIR, "resources", VAPI_ENV);
-export const STATE_FILE_PATH = join(BASE_DIR, `.vapi-state.${VAPI_ENV}.json`);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Exclusions - Keys to remove when updating resources (PATCH)

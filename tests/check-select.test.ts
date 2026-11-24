@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -26,6 +27,8 @@ test("a check is affected by its org's files, its run org, its state, the engine
       undefined,
       "resources/acme-ci/tools/t.yml",
     ],
+    ["state/acme/state.json", "state/acme/state.json", undefined],
+    // A repository that has not moved its state into state/ yet.
     [".vapi-state.acme.json", ".vapi-state.acme.json", undefined],
     ["vapi-checks.yml", "vapi-checks.yml", "vapi-checks.yml"],
     ["src/push.ts", "src/push.ts", "src/push.ts"],

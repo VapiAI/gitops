@@ -1,3 +1,4 @@
+import "./engine-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -18,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { parseResourceDataFromFile } from "../src/resource-parse.ts";
 import { hashPayload } from "../src/state-serialize.ts";
+import { baselinesDir, stateFixturePath } from "./state-fixture.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Integration test for the state-aware adoption fix in pull.ts.
@@ -167,12 +169,12 @@ async function runClobberScenario(
   // Seed state: slug `riley` already maps to UUID A.
   // The drift baseline lives in the hash store, not the state file. The
   // engine runs from the copied src/, so its store resolves under `dir`.
-  const hashStore = join(dir, ".vapi-state-hash", ENV);
+  const hashStore = baselinesDir(dir, ENV);
   mkdirSync(hashStore, { recursive: true });
   writeFileSync(join(hashStore, UUID_A), "stale-hash-A\n");
 
   writeFileSync(
-    join(dir, `.vapi-state.${ENV}.json`),
+    stateFixturePath(dir, ENV),
     JSON.stringify(
       {
         credentials: {},
@@ -295,7 +297,7 @@ async function runClobberScenario(
 
     // ── State assertions ─────────────────────────────────────────────────
     const finalState = JSON.parse(
-      readFileSync(join(dir, `.vapi-state.${ENV}.json`), "utf-8"),
+      readFileSync(stateFixturePath(dir, ENV), "utf-8"),
     );
     assert.equal(
       finalState.assistants.riley?.uuid,
