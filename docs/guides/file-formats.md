@@ -185,7 +185,9 @@ Text or settings that several files share can live in one file under
 prompt, or a `$include: <name>` key in any mapping. An org can replace a
 shared block with its own. Syntax, merge rules and how a block change is
 rolled out: [Blocks](blocks.md), with a tested example in
-[`examples/blocks/`](../../examples/blocks/README.md).
+[`examples/blocks/`](../../examples/blocks/README.md). For several locations
+that share most of their prompts, start with
+[Running many locations from one set of prompts](many-locations.md).
 
 ## TypeScript resources (`.ts`)
 

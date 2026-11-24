@@ -101,6 +101,11 @@ release: dev → prod
 org's own blocks under `resources/<org>/templates/` stay in that org. The
 plan fails if a promoted file includes a block the destination can't find.
 
+When the orgs in a pipeline are locations rather than stages, read
+[Orgs linked by promotion](many-locations.md#6-orgs-linked-by-promotion)
+first: promotion copies every file in the pipeline's patterns to the next
+org.
+
 ## Source-org and deletion boundary
 
 Promotion treats `resources/<source>/` in Git as the reviewed desired state for

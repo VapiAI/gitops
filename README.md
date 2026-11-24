@@ -245,6 +245,7 @@ when run without arguments. Full flags and examples:
 | [Everyday workflows](docs/guides/workflows.md) | Deploy, pull safely, recover from a bad deploy, clean up |
 | [File formats](docs/guides/file-formats.md) | Write assistants, tools, squads, structured outputs and simulations |
 | [Blocks](docs/guides/blocks.md) | Share prompt text and config between assistants, squads and orgs |
+| [Many locations, one set of prompts](docs/guides/many-locations.md) | Run several locations from shared wording: a worked path from pasted copies to a rolled-out edit |
 | [Resource reference](docs/guides/resource-reference.md) | Look up every setting, with examples |
 | [Writing system prompts](docs/guides/writing-prompts.md) | Structure a voice agent's prompt |
 | [PR checks](docs/guides/pr-checks.md) | Test every pull request with simulations |
