@@ -22,6 +22,19 @@ export interface VapiResource {
   [key: string]: unknown;
 }
 
+export function isVersionedResource(type?: ResourceType): boolean {
+  return type === "assistants" || type === "tools" || type === "squads";
+}
+
+export function withoutLatestVersion(
+  data: Record<string, unknown>,
+  type?: ResourceType,
+): Record<string, unknown> {
+  if (!isVersionedResource(type) || !("latestVersion" in data)) return data;
+  const { latestVersion: _version, ...config } = data;
+  return config;
+}
+
 // Fields to remove before hashing/writing (server-managed or computed).
 // Single source of truth — drift's old private `SERVER_FIELDS` was an exact
 // duplicate of this and drifted out of sync risk-free only by luck.
@@ -213,7 +226,7 @@ export function canonicalizeForHash(
   credReverse: Map<string, string>,
   resourceType?: ResourceType,
 ): Record<string, unknown> {
-  const cleaned = cleanResource(resource);
+  const cleaned = withoutLatestVersion(cleanResource(resource), resourceType);
   const content =
     resourceType === "assistants" ? withoutAssistantFolder(cleaned) : cleaned;
   const resolved = resolveReferencesToResourceIds(content, state);

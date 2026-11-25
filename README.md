@@ -227,7 +227,7 @@ More detail: [How the engine works](docs/guides/how-it-works.md).
 | `npm run push -- <org>` | Preflight the write plan, then push without pulling first (prefer `apply`); `--strict` also blocks validation errors outside the plan and `variable-undefined` warnings. Review `--dry-run` Name collisions, and use `--adopt <id>[=<uuid>]` only with explicit approval to take over a resource; unchanged alias files are removed, edited/unbaselined copies need review. Push/apply support `--json` for one grouped link-preflight report (exit 1 on blockers); see [Running in CI](docs/guides/commands.md#running-in-ci). |
 | `npm run rollback -- <org>` | Restore a pre-deploy snapshot |
 | `npm run cleanup -- <org>` | Find, and optionally delete, platform resources with no file |
-| `npm run audit -- <org>` | Report drift between files, state and the platform |
+| `npm run audit -- <org>` | Report drift between files, state and the platform; ignore version-only changes for assistants, tools and squads |
 | `npm run call -- <org>` | Talk to an assistant or squad from your terminal |
 | `npm run sim -- <org>` | Run a simulation suite against deployed resources |
 | `npm run check` | Run PR simulation checks against local files |

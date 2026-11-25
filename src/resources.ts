@@ -4,6 +4,7 @@ import { basename, extname, join, relative, resolve } from "path";
 import { parse as parseYaml } from "yaml";
 import { withoutAssistantFolder } from "./assistant-folder.ts";
 import { blockLayers, blocksExpand } from "./blocks.ts";
+import { withoutLatestVersion } from "./canonical.ts";
 import { BASE_DIR, matchesIgnore, RESOURCES_DIR } from "./config.ts";
 import {
   FOLDER_MAP,
@@ -36,21 +37,49 @@ function findLocalResourceFile(
   return undefined;
 }
 
+export interface LocalResourceContent {
+  config: Record<string, unknown>;
+  hash: string;
+  latestVersion: unknown;
+}
+
+export function localResourceContent(
+  type: ResourceType,
+  data: Record<string, unknown>,
+): LocalResourceContent {
+  const config = withoutLatestVersion(
+    type === "assistants" ? withoutAssistantFolder(data) : data,
+    type,
+  );
+  return {
+    config,
+    hash: hashPayload(config),
+    latestVersion: data.latestVersion,
+  };
+}
+
+export function readLocalResourceContent(
+  type: ResourceType,
+  resourceId: string,
+): LocalResourceContent | null {
+  const filePath = findLocalResourceFile(type, resourceId);
+  if (!filePath) return null;
+  try {
+    return localResourceContent(
+      type,
+      parseResourceDataFromFile(filePath, RESOURCES_DIR),
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Stable content hash of a local resource file (same basis as lastPulledHash). */
 export function hashLocalResource(
   type: ResourceType,
   resourceId: string,
 ): string | null {
-  const filePath = findLocalResourceFile(type, resourceId);
-  if (!filePath) return null;
-  try {
-    const data = parseResourceDataFromFile(filePath, RESOURCES_DIR);
-    return hashPayload(
-      type === "assistants" ? withoutAssistantFolder(data) : data,
-    );
-  } catch {
-    return null;
-  }
+  return readLocalResourceContent(type, resourceId)?.hash ?? null;
 }
 
 export async function loadResources<T>(

@@ -33,6 +33,11 @@ same-name candidates without linking them. Existing mappings, including
 legacy entries without provenance, remain linked. New pull mappings record
 `origin: pulled`; push-created resources record `origin: pushed`.
 
+Pull, drift checks, and normal create/update requests ignore the top-level
+`latestVersion` of assistants, tools and squads. If an old baseline can't
+prove a side is unchanged, use the
+[normal conflict-resolution flow](../learnings/sync-behavior.md#publishing-or-rolling-back-a-version-can-leave-the-config-unchanged).
+
 Dry-run push/apply ends with **Name collisions**, listing same-name state and
 live dashboard resources for every planned POST, including dependency creates.
 Read-only GETs run in dry-run. No matches prints `Name collisions: none`;
