@@ -2,6 +2,7 @@ import { confirm } from "@inquirer/prompts";
 import { rm } from "fs/promises";
 import { relative } from "path";
 import type { AdoptionAlias } from "./adopt.ts";
+import { withoutLatestVersion } from "./canonical.ts";
 import { BASE_DIR, DRY_RUN, RESOURCES_DIR, VAPI_ENV } from "./config.ts";
 import { deleteBaseline, readBaseline } from "./hash-store.ts";
 import { parseResourceDataFromFile } from "./resource-parse.ts";
@@ -24,14 +25,18 @@ export async function prepareAliasCleanup(
   }[] = [];
   for (const { file, uuid, adoptedAs, type } of files) {
     const path = relative(BASE_DIR, file.filePath);
-    let hash: string | undefined;
-    try {
-      hash = hashPayload(
-        parseResourceDataFromFile(file.filePath, RESOURCES_DIR),
-      );
-    } catch {}
     const baseline = readBaseline(VAPI_ENV, uuid);
-    if (!baseline || hash !== baseline) {
+    let matches = false;
+    if (baseline) {
+      try {
+        const raw = parseResourceDataFromFile(file.filePath, RESOURCES_DIR);
+        const config = withoutLatestVersion(raw, type);
+        matches =
+          hashPayload(config) === baseline ||
+          (config !== raw && hashPayload(raw) === baseline);
+      } catch {}
+    }
+    if (!matches) {
       const message = `${path}: local edits or no baseline. Delete it by hand (or merge its edits into ${adoptedAs}) and rerun.`;
       if (
         DRY_RUN ||

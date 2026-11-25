@@ -4,7 +4,11 @@ import { fileURLToPath } from "url";
 import { getDryRunCounts, VapiApiError, vapiRequest } from "./api.ts";
 import { withAssistantFolder } from "./assistant-folder.ts";
 import { type BlockUsage, blocksRecordUpdate } from "./blocks.ts";
-import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import {
+  canonicalizeForHash,
+  type VapiResource,
+  withoutLatestVersion,
+} from "./canonical.ts";
 import {
   APPLY_FILTER,
   BASE_DIR,
@@ -247,6 +251,7 @@ async function upsertResourceWithStateRecovery(options: {
   updatePayload: Record<string, unknown>;
   createEndpoint: string;
   createPayload: Record<string, unknown>;
+  loadedTypeScriptData?: Record<string, unknown>;
   // Full state file — needed so drift detection can canonicalize the platform
   // payload into the same basis as `lastPulledHash` (resolves UUID refs back
   // to resourceId slugs + credential names). Without it the drift check
@@ -328,6 +333,7 @@ async function upsertResourceWithStateRecovery(options: {
             resourceType: driftResourceType,
             resourceId,
             state: fullState,
+            loadedTypeScriptData: options.loadedTypeScriptData,
             env: VAPI_ENV,
             overwrite: OVERWRITE_DRIFT,
           });
@@ -665,7 +671,11 @@ async function maybeBootstrapState(
     );
   }
 
-  const result = await runPull({ bootstrap: true, typeFilter: [] });
+  const result = await runPull({
+    bootstrap: true,
+    preserveVersionedBaselines: true,
+    typeFilter: [],
+  });
   return result.state;
 }
 
@@ -702,7 +712,7 @@ export async function applyTool(
   const existingUuid = state.tools[resourceId]?.uuid;
 
   // Resolve references (but assistants may not exist yet on first pass)
-  const payload = resolveReferences(data as Record<string, unknown>, state);
+  const payload = resolveReferences(withoutLatestVersion(data, "tools"), state);
 
   // For handoff tools with assistant destinations, strip unresolved assistantIds for initial creation
   // They will be linked after assistants are created
@@ -724,6 +734,7 @@ export async function applyTool(
     ),
     createEndpoint: "/tool",
     createPayload: payloadForCreate,
+    loadedTypeScriptData: resource.filePath?.endsWith(".ts") ? data : undefined,
   });
 }
 
@@ -925,7 +936,7 @@ export async function applyAssistant(
 
   // Resolve tool and structured output references
   const payload = withAssistantFolder(
-    resolveReferences(data as Record<string, unknown>, state),
+    resolveReferences(withoutLatestVersion(data, "assistants"), state),
     resourceId,
   );
 
@@ -939,6 +950,7 @@ export async function applyAssistant(
     updatePayload: removeExcludedKeys(payload, "assistants"),
     createEndpoint: "/assistant",
     createPayload: payload,
+    loadedTypeScriptData: resource.filePath?.endsWith(".ts") ? data : undefined,
   });
 }
 
@@ -950,7 +962,10 @@ export async function applySquad(
   const existingUuid = state.squads[resourceId]?.uuid;
 
   // Resolve assistant references in members
-  const payload = resolveReferences(data as Record<string, unknown>, state);
+  const payload = resolveReferences(
+    withoutLatestVersion(data, "squads"),
+    state,
+  );
 
   return upsertResourceWithStateRecovery({
     resourceLabel: "squad",
@@ -962,6 +977,7 @@ export async function applySquad(
     updatePayload: removeExcludedKeys(payload, "squads"),
     createEndpoint: "/squad",
     createPayload: payload,
+    loadedTypeScriptData: resource.filePath?.endsWith(".ts") ? data : undefined,
   });
 }
 
@@ -1138,7 +1154,7 @@ export async function updateToolAssistantRefs(
     // This PATCH mutates the platform AFTER the main upsert wrote its
     // baseline — refresh it from the linking response, or the next push would
     // see drift we caused ourselves.
-    await writeBaselineFromResponse(uuid, result, state);
+    await writeBaselineFromResponse(uuid, result, state, "tools");
   }
 }
 
@@ -2068,6 +2084,7 @@ async function main(): Promise<void> {
     // 6. Simulation suites (references simulations)
     // 7. Evals
 
+    const appliedTools: ResourceFile[] = [];
     if (tools.length > 0) {
       console.log("\n🔧 Applying tools...\n");
       for (const tool of tools) {
@@ -2079,6 +2096,7 @@ async function main(): Promise<void> {
           });
           touched.tools.add(tool.resourceId);
           applied.tools++;
+          appliedTools.push(tool);
         } catch (error) {
           console.error(formatApiError(tool.resourceId, error));
           throw error;
@@ -2252,7 +2270,7 @@ async function main(): Promise<void> {
     }
 
     // Second pass: Link resources to assistants (include auto-applied deps)
-    const allAppliedTools = [...tools, ...autoAppliedTools];
+    const allAppliedTools = [...appliedTools, ...autoAppliedTools];
     if (allAppliedTools.length > 0) {
       console.log("\n🔗 Linking tools to assistant destinations...\n");
       await updateToolAssistantRefs(allAppliedTools, state);

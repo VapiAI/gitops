@@ -13,6 +13,7 @@ import {
 import {
   buildReverseMap,
   canonicalizeForHash,
+  isVersionedResource,
   type VapiResource,
 } from "./canonical.ts";
 import {
@@ -33,7 +34,7 @@ import {
 } from "./credential-kinds.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import {
-  classifyDrift,
+  compareResourceDrift,
   type DriftDirection,
   formatDriftLabel,
 } from "./drift.ts";
@@ -43,6 +44,7 @@ import {
   FOLDER_MAP,
   hashLocalResource,
   parseResourceFilePath,
+  readLocalResourceContent,
   resolvePullScopeFromFilePaths,
 } from "./resources.ts";
 import { extractBaseSlug, isBackupCopyFile, slugify } from "./slug-utils.ts";
@@ -631,21 +633,21 @@ async function blocksFilePull(options: {
   bothDiverged?: BothDivergedResource[];
 }): Promise<void> {
   const { resourceType, resourceId, resource, state, localFile } = options;
-  const localHash = hashLocalResource(resourceType, resourceId);
-  if (localHash === null) {
+  const local = readLocalResourceContent(resourceType, resourceId);
+  if (local === null) {
     console.warn(
       `   ⚠️  ${resourceId}: uses blocks that could not be expanded, file left as written (run npm run validate -- ${VAPI_ENV})`,
     );
     return;
   }
-  const platformHash = hashPayload(
-    canonicalizeForHash(resource, state, options.credReverse, resourceType),
-  );
   const baseline = readBaseline(VAPI_ENV, resource.id);
-  const direction = classifyDrift({
-    localHash,
-    lastPulledHash: baseline,
-    platformHash,
+  const { direction, localHash, platformHash } = compareResourceDrift({
+    local,
+    remote: resource,
+    state,
+    credReverse: options.credReverse,
+    resourceType,
+    baseline,
   });
   if (!options.force && options.driftCounts) options.driftCounts[direction]++;
 
@@ -844,6 +846,7 @@ function timingLine(entry: BothDivergedResource): string {
 export interface PullOptions {
   force?: boolean;
   bootstrap?: boolean;
+  preserveVersionedBaselines?: boolean;
   bindingsOnly?: boolean;
   skipBindings?: boolean;
   typeFilter?: ResourceType[];
@@ -865,6 +868,7 @@ export async function pullResourceType(
     changedFiles?: Set<string>;
     force?: boolean;
     bootstrap?: boolean;
+    preserveVersionedBaselines?: boolean;
     resourceIds?: string[];
     driftCounts?: DriftDirectionCounts;
     bothDiverged?: BothDivergedResource[];
@@ -988,23 +992,15 @@ export async function pullResourceType(
       const localFile = findLocalResourcePath(folderPath, resourceId);
 
       if (localFile && baseline) {
-        const localHash = hashLocalResource(resourceType, resourceId);
-        if (localHash) {
-          // Use canonicalizeForHash so platform-default mutation (_platformDefault)
-          // and the 3-step pipeline are applied identically across pull-write,
-          // classifier, audit, and resolveBothDiverged sites. Any asymmetry here
-          // makes every drifted file look `both-diverged` even when content matches.
-          const platformHash = hashPayload(
-            canonicalizeForHash(resource, state, credReverse, resourceType),
-          );
-          // Note: classifyDrift treats live local + platform agreement as
-          // `clean` whatever the (possibly stale) baseline says — the clean
-          // fall-through to the write path re-seeds the baseline from the
-          // disk form, self-healing the stale pointer.
-          const direction = classifyDrift({
-            localHash,
-            lastPulledHash: baseline,
-            platformHash,
+        const local = readLocalResourceContent(resourceType, resourceId);
+        if (local) {
+          const { direction, localHash, platformHash } = compareResourceDrift({
+            local,
+            remote: resource,
+            state,
+            credReverse,
+            resourceType,
+            baseline,
           });
           if (driftCounts) driftCounts[direction]++;
 
@@ -1227,6 +1223,14 @@ export async function pullResourceType(
       uuid: resource.id,
       origin: "pulled",
     });
+    if (
+      bootstrap &&
+      options.preserveVersionedBaselines &&
+      isVersionedResource(resourceType) &&
+      readBaseline(VAPI_ENV, resource.id)
+    ) {
+      continue;
+    }
     await writeBaseline(
       VAPI_ENV,
       resource.id,
@@ -1622,6 +1626,7 @@ export async function runPull(options: PullOptions = {}): Promise<PullResult> {
     changedFiles,
     force,
     bootstrap,
+    preserveVersionedBaselines: options.preserveVersionedBaselines,
     resourceIds: idsByType?.get(type) ?? resourceIds,
     driftCounts,
     bothDiverged: bothDivergedResources,

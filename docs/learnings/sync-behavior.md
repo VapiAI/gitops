@@ -51,7 +51,23 @@ UUIDs → names):
 | ≠ | = | `local-ahead` | You edited locally; dashboard untouched → **your change is the natural next step UP** |
 | = | ≠ | `dashboard-ahead` | Someone edited the dashboard; you didn't → **their change is the natural next step DOWN** |
 | ≠ | ≠ (but L = D) | treated as `clean` | Both sides already agree; the baseline is just stale → self-heals, never blocks, never prompts |
-| ≠ | ≠ (and L ≠ D) | `both-diverged` | True 3-way conflict — the only case a human is ever asked about |
+| ≠ | ≠ (and L ≠ D) | `both-diverged` | Neither side is known to match the last sync; resolve the difference before overwriting |
+
+### Publishing or rolling back a version can leave the config unchanged
+
+For assistants, tools and squads, the API's top-level `latestVersion` isn't
+config. Pull omits it when writing files, and drift checks and normal
+create/update requests ignore it even if an existing local file still has it.
+Nested keys with that name are unaffected. Pull still leaves files using blocks
+as written, and promotion can still copy source text verbatim. Snapshot capture
+and replay are unchanged.
+
+An existing baseline may include the version in its hash. GitOps can still
+recognize an unchanged side if the whole old hash matches that side's config
+with a version value still visible in the file or the API response. If neither
+side can be proven unchanged and their configs differ, use the normal conflict
+resolution flow. A push that automatically refreshes mappings preserves these
+existing baselines so the refresh can't hide a conflict.
 
 > **The core principle:** a question is only ever asked **per resource**, and
 > only for `both-diverged`-class situations at push time. Everything else has

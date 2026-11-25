@@ -113,6 +113,7 @@ you which stack PR closes the row.**
 | 40  | Nothing checked a `credentialIds` list against the keys an org has saved | A list that hides the org's own key runs the call on Vapi's key, silently | None       | RESOLVED 2026-11-17 (#96)                |
 | 41  | Shared prompt text and config had no home, and pull would erase any include marker | Repeated paragraphs drift apart across assistants and orgs | None       | RESOLVED 2026-11-16 (#94)                |
 | 42  | An org with no credentials is re-bootstrapped on every push, which disables the drift check | A dashboard edit is overwritten without a warning in such an org | None       | Open                                     |
+| 45  | A version pointer looked like a config edit | Version-only publishes and rollbacks report false drift | None | Implemented |
 
 **Active backlog after cleanup:** `#2`, `#6`, `#8`, `#12`, `#20`, `#24–#26`, `#31`, and the open remainder of `#27` (wiring the listing-completeness verdict into push/delete/audit, and moving `cleanup.ts` onto the shared pager). Resolved entries stay in this file as historical incident notes per the maintenance directive; stale superseded backlog rows are not duplicated.
 
@@ -2318,7 +2319,7 @@ The push drift check refuses to overwrite a resource that was edited in the
 dashboard since the last pull. In an org that has no credentials stored in
 Vapi, it never refuses.
 
-### Current behavior (Verified)
+### Original behavior (Verified)
 
 `maybeBootstrapState` in `src/push.ts` treats a state file with an empty
 `credentials` section as uninitialized and runs a bootstrap pull before
@@ -2338,8 +2339,8 @@ credentials.
 
 ### Current mitigation
 
-None. `npm run pull -- <org>` first still shows a dashboard edit before it is
-overwritten, for anyone who reads the output.
+Automatic push bootstrap now keeps existing baselines for assistants, tools
+and squads (#45). Other resource types still have the original behavior.
 
 ### Possible fix
 
@@ -2349,7 +2350,7 @@ have a bootstrap pull leave existing baselines alone.
 
 ### Status
 
-**Open.**
+**Partially mitigated.**
 
 ---
 
@@ -2386,6 +2387,21 @@ per-practice numbers in inline squad overrides; see `examples/nhs-shared-squads`
 ### Status
 
 **Implemented.** Covered by `tests/validate-transfer-numbers.test.ts`.
+
+---
+
+## 45. Version pointers looked like resource config edits
+
+An assistant, tool or squad's top-level `latestVersion` could land in a pulled
+file, so publishing or rolling back to identical settings could report false
+drift or block a legitimate local edit. Normal sync now strips that field
+from config and write requests. An old drift baseline can identify an unchanged
+side only when its full hash can be reproduced; otherwise differing configs
+still go through conflict resolution. Automatic push bootstrap preserves these
+existing baselines, closing that path to the overwrite risk in #42 for these
+three types.
+
+**Implemented.** Covered by local API stubs in `tests/latest-version.test.ts`.
 
 ---
 

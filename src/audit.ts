@@ -21,16 +21,16 @@
 
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import type { VapiResource } from "./canonical.ts";
 import { matchesIgnore, RESOURCES_DIR, VAPI_ENV } from "./config.ts";
 import { credentialReverseMap } from "./credentials.ts";
-import { classifyDrift } from "./drift.ts";
+import { compareResourceDrift } from "./drift.ts";
 import { readBaseline } from "./hash-store.ts";
 import { findOrphanResourceIds } from "./new-file-gate.ts";
 import { fetchAllResources, listExistingResourceIds } from "./pull.ts";
-import { FOLDER_MAP, hashLocalResource } from "./resources.ts";
+import { FOLDER_MAP, readLocalResourceContent } from "./resources.ts";
 import { extractBaseSlug, slugify } from "./slug-utils.ts";
-import { hashPayload, loadState } from "./state.ts";
+import { loadState } from "./state.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 import { VALID_RESOURCE_TYPES } from "./types.ts";
 
@@ -384,21 +384,19 @@ function checkContentDrift(
     const entry = state[type][resourceId];
     if (!entry) continue;
 
-    const localHash = hashLocalResource(type, resourceId);
-    if (!localHash) continue;
+    const local = readLocalResourceContent(type, resourceId);
+    if (!local) continue;
 
     const remoteResource = remoteByUuid.get(entry.uuid);
     if (!remoteResource) continue;
 
-    // canonicalizeForHash centralizes the 3-step pipeline + _platformDefault
-    // mutation so the hash agrees with the pull-write baseline basis.
-    const platformHash = hashPayload(
-      canonicalizeForHash(remoteResource, state, credReverse, type),
-    );
-    const direction = classifyDrift({
-      localHash,
-      lastPulledHash: baselineReader(entry.uuid),
-      platformHash,
+    const { direction } = compareResourceDrift({
+      local,
+      remote: remoteResource,
+      state,
+      credReverse,
+      resourceType: type,
+      baseline: baselineReader(entry.uuid),
     });
     if (direction === "clean") continue;
 

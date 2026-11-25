@@ -19,10 +19,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { VapiApiError, vapiGet } from "./api.ts";
-import { canonicalizeForHash, type VapiResource } from "./canonical.ts";
+import {
+  canonicalizeForHash,
+  isVersionedResource,
+  type VapiResource,
+} from "./canonical.ts";
 import { credentialReverseMap } from "./credentials.ts";
 import { readBaseline } from "./hash-store.ts";
-import { hashLocalResource } from "./resources.ts";
+import {
+  type LocalResourceContent,
+  localResourceContent,
+  readLocalResourceContent,
+} from "./resources.ts";
 import { hashPayload } from "./state-serialize.ts";
 import type { ResourceType, StateFile } from "./types.ts";
 
@@ -54,6 +62,71 @@ export function classifyDrift(input: ClassifyDriftInput): DriftDirection {
   if (localMatches && !platformMatches) return "dashboard-ahead";
   if (!localMatches && platformMatches) return "local-ahead";
   return "both-diverged";
+}
+
+export function compareResourceDrift({
+  local,
+  remote,
+  state,
+  credReverse,
+  resourceType,
+  baseline,
+}: {
+  local: LocalResourceContent | null;
+  remote: VapiResource;
+  state: StateFile;
+  credReverse: Map<string, string>;
+  resourceType: ResourceType;
+  baseline?: string;
+}): { localHash: string; platformHash: string; direction: DriftDirection } {
+  const platform = canonicalizeForHash(
+    remote,
+    state,
+    credReverse,
+    resourceType,
+  );
+  const platformHash = hashPayload(platform);
+  let lastPulledHash = baseline;
+  if (
+    baseline &&
+    platformHash !== baseline &&
+    local?.hash !== baseline &&
+    local?.hash !== platformHash &&
+    isVersionedResource(resourceType)
+  ) {
+    for (const latestVersion of new Set([
+      local?.latestVersion,
+      remote.latestVersion,
+    ])) {
+      if (
+        latestVersion !== null &&
+        typeof latestVersion !== "string" &&
+        typeof latestVersion !== "number"
+      )
+        continue;
+      if (hashPayload({ ...platform, latestVersion }) === baseline) {
+        lastPulledHash = platformHash;
+        break;
+      }
+      if (
+        local &&
+        hashPayload({ ...local.config, latestVersion }) === baseline
+      ) {
+        lastPulledHash = local.hash;
+        break;
+      }
+    }
+  }
+  const localHash = local?.hash ?? lastPulledHash ?? "";
+  return {
+    localHash,
+    platformHash,
+    direction: classifyDrift({
+      localHash,
+      lastPulledHash,
+      platformHash,
+    }),
+  };
 }
 
 export function formatDriftLabel(direction: DriftDirection): string {
@@ -103,6 +176,7 @@ export async function checkDriftForUpdate(options: {
   resourceType: ResourceType;
   resourceId: string; // local resource id
   state: StateFile;
+  loadedTypeScriptData?: Record<string, unknown>;
   env: string; // org slug — keys the hash store
   overwrite: boolean;
 }): Promise<DriftCheckResult> {
@@ -137,46 +211,20 @@ export async function checkDriftForUpdate(options: {
     return { ok: true, reason: "no-baseline" };
   }
 
-  // Hash all three points (platform, local, baseline) in ONE basis — the
-  // canonical form defined in canonical.ts that pull also uses to write
-  // `lastPulledHash`. Drift previously carried its own field-strip copy that
-  // omitted reference/credential resolution, so any tool- or credential-bearing
-  // resource hashed differently here than at pull time → phantom both-diverged.
-  const credReverse = credentialReverseMap(state);
-  const platformHash = hashPayload(
-    canonicalizeForHash(
-      remote as VapiResource,
-      state,
-      credReverse,
-      resourceType,
-    ),
-  );
-  if (platformHash === baseline) {
-    return { ok: true, reason: "match", platformHash, platformPayload: remote };
-  }
-
-  // On-disk hash in the same basis as the baseline. Absent a local file
-  // (rare on an update path), fall back to the baseline so the direction is
-  // dashboard-ahead rather than a phantom both-diverged.
-  const localHash = hashLocalResource(resourceType, resourceId) ?? baseline;
-
-  // Local and platform are byte-identical → there is nothing to reconcile and
-  // the PATCH is a no-op. NEVER block here, even if the baseline disagrees
-  // with both (a stale or older-basis baseline must not manufacture a conflict
-  // when the two LIVE sides already agree). `classifyDrift` encodes the same
-  // invariant, but this early return also short-circuits before the direction
-  // bookkeeping. This is the fix for the phantom-drift class: a freshly
-  // upgraded customer repo carries baselines written in an older hash basis,
-  // so every untouched resource hit `both-diverged` on its first push.
-  if (localHash === platformHash) {
-    return { ok: true, reason: "match", platformHash, platformPayload: remote };
-  }
-
-  const direction = classifyDrift({
-    localHash,
-    lastPulledHash: baseline,
-    platformHash,
+  const { direction, platformHash } = compareResourceDrift({
+    local: options.loadedTypeScriptData
+      ? localResourceContent(resourceType, options.loadedTypeScriptData)
+      : readLocalResourceContent(resourceType, resourceId),
+    remote: remote as VapiResource,
+    state,
+    credReverse: credentialReverseMap(state),
+    resourceType,
+    baseline,
   });
+  if (direction === "clean" || direction === "local-ahead") {
+    return { ok: true, reason: "match", platformHash, platformPayload: remote };
+  }
+
   const directionTag = `[${direction}]`;
 
   if (overwrite) {
