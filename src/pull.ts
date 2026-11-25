@@ -73,12 +73,14 @@ const ENDPOINT_MAP: Record<ResourceType, string> = {
 // Git Helpers (detect locally changed files to skip during pull)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Returns git's output as git wrote it. Never trim it: a record of
+// `git status --porcelain` starts with a space when the change is unstaged.
 function gitCmd(args: string): string {
   return execSync(`git ${args}`, {
     cwd: BASE_DIR,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
-  }).trim();
+  });
 }
 
 function isGitRepo(): boolean {
